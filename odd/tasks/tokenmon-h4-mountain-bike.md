@@ -21,8 +21,8 @@ The user wants a shared visual identity across the three providers ("each one on
 `ask-on-risk`. Forecast ~450 authored changed lines (mostly art grids).
 
 ## Tasks
-- [ ] T1 — Author `claude.bike`, `codex.bike`, `kimi.bike`; `--verify` PNGs read clearly as a rider on a bike with turning wheels. Route: delegated writer.
-- [ ] T2 — Wire as mascot acts + splash rotation; sim autoshots of each provider mid-pedal and of the splash bike scene. Route: same writer.
+- [x] T1 — Author `claude.bike`, `codex.bike`, `kimi.bike`; `--verify` PNGs read clearly as a rider on a bike with turning wheels. Route: delegated writer (done; see evidence).
+- [x] T2 — Wire as mascot acts + splash rotation; sim autoshots of each provider mid-pedal and of the splash bike scene. Route: same writer (done; see evidence).
 - [ ] T3 — Hardware: flash, screenshot splash bike + a provider screen mid-act; commit. Route: verification worker.
 
 ## Verification
@@ -31,7 +31,18 @@ The user wants a shared visual identity across the three providers ("each one on
 - `pio run -d firmware -e waveshare_amoled_216` + flash + `screenshot.sh`
 
 ## Verification evidence
-(pending)
+T1/T2 (writer, worktree `feat/tokenmon-h4-mountain-bike` on c3c3260, uncommitted):
+- Art: three grids, 25×21 crop at stage (15,16) — same `ox` 15 as every idle — 6 frames each (f0/f5 coast hold 400, f1–f4 pedal loop hold 110), 9 colors. Wheels are 11-cell: tire ring `#3A3A3A`, rim ring `#9A9A9A`, 4 spokes (`#6E6E6E`) with a light pair (`#E8E8E8`) stepping 45° per loop frame (`| / — \`, 180° period, so the 4-frame loop is seamless and the turning direction reads). Crank radius 2, 90° per frame (top/front/bottom/back), near leg over the frame, far leg in a darker tint behind it.
+- Deviation: the bike metal (frame, fork, cranks) is ivory `#F9F8F4`, not `#141413` — on the full splash index 0 is opaque black and a `#141413` frame was invisible in the first render. Saddle/handlebar `#6E6E6E`, pedals/hub `#9A9A9A`.
+- `node --test tools/test/`: 8 pass, 0 fail.
+- `node tools/convert_grid_animations.js` ×2: no warnings; header identical after the second run (shasum equal); 7 animations, each bike 3.1 KB.
+- `--verify` strips + a black-backdrop render (scratch) read as Clawd / the three dots / the moon riding a spoked bike.
+- `pio run -e sim`: SUCCESS. Headless autoshots (temporary `SCREEN_USAGE` boot and a temporary bike-first idle group for Claude, both reverted; `git diff --stat firmware/src/main.cpp` empty): corner bike mid-pedal for Claude (~10.6 s), Codex and Kimi (~21.7 s, final wiring: bike is the second act of the idle group). Splash full-size `claude.bike` (temporary group-0 boot pick, reverted) at 1.5/1.7/1.9 s shows the wheels stepping.
+- `pio run -e waveshare_amoled_216`: SUCCESS, RAM 33.9%, Flash 65.5% (2190595 / 3342336 bytes).
+- `grep -rn "ifdef BOARD_" firmware/src/*.cpp firmware/src/*.h`: only the three pre-existing `BOARD_HAS_PSRAM`.
+- Wiring: `GROUP_MAX` 4→6 (`claude.bike` in group 2; `codex.bike`, `kimi.bike` in group 3); `MAS_ACT_MAX` 4→5; Claude keeps its official acts and adds `claude.bike` to the normal/active/heavy groups; Codex/Kimi alternate dots/glow with the bike in every group. `splash_next` already walks the custom table, so the PWR button reaches all three.
+- Scenario: "claude only again" dwell 6 s → 12 s; the rest already ≥ 12 s.
+- Note: in the sim the rate group is always 0 (`MIN_WINDOW_MS` 240 s), so Claude's corner bike only shows on hardware once the pace is at least "normal".
 
 ## Next step
-Branch from H3 once committed; launch writer.
+T3 (parent): flash `waveshare_amoled_216`, `screenshot.sh` the splash bike (PWR-cycle to it) and a provider screen mid-act, then commit the work unit.

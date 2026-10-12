@@ -323,7 +323,11 @@ sim`, then `cd firmware && .pio/build/sim/program`). See
   compiles them into `firmware/src/custom_animations.h` in the same format as
   the official set, and `--verify DIR` writes a PNG strip per animation to
   eyeball. The usage screen swaps the corner mascot to match the provider on
-  screen. See the "Custom animations" section of [`CLAUDE.md`](CLAUDE.md).
+  screen. Gallery: `codex.dots` (bouncing dots), `kimi.glow` (moon glow and
+  twinkle), and `claude.bike` / `codex.bike` / `kimi.bike` — each mascot riding
+  a mountain bike with turning spoked wheels, playable both as a corner act and
+  full-size on the splash. See the "Custom animations" section of
+  [`CLAUDE.md`](CLAUDE.md).
 - **Icons** — Lucide PNGs convert to LVGL C arrays with
   `tools/png_to_lvgl.js`. See [`tools/README.md`](tools/README.md).
 - **Fonts** — the pre-compiled LVGL fonts and the LVGL-9 patching they need:

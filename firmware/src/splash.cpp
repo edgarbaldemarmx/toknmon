@@ -67,11 +67,12 @@ static bool active = false;
 // rate-driven group every this many ms.
 #define SPLASH_ROTATE_INTERVAL_MS 20000
 
-// Usage-rate animation groups: 4 groups × up to 4 animations each.
+// Usage-rate animation groups: 4 groups × up to 6 animations each.
 // Filled at init by matching literal names across both animation tables.
 // (jumping is the only unassigned animation — still reachable via splash_next.)
+// The custom mountain bikes (H4) ride in the busy groups; unused slots are NULL.
 #define GROUP_COUNT 4
-#define GROUP_MAX   4
+#define GROUP_MAX   6
 static int8_t  group_lists[GROUP_COUNT][GROUP_MAX];
 static uint8_t group_size[GROUP_COUNT] = {0};
 static uint8_t group_rotation[GROUP_COUNT] = {0};
@@ -79,13 +80,14 @@ static uint8_t group_rotation[GROUP_COUNT] = {0};
 static const char* GROUP_NAMES[GROUP_COUNT][GROUP_MAX] = {
     // Group 0 — idle / sleepy (calm, investigative). Magnifier first: it's
     // the boot pick, and lurking-first would boot to a near-empty screen.
-    { "magnifier", "walking", "pointing", "lurking" },
+    { "magnifier", "walking", "pointing", "lurking", NULL, NULL },
     // Group 1 — normal pace
-    { "crab walking", "waving", "trumpet", "basketball" },
-    // Group 2 — active (typing along with you)
-    { "laptop", "dancing", "skateboard", "soccer" },
-    // Group 3 — heavy burn (high-energy rides + the most exuberant jump)
-    { "racing car", "cloud", "sailing scene", "jumping happy" },
+    { "crab walking", "waving", "trumpet", "basketball", NULL, NULL },
+    // Group 2 — active (typing along with you; Clawd takes the bike out)
+    { "laptop", "dancing", "skateboard", "soccer", "claude.bike", NULL },
+    // Group 3 — heavy burn (high-energy rides + the most exuberant jump,
+    // and the other two mascots pedaling along)
+    { "racing car", "cloud", "sailing scene", "jumping happy", "codex.bike", "kimi.bike" },
 };
 
 // Scratch stage: the current animation frame composed centered onto the full
@@ -470,7 +472,7 @@ static uint8_t big_act = 0;            // 0 waving, 1 pointing
 // the walk-off / full-size-lurk / walk-back trip; a NULL `walk` disables
 // those trips (the mascot only ever acts in place). All names resolve through
 // anim_by_name(), so a missing animation degrades to "stays still".
-#define MAS_ACT_MAX 4
+#define MAS_ACT_MAX 5
 struct MascotSpec {
     const char *idle;                   // frame 0 is the still pose
     const char *walk;                   // gait for trips; NULL = no trips
@@ -479,27 +481,29 @@ struct MascotSpec {
     const char *lurk;                   // full-size off-slot act; NULL = none
 };
 static const MascotSpec MASCOT_SPECS[PROVIDER_COUNT] = {
-    // Claude: the official Clawd set. Acts must fit the corner buffer (jumps
-    // are too tall).
+    // Claude: the official Clawd set plus the custom mountain bike once the
+    // pace picks up. Acts must fit the corner buffer (jumps are too tall).
     { "walking", "walking", WALK_FRONT,
-      { { "pointing", "lurking", NULL,       NULL      },   // idle: sparse, sneaky
-        { "waving",   "lurking", "pointing", NULL      },   // normal
-        { "waving",   "dancing", "lurking",  NULL      },   // active
-        { "dancing",  "waving",  "dancing",  "lurking" } }, // heavy: can't sit still
+      { { "pointing", "lurking", NULL,          NULL,          NULL          },   // idle: sparse, sneaky
+        { "waving",   "lurking", "pointing",    "claude.bike", NULL          },   // normal
+        { "waving",   "dancing", "claude.bike", "lurking",     NULL          },   // active
+        { "dancing",  "waving",  "claude.bike", "dancing",     "lurking"     } }, // heavy: can't sit still
       "lurking" },
-    // Codex: the three thinking dots. No walk gait, so no trips.
+    // Codex: the three thinking dots, and the bike at every pace. No walk
+    // gait, so no trips.
     { "codex.idle", NULL, WALK_NONE,
-      { { "codex.dots", NULL, NULL, NULL },
-        { "codex.dots", NULL, NULL, NULL },
-        { "codex.dots", NULL, NULL, NULL },
-        { "codex.dots", NULL, NULL, NULL } },
+      { { "codex.dots", "codex.bike", NULL,         NULL, NULL },
+        { "codex.dots", "codex.bike", NULL,         NULL, NULL },
+        { "codex.bike", "codex.dots", NULL,         NULL, NULL },
+        { "codex.bike", "codex.dots", "codex.bike", NULL, NULL } },
       NULL },
-    // Kimi: the crescent moon. No walk gait, so no trips.
+    // Kimi: the crescent moon, and the bike at every pace. No walk gait, so
+    // no trips.
     { "kimi.idle", NULL, WALK_NONE,
-      { { "kimi.glow", NULL, NULL, NULL },
-        { "kimi.glow", NULL, NULL, NULL },
-        { "kimi.glow", NULL, NULL, NULL },
-        { "kimi.glow", NULL, NULL, NULL } },
+      { { "kimi.glow", "kimi.bike", NULL,        NULL, NULL },
+        { "kimi.glow", "kimi.bike", NULL,        NULL, NULL },
+        { "kimi.bike", "kimi.glow", NULL,        NULL, NULL },
+        { "kimi.bike", "kimi.glow", "kimi.bike", NULL, NULL } },
       NULL },
 };
 static const uint16_t MAS_STILL_MS_BY_RATE[4] = { 10000, 7000, 5000, 3500 };

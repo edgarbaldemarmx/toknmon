@@ -259,6 +259,12 @@ idle and act files at the same left edge (`ox`): the corner mascot is
 bottom-left anchored and ignores `ox`/`oy`, so differing crops would shift
 the character between idle and act.
 
+The three `<provider>.bike` grids (H4) are the mascots on a mountain bike:
+frames 0/5 coast, 1-4 are one pedal revolution with the 4-spoke wheels
+stepping 45° per frame; they are wired both as corner acts and into the busy
+`GROUP_NAMES` slots, and the bike metal is ivory because a `#141413` frame
+would vanish into the splash's opaque-black index 0.
+
 Corner mascots are per provider (`MASCOT_SPECS` in `splash.cpp`: idle, walk
 gait, acts per usage-rate group, lurk). `ui.cpp` calls
 `splash_mascot_set_provider()` when the carousel changes slot, and
