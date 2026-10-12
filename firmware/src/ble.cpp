@@ -4,7 +4,10 @@
 #include <NimBLEHIDDevice.h>
 #include <Preferences.h>
 
-#define DEVICE_NAME "Clawdmeter"
+// Advertised device name. Loaded from NVS at init (see load_device_name);
+// defaults to BLE_DEFAULT_DEVICE_NAME until the user sets one with the
+// `name <text>` serial command.
+static char device_name[BLE_DEVICE_NAME_MAX_LEN + 1] = BLE_DEFAULT_DEVICE_NAME;
 
 // Custom GATT UUIDs for data channel
 #define SERVICE_UUID        "4c41555a-4465-7669-6365-000000000001"
@@ -105,6 +108,20 @@ static void clear_owner() {
     prefs.end();
 }
 
+// Read the user-chosen device name from NVS. Falls back to the default when
+// unset or when the stored value is out of range (e.g. hand-edited NVS).
+static void load_device_name() {
+    char buf[BLE_DEVICE_NAME_MAX_LEN + 1] = {0};
+    prefs.begin(BLE_NAME_NVS_NAMESPACE, true);
+    size_t n = prefs.getString(BLE_NAME_NVS_KEY, buf, sizeof(buf));
+    prefs.end();
+    if (n > 0 && buf[0] != '\0') {
+        strncpy(device_name, buf, BLE_DEVICE_NAME_MAX_LEN);
+        device_name[BLE_DEVICE_NAME_MAX_LEN] = '\0';
+    }
+    Serial.printf("BLE: name=%s\n", device_name);
+}
+
 static void load_owner() {
     prefs.begin("clawd", true);
     String o = prefs.getString("owner", "");
@@ -150,14 +167,14 @@ static void start_advertising() {
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     adv->reset();
     // Primary advertising packet (≤31 bytes):
-    //   flags (3) + appearance (4) + HID service 0x1812 (4) + name "Clawdmeter" (12)
-    //   = 23 bytes. macOS Bluetooth Settings only surfaces BLE-only devices
+    //   flags (3) + appearance (4) + HID service 0x1812 (4) + name (2 + up to 18)
+    //   = up to 31 bytes. macOS Bluetooth Settings only surfaces BLE-only devices
     //   that explicitly advertise the standard HID service UUID (0x1812) —
     //   without it the device is recognized internally but hidden from the
     //   GUI nearby-devices list.
     adv->setAppearance(HID_KEYBOARD);
     adv->addServiceUUID(NimBLEUUID((uint16_t)0x1812));  // BLE HID Service
-    adv->setName(DEVICE_NAME);
+    adv->setName(device_name);
     // Scan response carries the 128-bit custom data-service UUID for active
     // scanners (the host daemon scans actively).
     NimBLEAdvertisementData scanResp;
@@ -299,7 +316,8 @@ class ReqCallbacks : public NimBLECharacteristicCallbacks {
 };
 
 void ble_init(void) {
-    NimBLEDevice::init(DEVICE_NAME);
+    load_device_name();
+    NimBLEDevice::init(device_name);
     NimBLEDevice::setSecurityAuth(true, false, true);  // bonding, no MITM, SC
 
     // Restore the locked owner (if any) and drop any stale non-owner bonds so
@@ -388,7 +406,7 @@ ble_state_t ble_get_state(void) {
 }
 
 const char* ble_get_device_name(void) {
-    return DEVICE_NAME;
+    return device_name;
 }
 
 const char* ble_get_mac_address(void) {

@@ -132,6 +132,33 @@ configure_chime() {
     fi
 }
 
+# Record the board's Bluetooth name so the daemon's HID fallback and stale-bond
+# repair match the right device. The name itself lives on the board (set by
+# flash-mac.sh or the `name <text>` serial command); this only stores it in the
+# config. Defaults to the saved value, else "TokenMon".
+configure_device_name() {
+    [ -t 0 ] || return 0
+    local ans cur def
+    cur=$(current_config_value device_name)
+    def="${cur:-TokenMon}"
+    read -r -p "  Device Bluetooth name (as set when flashing) [$def]: " ans || ans=""
+    [ -z "$ans" ] && ans="$def"
+    if [ ${#ans} -gt 18 ] || ! LC_ALL=C grep -qE '^[ -~]+$' <<< "$ans"; then
+        echo "  Invalid name (1-18 printable ASCII chars) — leaving device_name unchanged."
+        return 0
+    fi
+    if [ "$ans" = "$cur" ]; then
+        echo "  device_name = $ans (unchanged)."
+        return 0
+    fi
+    if [ "$ans" = "TokenMon" ] && [ -z "$cur" ]; then
+        echo "  device_name = TokenMon (default)."
+        return 0
+    fi
+    upsert_config_key device_name "$ans"
+    echo "  Set: device_name = $ans"
+}
+
 # Offer the optional attention beep (Claude Code hooks, see the README).
 configure_beep() {
     [ -t 0 ] || return 0
@@ -224,10 +251,11 @@ sed \
 echo "  Installed: $PLIST_DST"
 echo ""
 
-# Interactive daemon configuration: which plans to poll, plus the optional
-# clock display, session-reset chime and attention beep. All re-read by the
-# daemon each poll.
+# Interactive daemon configuration: the board's Bluetooth name, which plans to
+# poll, plus the optional clock display, session-reset chime and attention
+# beep. All re-read by the daemon each poll.
 echo "[4/6] Configuring the daemon..."
+configure_device_name
 configure_config_dirs
 configure_clock
 configure_chime

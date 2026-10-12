@@ -62,9 +62,24 @@ The macOS host pieces — Python daemon, LaunchAgent, and flash helper — were 
 
 The board env name is required. Run `./flash-mac.sh` with no args to see the available envs (scraped from `firmware/platformio.ini`).
 
+### Naming your device
+
+Several boards in one office would all show up as the same Bluetooth device, so each board carries its own name (default `TokenMon`, max 18 ASCII characters). After a successful upload, `flash-mac.sh` asks:
+
+```text
+Device Bluetooth name [TokenMon]: ToknMon Desk One
+  board> BLE: name set to "ToknMon Desk One", restarting
+  board> BLE: name=ToknMon Desk One
+  Saved: device_name = ToknMon Desk One  -> ~/.config/claude-usage-monitor/config
+```
+
+Pass `--name "..."` or set `DEVICE_NAME=...` to skip the prompt (useful in scripts). The name is stored in the board's flash (NVS), so it survives re-flashing. To change it later without re-flashing, open a serial monitor (`pio device monitor -p /dev/cu.usbmodem* -b 115200`) and type `name <new name>`; `name` alone prints the current one. The board reboots to apply it.
+
+The daemon finds the board by its BLE service UUID, so the name is cosmetic for everyday use; it is only consulted by the HID fallback and the stale-bond repair, which read `device_name` from the config (`install-mac.sh` asks for it too) and always accept the legacy name `Clawdmeter` as well.
+
 ### Pair the device
 
-After flashing, open **System Settings → Bluetooth** and click _Connect_ next to "Clawdmeter". The daemon only ever connects to the peripheral this Mac is paired/connected to — it never scans for a nearby device — so once it's connected here the daemon picks it up on its next poll (~60 s).
+After flashing, open **System Settings → Bluetooth** and click _Connect_ next to your device's name (`TokenMon` unless you renamed it). The daemon only ever connects to the peripheral this Mac is paired/connected to — it never scans for a nearby device — so once it's connected here the daemon picks it up on its next poll (~60 s).
 
 ### Install the daemon
 

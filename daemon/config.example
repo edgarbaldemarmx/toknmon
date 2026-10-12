@@ -6,6 +6,14 @@
 #
 # The daemon re-reads it on every poll, so edits take effect within ~60s — no restart needed.
 
+# Bluetooth name of your board, as set when flashing (flash-mac.sh prompts for
+# it; or type `name <text>` into the board's USB serial console). Max 18 ASCII
+# characters. The daemon finds the device by its service UUID regardless of
+# name; this only matters for the HID fallback and stale-bond repair, where
+# the legacy name "Clawdmeter" is always accepted too.
+#   Unset (default) = TokenMon
+# device_name = TokenMon
+
 # Poll more than one Claude config dir and show whichever plan is currently
 # active. Use this if you run separate plans from different config dirs (e.g. a
 # personal plan in ~/.claude and a work plan in ~/.claude-work, selected via

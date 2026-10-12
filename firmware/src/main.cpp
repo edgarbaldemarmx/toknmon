@@ -3,6 +3,7 @@
 #include <lvgl.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
+#include <Preferences.h>
 
 #include "data.h"
 #include "ui.h"
@@ -171,6 +172,46 @@ static void send_screenshot() {
 #endif
 }
 
+// `name` prints the stored BLE device name; `name <text>` validates, persists
+// it to NVS and reboots so the new name is advertised (NimBLE takes the GAP
+// name at init, and a restart also drops any client holding the old name).
+static void print_device_name() {
+    char buf[BLE_DEVICE_NAME_MAX_LEN + 1] = {0};
+    Preferences prefs;
+    prefs.begin(BLE_NAME_NVS_NAMESPACE, true);
+    size_t n = prefs.getString(BLE_NAME_NVS_KEY, buf, sizeof(buf));
+    prefs.end();
+    Serial.printf("BLE: name=%s\n", (n > 0 && buf[0]) ? buf : BLE_DEFAULT_DEVICE_NAME);
+}
+
+static bool device_name_valid(const char* s) {
+    size_t len = strlen(s);
+    if (len == 0 || len > BLE_DEVICE_NAME_MAX_LEN) return false;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] < 0x20 || s[i] > 0x7E) return false;  // printable ASCII only
+    }
+    return true;
+}
+
+static void set_device_name(char* text) {
+    while (*text == ' ') text++;                       // trim leading spaces
+    size_t len = strlen(text);
+    while (len > 0 && text[len - 1] == ' ') text[--len] = '\0';  // trim trailing
+    if (!device_name_valid(text)) {
+        Serial.printf("BLE: name rejected (need 1-%d printable ASCII chars)\n",
+                      BLE_DEVICE_NAME_MAX_LEN);
+        return;
+    }
+    Preferences prefs;
+    prefs.begin(BLE_NAME_NVS_NAMESPACE, false);
+    prefs.putString(BLE_NAME_NVS_KEY, text);
+    prefs.end();
+    Serial.printf("BLE: name set to \"%s\", restarting\n", text);
+    Serial.flush();
+    delay(100);
+    ESP.restart();
+}
+
 static void check_serial_cmd() {
     while (Serial.available()) {
         char c = Serial.read();
@@ -178,6 +219,8 @@ static void check_serial_cmd() {
             cmd_buf[cmd_pos] = '\0';
             if (strcmp(cmd_buf, "screenshot") == 0) send_screenshot();
             else if (strcmp(cmd_buf, "buzz") == 0)  sound_hal_play_reset();
+            else if (strcmp(cmd_buf, "name") == 0)  print_device_name();
+            else if (strncmp(cmd_buf, "name ", 5) == 0) set_device_name(cmd_buf + 5);
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;

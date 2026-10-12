@@ -1,6 +1,15 @@
 #pragma once
 #include <stdint.h>
 
+// User-configurable BLE device name, persisted in NVS. Shared between ble.cpp
+// (reads it at init, advertises it) and main.cpp (the `name` serial command
+// writes it). Max 18 bytes: the primary advertising packet is 31 bytes and
+// flags + appearance + HID UUID already take 11, name header takes 2.
+#define BLE_NAME_NVS_NAMESPACE   "clawdmeter"
+#define BLE_NAME_NVS_KEY         "dev_name"
+#define BLE_DEFAULT_DEVICE_NAME  "TokenMon"
+#define BLE_DEVICE_NAME_MAX_LEN  18
+
 enum ble_state_t {
     BLE_STATE_INIT,
     BLE_STATE_ADVERTISING,

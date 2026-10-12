@@ -25,5 +25,13 @@ public:
 };
 extern SimSerial Serial;
 
+// ESP.restart() stand-in: the sim cannot reboot itself, so it just logs.
+// Stateless, so a per-translation-unit copy is harmless.
+class SimESP {
+public:
+    void restart(void) { puts("sim: ESP.restart() requested (ignored)"); }
+};
+static SimESP ESP;
+
 void setup(void);
 void loop(void);

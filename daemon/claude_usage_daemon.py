@@ -25,7 +25,14 @@ import httpx
 from bleak import BleakClient
 from bleak.exc import BleakError
 
-DEVICE_NAME = "Clawdmeter"
+# BLE device name. The firmware default is "TokenMon"; users can rename their
+# board (`name <text>` over USB serial, or via flash-mac.sh) and record the same
+# name in the config as `device_name`. The daemon finds the device primarily by
+# service UUID; the name only matters for the HID fallback and stale-bond repair,
+# where any of accepted_device_names() is honored (configured + legacy names).
+DEFAULT_DEVICE_NAME = "TokenMon"
+LEGACY_DEVICE_NAMES = ("Clawdmeter",)
+DEVICE_NAME_MAX_LEN = 18  # firmware advertising budget (bytes, printable ASCII)
 SERVICE_UUID = "4c41555a-4465-7669-6365-000000000001"
 RX_CHAR_UUID = "4c41555a-4465-7669-6365-000000000002"
 REQ_CHAR_UUID = "4c41555a-4465-7669-6365-000000000004"
@@ -179,6 +186,48 @@ def read_config_dirs() -> list[Path]:
     return dirs or [DEFAULT_CONFIG_DIR]
 
 
+def read_config_value(key: str) -> str | None:
+    """Return the raw (comment-stripped, trimmed) value of one config key.
+
+    Keys are matched case-insensitively; the last occurrence wins. Returns
+    None when the file or the key is absent.
+    """
+    found = None
+    try:
+        if CONFIG_FILE.exists():
+            for line in CONFIG_FILE.read_text().splitlines():
+                line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                k, val = line.split("=", 1)
+                if k.strip().lower() == key:
+                    found = val.strip()
+    except OSError:
+        pass
+    return found
+
+
+def read_device_name() -> str:
+    """Return the configured BLE device name (`device_name`), else the default.
+
+    Mirrors the firmware's constraint: 1..DEVICE_NAME_MAX_LEN printable ASCII
+    bytes. Anything else falls back to DEFAULT_DEVICE_NAME.
+    """
+    val = read_config_value("device_name")
+    if not val or len(val) > DEVICE_NAME_MAX_LEN or not val.isascii() or not val.isprintable():
+        return DEFAULT_DEVICE_NAME
+    return val
+
+
+def accepted_device_names() -> set[str]:
+    """Names that identify our board: the configured one plus legacy names."""
+    return {read_device_name(), *LEGACY_DEVICE_NAMES}
+
+
+def is_device_name(name: str | None) -> bool:
+    return name is not None and name in accepted_device_names()
+
+
 def read_token_for(config_dir: Path) -> str | None:
     """Read the OAuth token for one config dir.
 
@@ -254,7 +303,7 @@ async def retrieve_connected_macos(skip_addr: str | None = None):
        that service is unambiguous (no other device exposes it), so we accept
        by service alone — the peripheral's name can be None on macOS.
     2. Fall back to the generic HID service 0x1812, but ONLY trust a
-       peripheral whose name matches DEVICE_NAME. 0x1812 also matches
+       peripheral whose name is one of accepted_device_names(). 0x1812 also matches
        unrelated keyboards/mice, so picking blindly here could grab the
        wrong device.
 
@@ -288,12 +337,12 @@ async def retrieve_connected_macos(skip_addr: str | None = None):
         if _ok(p):
             return _wrap(p)
 
-    # 2. Generic HID service — require an exact name match.
+    # 2. Generic HID service — require an exact name match (configured or legacy).
     hid = cm.retrieveConnectedPeripheralsWithServices_(
         [CBUUID.UUIDWithString_("1812")]
     )
     for p in hid or []:
-        if _ok(p) and p.name() == DEVICE_NAME:
+        if _ok(p) and is_device_name(p.name()):
             return _wrap(p)
 
     return None
@@ -745,7 +794,7 @@ def _blueutil(*args: str) -> str | None:
 
 
 def unpair_macos() -> bool:
-    """Forget a stale macOS bond for DEVICE_NAME so the device can re-pair.
+    """Forget a stale macOS bond for our device so it can re-pair.
 
     A Code=15 "failed to encrypt" connect error means macOS holds bonding
     keys that no longer match the ESP32's (e.g. after a firmware reflash or
@@ -759,10 +808,11 @@ def unpair_macos() -> bool:
     True if a bond was removed. Mirrors the Linux daemon's `bluetoothctl
     remove` self-heal.
     """
+    device_name = read_device_name()
     if not shutil.which("blueutil"):
         log("Stale bond detected but `blueutil` is not installed; cannot "
             "auto-recover. Run `brew install blueutil`, or forget "
-            f"'{DEVICE_NAME}' in System Settings > Bluetooth and reconnect.")
+            f"'{device_name}' in System Settings > Bluetooth and reconnect.")
         return False
 
     out = _blueutil("--paired")
@@ -770,21 +820,29 @@ def unpair_macos() -> bool:
         return False
 
     # Each line looks like:
-    #   address: 28-84-85-55-5c-3d, ... name: "Clawdmeter", ...
+    #   address: aa-bb-cc-dd-ee-04, ... name: "TokenMon", ...
+    # Accept the configured name and legacy names (boards flashed before the
+    # rename still advertise "Clawdmeter").
+    names = accepted_device_names()
     addr = None
+    matched = None
     for line in out.splitlines():
-        if f'name: "{DEVICE_NAME}"' in line:
-            m = re.search(r"address:\s*([0-9a-fA-F:-]+)", line)
-            if m:
-                addr = m.group(1)
+        for n in names:
+            if f'name: "{n}"' in line:
+                m = re.search(r"address:\s*([0-9a-fA-F:-]+)", line)
+                if m:
+                    addr = m.group(1)
+                    matched = n
                 break
+        if addr:
+            break
     if not addr:
-        log(f"No paired '{DEVICE_NAME}' found to unpair (already forgotten?)")
+        log(f"No paired '{device_name}' found to unpair (already forgotten?)")
         return False
 
     if _blueutil("--unpair", addr) is None:
         return False
-    log(f"Unpaired stale bond for '{DEVICE_NAME}' [{addr}]; re-pairing on "
+    log(f"Unpaired stale bond for '{matched}' [{addr}]; re-pairing on "
         "next connect")
     return True
 
