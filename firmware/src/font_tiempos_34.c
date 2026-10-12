@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 34 px
  * Bpp: 4
- * Opts: --font /home/hermann/Documents/Code/Personal/claude-usage-monitor-sc01-plus/assets/TiemposText-400-Regular.otf -r 0x20-0x7E --size 34 --format lvgl --bpp 4 --no-compress -o /home/hermann/Documents/Code/Personal/claude-usage-monitor-sc01-plus/firmware/src/font_tiempos_34.c --lv-include lvgl.h
+ * Opts: --font <upstream path>/assets/TiemposText-400-Regular.otf -r 0x20-0x7E --size 34 --format lvgl --bpp 4 --no-compress -o <upstream path>/firmware/src/font_tiempos_34.c --lv-include lvgl.h
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

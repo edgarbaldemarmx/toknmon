@@ -43,6 +43,19 @@ jobs:
       - name: Run pytest
         run: python -m pytest daemon/tests -q
 
+  pii-check:
+    name: Personal data check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Fails when a tracked file contains home paths, hostnames, e-mail
+      # addresses, non-documentation MAC addresses, credential-looking
+      # strings or scratch paths (placeholders are allow-listed in the script).
+      - name: Scan tracked files
+        run: bash tools/check_pii.sh
+
   tools-tests:
     name: Tools tests (node + shell)
     runs-on: ubuntu-latest

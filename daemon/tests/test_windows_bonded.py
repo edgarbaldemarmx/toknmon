@@ -28,8 +28,8 @@ def _run(coro):
 
 
 def test_recovers_mac_from_standard_bthle_instance_id():
-    instance_id = r"BTHLE\DEV_98A316A5D706\7&B8081D1&0&98A316A5D706"
-    assert _mac_from_pnp_instance_id(instance_id) == "98:A3:16:A5:D7:06"
+    instance_id = r"BTHLE\DEV_AABBCCDDEE03\7&B8081D1&0&AABBCCDDEE03"
+    assert _mac_from_pnp_instance_id(instance_id) == "AA:BB:CC:DD:EE:03"
 
 
 def test_uppercases_lowercase_hex():
@@ -64,11 +64,11 @@ def test_acquire_target_uses_bonded_address():
     from bleak.backends.device import BLEDevice
 
     with patch("daemon.claude_usage_daemon_windows.discover_bonded_address",
-               return_value="98:A3:16:A5:D7:06"):
+               return_value="AA:BB:CC:DD:EE:03"):
         result = _run(acquire_target())
 
     assert isinstance(result, BLEDevice)
-    assert result.address == "98:A3:16:A5:D7:06"
+    assert result.address == "AA:BB:CC:DD:EE:03"
 
 
 def test_acquire_target_returns_none_when_not_bonded():

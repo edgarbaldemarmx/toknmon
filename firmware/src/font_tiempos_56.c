@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 56 px
  * Bpp: 4
- * Opts: --font /home/hermann/Documents/Code/Personal/claude-usage-monitor-sc01-plus/.claude/worktrees/waveshare-esp32-s3-touch-amoled-2.16/assets/TiemposText-400-Regular.otf -r 0x20-0x7E --size 56 --format lvgl --bpp 4 --no-compress -o /home/hermann/Documents/Code/Personal/claude-usage-monitor-sc01-plus/.claude/worktrees/waveshare-esp32-s3-touch-amoled-2.16/firmware/src/font_tiempos_56.c --lv-include lvgl.h
+ * Opts: --font <upstream path>/.claude/worktrees/waveshare-esp32-s3-touch-amoled-2.16/assets/TiemposText-400-Regular.otf -r 0x20-0x7E --size 56 --format lvgl --bpp 4 --no-compress -o <upstream path>/.claude/worktrees/waveshare-esp32-s3-touch-amoled-2.16/firmware/src/font_tiempos_56.c --lv-include lvgl.h
  ******************************************************************************/
 
 #include "lvgl.h"

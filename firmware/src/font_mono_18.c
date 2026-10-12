@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 18 px
  * Bpp: 4
- * Opts: --font /home/hermann/Documents/Code/Personal/claude-usage-monitor-sc01-plus/assets/DejaVuSansMono.ttf -r 0x20-0x7E,0xB7,0x2026,0x2722,0x2733,0x2736,0x273B,0x273D --size 18 --format lvgl --bpp 4 --no-compress -o /home/hermann/Documents/Code/Personal/claude-usage-monitor-sc01-plus/firmware/src/font_mono_18.c --lv-include lvgl.h
+ * Opts: --font <upstream path>/assets/DejaVuSansMono.ttf -r 0x20-0x7E,0xB7,0x2026,0x2722,0x2733,0x2736,0x273B,0x273D --size 18 --format lvgl --bpp 4 --no-compress -o <upstream path>/firmware/src/font_mono_18.c --lv-include lvgl.h
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

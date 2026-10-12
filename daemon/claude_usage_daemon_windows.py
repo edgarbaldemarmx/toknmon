@@ -301,7 +301,7 @@ def _mac_from_pnp_instance_id(instance_id: str) -> str | None:
     Windows encodes a paired BLE device's address in its PnP instance id as a
     12-hex run after a ``DEV_`` token, e.g.::
 
-        BTHLE\\DEV_98A316A5D706\\7&B8081D1&0&98A316A5D706  ->  98:A3:16:A5:D7:06
+        BTHLE\\DEV_AABBCCDDEE03\\7&B8081D1&0&AABBCCDDEE03  ->  AA:BB:CC:DD:EE:03
 
     Returns None when no ``DEV_<12 hex>`` token is present. Pure — the
     subprocess that produces the instance id lives in discover_bonded_address().
