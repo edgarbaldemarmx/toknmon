@@ -1,0 +1,34 @@
+name: Bug report
+description: Something on the device, in the daemon, or in the install flow does not work.
+labels: [bug]
+body:
+  - type: dropdown
+    id: board
+    attributes:
+      label: Board
+      options:
+        - Waveshare ESP32-S3 Touch AMOLED 2.16
+        - Desktop simulator (sim)
+        - Other (say which in the description)
+    validations:
+      required: true
+  - type: input
+    id: firmware-version
+    attributes:
+      label: Firmware version
+      description: Release tag or commit hash you flashed (shown in the serial banner).
+      placeholder: v1.0.0 or cc70426
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: daemon-log
+    attributes:
+      label: Daemon log lines
+      description: Relevant lines from `~/Library/Logs/toknmon.err.log` (remove tokens and personal data).
+      render: text

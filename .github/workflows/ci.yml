@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  daemon-tests:
+    name: Daemon tests (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: daemon/requirements-macos.txt
+
+      - name: Install daemon dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r daemon/requirements-macos.txt
+
+      # Tests import the real `bleak`; on Linux its BlueZ backend is resolved
+      # lazily, so importing it needs no running bluetoothd. Two tests in
+      # daemon/tests/test_windows_token.py are Linux-only (skipped on macOS/
+      # Windows via sys.platform) and spawn the Windows daemon as a subprocess
+      # to assert its "WinRT BLE will not be available" warning; they run here.
+      - name: Run pytest
+        run: python -m pytest daemon/tests -q
+
+  tools-tests:
+    name: Tools tests (node + shell)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Node unit tests
+        run: node --test tools/test/
+
+      - name: Shell device-name validator tests
+        run: bash tools/test/shell/test_device_name_validator.sh
+
+      # The converter only needs ImageMagick for `--verify`; the plain run
+      # regenerates firmware/src/custom_animations.h from assets/animations.
+      # The committed header must match what the converter produces.
+      - name: Grid-animation converter idempotency
+        run: |
+          node tools/convert_grid_animations.js
+          git diff --exit-code -- firmware/src/custom_animations.h
+
+  firmware-sim:
+    name: Firmware sim (native, SDL2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # [env:sim] resolves SDL2 through `!sdl2-config --cflags --libs`;
+      # libsdl2-dev ships sdl2-config on Debian/Ubuntu.
+      - name: Install SDL2 development headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsdl2-dev
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+            ~/.platformio/.cache
+          key: pio-sim-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: |
+            pio-sim-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build sim
+        run: pio run -d firmware -e sim
+
+      # Headless smoke: the sim runs under SDL's dummy video driver, takes a
+      # screenshot after SIM_AUTOSHOT_MS and exits (sim_platform.cpp). The
+      # scenario file is resolved relative to cwd, hence `cd firmware`.
+      - name: Headless smoke (autoshot)
+        working-directory: firmware
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+          SIM_AUTOSHOT_MS: "3000"
+        run: |
+          export SIM_AUTOSHOT_PATH="$RUNNER_TEMP/shot.bmp"
+          timeout 60 .pio/build/sim/program
+          test -s "$SIM_AUTOSHOT_PATH"
+          ls -l "$SIM_AUTOSHOT_PATH"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toknmon-sim-autoshot
+          path: ${{ runner.temp }}/shot.bmp
+          if-no-files-found: error
+          retention-days: 14
+
+  firmware-2.16:
+    name: Firmware waveshare_amoled_216
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+            ~/.platformio/.cache
+          key: pio-esp32s3-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: |
+            pio-esp32s3-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build waveshare_amoled_216
+        run: pio run -d firmware -e waveshare_amoled_216
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toknmon-waveshare_amoled_216
+          path: firmware/.pio/build/waveshare_amoled_216/firmware.bin
+          if-no-files-found: error
+          retention-days: 30
