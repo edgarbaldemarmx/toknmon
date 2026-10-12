@@ -116,8 +116,14 @@ Screenshots without touching the board:
 ```bash
 ./screenshot.sh out.png [port]                          # whatever is on screen (480×480 PNG)
 ./screenshot.sh out.png [port] --screen usage           # switch to the meter first
+./screenshot.sh out.png [port] --screen usage:codex     # meter on the Codex slot (`slot 1`; the slot must be fresh)
 ./screenshot.sh out.png [port] --screen splash:codex    # mascot mode for Codex, then capture
 ```
+
+`usage:claude|codex|kimi` sends `screen usage` and then `slot 0|1|2`. The raw
+dump can stall while the board logs BLE traffic, so the script retries the
+whole capture up to 3 times (`retrying (n/3)`) and exits non-zero only after
+the last failure.
 
 The `screenshot` command needs PSRAM (`LV_USE_SNAPSHOT`), so it is unavailable
 on the C6 boards. The simulator has the same UI with keyboard shortcuts and

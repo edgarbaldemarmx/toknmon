@@ -1,23 +1,39 @@
 #!/bin/bash
 # Take a screenshot from the Waveshare AMOLED display via LVGL snapshot.
-# Usage: ./screenshot.sh [output.png] [port] [--screen usage|splash|splash:<provider>]
+# Usage: ./screenshot.sh [output.png] [port] [--screen <name>]
+#   <name>: usage | usage:claude | usage:codex | usage:kimi
+#           splash | splash:claude | splash:codex | splash:kimi
 # Default port: /dev/cu.usbmodem101 on macOS, /dev/ttyACM0 on Linux.
 # --screen sends the firmware's `screen <name>` serial command first, waits
 # 300 ms for the redraw, then captures — no button press needed.
-# `splash:codex` / `splash:kimi` / `splash:claude` open mascot mode for that
-# provider (the colon stands in for the space in the serial command, so no
-# quoting is needed); bare `splash` is the default Claude splash.
+# `usage:<provider>` sends `screen usage` and then `slot 0|1|2` so the meter
+# shows that provider (the slot must hold fresh data). `splash:<provider>`
+# opens mascot mode for that provider; bare `splash` is the default Claude
+# splash. The colon stands in for the space in the serial command, so no
+# quoting is needed.
+# The raw dump (460800 bytes at 480x480) can stall when the board is busy
+# logging BLE traffic, so the capture is retried up to 3 times before the
+# script gives up with a non-zero exit code.
+
+MAX_ATTEMPTS=3
 
 SCREEN=""
+SLOT=""
 POSITIONAL=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --screen)
             case "$2" in
-                usage|splash|splash:claude|splash:codex|splash:kimi) ;;
-                *) echo "Usage: --screen usage|splash|splash:claude|splash:codex|splash:kimi" >&2; exit 2 ;;
+                usage|splash|splash:claude|splash:codex|splash:kimi)
+                    SCREEN="${2/:/ }" ;;
+                usage:claude) SCREEN="usage"; SLOT=0 ;;
+                usage:codex)  SCREEN="usage"; SLOT=1 ;;
+                usage:kimi)   SCREEN="usage"; SLOT=2 ;;
+                *)
+                    echo "Usage: --screen usage|usage:claude|usage:codex|usage:kimi|splash|splash:claude|splash:codex|splash:kimi" >&2
+                    exit 2 ;;
             esac
-            SCREEN="${2/:/ }"; shift 2 ;;
+            shift 2 ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done
@@ -47,21 +63,36 @@ trap "rm -f '$TMPRAW' '$TMPDIMS'" EXIT
 
 echo "Taking screenshot from $PORT..."
 
-"$PY" - "$PORT" "$TMPRAW" "$TMPDIMS" "$SCREEN" << 'PYEOF'
+# One capture attempt. Exit codes: 0 ok, 1 device error / transfer timeout
+# (retryable), 3 the port could not be opened (not retryable).
+capture() {
+"$PY" - "$PORT" "$TMPRAW" "$TMPDIMS" "$SCREEN" "$SLOT" << 'PYEOF'
 import serial, sys, time
 
-port_path, raw_path, dims_path, screen = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+port_path, raw_path, dims_path, screen, slot = sys.argv[1:6]
 
-port = serial.Serial(port_path, 115200, timeout=10)
+# Per-read timeout: a 4 KiB chunk takes ~0.4 s at 115200 baud, so 30 s only
+# fires when the board has really stopped sending (e.g. a BLE burst wedged
+# the dump), not on an ordinary slow stretch.
+try:
+    port = serial.Serial(port_path, 115200, timeout=30)
+except serial.SerialException as e:
+    print(f"Cannot open {port_path}: {e}", file=sys.stderr)
+    sys.exit(3)
 port.reset_input_buffer()
 if screen:
     port.write(f"screen {screen}\n".encode())
     port.flush()
     time.sleep(0.3)
+    if slot:
+        port.write(f"slot {slot}\n".encode())
+        port.flush()
+        time.sleep(0.3)
     port.reset_input_buffer()
 port.write(b"screenshot\n")
 port.flush()
 
+deadline = time.monotonic() + 30
 while True:
     line = port.readline().decode("utf-8", errors="replace").strip()
     if line.startswith("SCREENSHOT_START"):
@@ -70,6 +101,9 @@ while True:
         break
     if line == "SCREENSHOT_ERR":
         print("Device reported screenshot error", file=sys.stderr)
+        sys.exit(1)
+    if time.monotonic() > deadline:
+        print("Timeout: no SCREENSHOT_START from the device", file=sys.stderr)
         sys.exit(1)
 
 data = b""
@@ -93,11 +127,21 @@ for _ in range(10):
 port.close()
 print(f"Captured {w}x{h} ({len(data)} bytes)")
 PYEOF
+}
 
-if [ $? -ne 0 ]; then
-    echo "Screenshot capture failed"
-    exit 1
-fi
+attempt=1
+while :; do
+    capture
+    rc=$?
+    [ "$rc" -eq 0 ] && break
+    if [ "$rc" -eq 3 ] || [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+        echo "Screenshot capture failed after $attempt attempt(s)" >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    echo "Transfer failed, retrying ($attempt/$MAX_ATTEMPTS)..."
+    sleep 1
+done
 
 DIMS=$(cat "$TMPDIMS")
 ffmpeg -y -f rawvideo -pixel_format rgb565le -video_size "$DIMS" \

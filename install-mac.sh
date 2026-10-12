@@ -188,7 +188,11 @@ configure_clock() {
     local ans cur
     cur=$(current_config_value clock)
     if ! interactive; then
-        echo "  Clock: ${cur:-off} (${cur:+kept}${cur:-default})."
+        if [ -n "$cur" ]; then
+            echo "  Clock: $cur (kept)."
+        else
+            echo "  Clock: off (default)."
+        fi
         return 0
     fi
     read -r -p "  Show a clock instead of the \"Usage\" title? [off/auto/12/24] (default off) " ans || ans=""
@@ -211,7 +215,11 @@ configure_chime() {
     local ans cur
     cur=$(current_config_value chime)
     if ! interactive; then
-        echo "  Chime: ${cur:-off} (${cur:+kept}${cur:-default})."
+        if [ -n "$cur" ]; then
+            echo "  Chime: $cur (kept)."
+        else
+            echo "  Chime: off (default)."
+        fi
         return 0
     fi
     read -r -p "  Chime through the speaker when your 5h session limit resets? [y/N] " ans || ans=""
@@ -372,7 +380,11 @@ configure_beep() {
     local ans cur
     cur=$(current_config_value beep)
     if ! interactive; then
-        echo "  Beep: ${cur:-off} (${cur:+kept}${cur:-default})."
+        if [ -n "$cur" ]; then
+            echo "  Beep: $cur (kept)."
+        else
+            echo "  Beep: off (default)."
+        fi
         return 0
     fi
     read -r -p "  Beep through the speaker when Claude Code needs your attention? [y/N] " ans || ans=""
@@ -543,8 +555,11 @@ if command -v blueutil >/dev/null 2>&1; then
     echo "  Priming blueutil's Bluetooth permission (grant if prompted)..."
     blueutil --paired >/dev/null 2>&1 &
     bu_pid=$!
+    # Watchdog kills a blocked blueutil after 20 s; it is disowned so the
+    # shell never prints a "Terminated: 15" job notice for it.
     ( sleep 20; kill "$bu_pid" 2>/dev/null ) >/dev/null 2>&1 &
     bu_killer=$!
+    disown "$bu_killer" 2>/dev/null || true
     if wait "$bu_pid" 2>/dev/null; then
         echo "  blueutil authorized — stale-bond auto-recovery enabled."
     else
@@ -558,9 +573,17 @@ echo ""
 
 echo "[6/6] Loading launchd service..."
 retire_legacy_agent
-launchctl unload "$PLIST_DST" 2>/dev/null || true
-launchctl load -w "$PLIST_DST"
-echo "  Loaded."
+# Modern launchctl vocabulary (bootout/bootstrap, macOS 10.11+); fall back to
+# the legacy load/unload pair only if bootstrap is refused on this system.
+launchctl bootout "gui/$(id -u)/$SERVICE_LABEL" 2>/dev/null || true
+if launchctl bootstrap "gui/$(id -u)" "$PLIST_DST" 2>/dev/null; then
+    echo "  Loaded (launchctl bootstrap)."
+else
+    echo "  bootstrap refused; falling back to launchctl load -w."
+    launchctl unload "$PLIST_DST" 2>/dev/null || true
+    launchctl load -w "$PLIST_DST"
+    echo "  Loaded (launchctl load -w)."
+fi
 echo ""
 
 echo "=== Done ==="
@@ -573,7 +596,8 @@ echo "  3. Click 'Connect' next to '${final_name:-$DEFAULT_DEVICE_NAME}'."
 echo "  4. The daemon will discover it within ~30 s and start polling."
 echo ""
 echo "Useful commands:"
-echo "  launchctl list | grep toknmon          # check it's running"
-echo "  tail -F $LOG_OUT                       # live logs"
-echo "  launchctl unload $PLIST_DST            # stop"
-echo "  launchctl load -w $PLIST_DST           # start"
+echo "  launchctl list | grep toknmon                          # check it's running"
+echo "  tail -F $(_tilde "$LOG_OUT")                       # live logs"
+echo "  launchctl kickstart -k gui/\$(id -u)/$SERVICE_LABEL    # restart now"
+echo "  launchctl bootout gui/\$(id -u)/$SERVICE_LABEL         # stop and unload"
+echo "  launchctl bootstrap gui/\$(id -u) $(_tilde "$PLIST_DST")   # load again"

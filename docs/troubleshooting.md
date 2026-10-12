@@ -52,7 +52,9 @@ console (115200 baud) prints every BLE event and payload.
 | Meter shows "Resets in 0m" around a reset | Known: aged countdowns clamp at 0 until the next poll | Wait for the next poll (60 s) |
 | Splash shows idle animations only | The mood group follows the Claude usage rate; a quiet session stays calm | Expected; mascot mode and the parade play the full sets regardless |
 | Side buttons type nothing | HID keys go to the paired host only, and only after pairing | Pair the board; the keys land in the focused window |
-| `./screenshot.sh` hangs waiting for `SCREENSHOT_START` or returns a short dump | The board is busy logging BLE traffic, or an orphaned reader holds the port | Retry; `lsof /dev/cu.usbmodem*` and kill the stale Python holding the port |
+| `./screenshot.sh` prints `Timeout: got N of 460800 bytes` and `retrying (n/3)` | The raw dump stalled while the board was logging BLE traffic | Normal; the script retries up to 3 times by itself. If all three fail, run it again right after a daemon poll (every 60 s) or stop the agent for the capture |
+| `./screenshot.sh` fails 3 times, or waits for `SCREENSHOT_START` with no data | An orphaned reader holds the port, or the board is on a C6 (no `screenshot`) | `lsof /dev/cu.usbmodem*` and kill the stale Python holding the port |
+| `--screen usage:codex` captures another provider | That slot is not fresh (`slot 1` → `err slot not fresh`) | Wait for the daemon to send that provider's payload, or check the provider rows above |
 | `screenshot` → nothing on a C6 board | `LV_USE_SNAPSHOT` is off without PSRAM | Use the simulator or eyeball on hardware |
 
 ## Flashing

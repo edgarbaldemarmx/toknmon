@@ -13,7 +13,7 @@ inherited from Clawdmeter, poll Claude only and are untested with ToknMon.
 | What | Why | How to get it |
 | --- | --- | --- |
 | macOS 13 (Ventura) or newer with Bluetooth | CoreBluetooth via `bleak`; launchd user agent | — |
-| Python 3.10 or newer (3.13 is what the project is developed on) | the daemon and its tests | `brew install python` or python.org; the installer prefers `python3.13` → `python3.10`, then Homebrew's `python3` |
+| Python 3.10 or newer (3.13 is what the project is developed on) | the daemon and its tests | `brew install python` or python.org; the installer picks the first of `python3.13` … `python3.10`, then `python3`, found on `PATH` |
 | Claude Code logged in | the Claude provider reads the OAuth token from the Keychain (service `Claude Code-credentials`) | `claude` → `/login` |
 | Codex CLI with at least one session under `~/.codex/sessions` (optional) | the Codex provider reads local session logs; no network, no credentials | run `codex` once |
 | Kimi Code CLI logged in once (optional) | `~/.kimi-code/credentials/*.json`; the daemon refreshes the token itself afterwards | run `kimi` and log in |
@@ -71,17 +71,21 @@ permission-priming run):
 ./install-mac.sh --yes --providers auto --device-name "<Your name>" --no-prime
 ```
 
-What the installer does, in order:
+What the installer does, in order (the banners it prints):
 
-1. Picks a Python interpreter (3.10+), creates `daemon/.venv` and installs
+1. `[1/6] Checking prerequisites`: `curl`, a Python interpreter (3.10+), and
+   the Claude Code OAuth token in the Keychain. The token check is silent
+   when the token exists and prints a warning when it is missing.
+2. `[2/6] Creating Python virtualenv`: creates `daemon/.venv` and installs
    `daemon/requirements-macos.txt` (`bleak`, `httpx`, `pillow`, `pytest`).
-2. Migrates a Clawdmeter-era setup if one exists: copies
-   `~/.config/claude-usage-monitor/{config,ble-address}` to
-   `~/.config/toknmon/` (only when the new files are absent; nothing is
-   deleted), stops the legacy `com.user.claude-usage-daemon` agent and moves
-   its plist to `~/.config/toknmon/legacy/`.
-3. Walks the configuration prompts (each one is skipped with `--yes`, which
-   keeps existing values):
+3. `[3/6] Rendering launchd plist`: renders `daemon/com.toknmon.daemon.plist`
+   into `~/Library/LaunchAgents/com.toknmon.daemon.plist` (not loaded yet).
+4. `[4/6] Configuring the daemon`: first migrates a Clawdmeter-era setup if
+   one exists (copies `~/.config/claude-usage-monitor/{config,ble-address}`
+   to `~/.config/toknmon/` only when the new files are absent; nothing is
+   deleted; the `Migrated …` lines appear only when a legacy install is
+   present), then walks the configuration prompts (each one is skipped with
+   `--yes`, which keeps existing values):
    - **Claude config dirs**: if several `~/.claude*` directories exist you can
      have the daemon poll all of them and show the plan in active use
      (`config_dirs`).
@@ -99,14 +103,18 @@ What the installer does, in order:
      value `flash-mac.sh` saved).
    - **Clock** (`off|auto|12|24`), **chime** on session reset and **beep** on
      attention alerts.
-4. Checks the Claude Code OAuth token in the Keychain and warns if it is
-   missing.
-5. Offers to install `blueutil` through Homebrew for stale-bond recovery.
-6. Renders `daemon/com.toknmon.daemon.plist` into
-   `~/Library/LaunchAgents/com.toknmon.daemon.plist` and loads it.
-7. Runs the daemon once in the foreground so macOS shows its **Bluetooth
-   permission** prompt for the right process (skip with `--no-prime`; with
-   `--yes` the run is bounded to a few seconds). Accept the prompt.
+5. `[5/6] Bluetooth permission check`: runs the daemon once in the foreground
+   so macOS shows its **Bluetooth permission** prompt for the right process
+   (skip with `--no-prime`, then run the printed command once yourself; with
+   `--yes` the run is bounded to a few seconds). Accept the prompt. If
+   `blueutil` is installed, it is primed the same way (bounded to 20 s) so
+   stale-bond recovery can use it.
+6. `[6/6] Loading launchd service`: retires the legacy
+   `com.user.claude-usage-daemon` agent if present (stops it and moves its
+   plist to `~/.config/toknmon/legacy/`), then loads the agent with
+   `launchctl bootstrap gui/$(id -u) <plist>` (after a `bootout` of any
+   previous copy). On a system that refuses `bootstrap` the script falls back
+   to `launchctl load -w` and says so.
 
 Options (`./install-mac.sh --help`):
 

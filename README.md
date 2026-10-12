@@ -99,6 +99,8 @@ PlatformIO env; shared code never changes. See
   creates its own virtual environment.
 - [PlatformIO CLI](https://docs.platformio.org/en/latest/core/installation/index.html)
   to build and flash: `brew install platformio` or `pip install platformio`.
+  A pip/installer-script install puts `pio` at `~/.platformio/penv/bin/pio`:
+  add that to `PATH`, or let the scripts find it there.
 - A USB-C **data** cable.
 - Optional: `blueutil` (`brew install blueutil`) for automatic stale-bond
   repair; Node 18+ and ImageMagick (`brew install node imagemagick`) only if
@@ -142,8 +144,9 @@ PlatformIO env; shared code never changes. See
    `./flash-mac.sh --rename "<New name>"`. Details: [`docs/flashing.md`](docs/flashing.md).
 
 3. **Pair** the board: **System Settings → Bluetooth → Connect** next to the
-   name you chose. (After a rename, unpair and pair again: macOS caches the
-   name with the bond.)
+   name you chose. While unpaired the board stays on the splash animation.
+   (After a rename, unpair and pair again: macOS caches the name with the
+   bond.)
 
 4. **Install the daemon**
 
@@ -154,7 +157,8 @@ PlatformIO env; shared code never changes. See
 
    It creates `daemon/.venv`, writes `~/.config/toknmon/config`, installs the
    launchd agent `com.toknmon.daemon` and runs the daemon once so macOS asks
-   for Bluetooth permission (accept it). Logs go to
+   for Bluetooth permission (accept it) unless you pass `--no-prime`, in
+   which case run the printed command once manually. Logs go to
    `~/Library/Logs/toknmon.{out,err}.log`. Upgrading from Clawdmeter is
    automatic: the legacy agent is retired and the old config copied.
    Details: [`docs/install-macos.md`](docs/install-macos.md).
@@ -269,8 +273,9 @@ splash next|prev   swipe up|down|left|right   parade on|off
 name [text]   screenshot   buzz
 ```
 
-`./screenshot.sh out.png [port] [--screen usage|splash:codex]` captures a
-480×480 PNG, switching screens first if asked. Full table in
+`./screenshot.sh out.png [port] [--screen usage|usage:<provider>|splash:<provider>]`
+captures a 480×480 PNG, switching screens (and provider slot) first if asked,
+and retries the transfer up to 3 times when BLE traffic stalls it. Full table in
 [`docs/controls.md`](docs/controls.md#serial-qa-commands).
 
 ## Troubleshooting

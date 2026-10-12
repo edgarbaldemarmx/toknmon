@@ -68,11 +68,14 @@ if [ -n "$RENAME" ] && [ -n "$BOARD" ]; then
 fi
 
 if [ -z "$RENAME" ] && [ -z "$BOARD" ]; then
-    echo "Error: board env name is required."
+    # No arguments reads as help: usage, the board list, then a one-line hint.
     usage
-    echo "Available boards:"
+    echo ""
+    echo "Available boards (PlatformIO env names):"
     grep -E '^\[env:' "$SCRIPT_DIR/firmware/platformio.ini" | sed 's/\[env:/  /;s/\]//'
-    exit 1
+    echo ""
+    echo "Hint: pass a board env name, e.g. $0 waveshare_amoled_216 --name \"Desk\""
+    exit 2
 fi
 
 if [ -z "$PORT" ]; then
