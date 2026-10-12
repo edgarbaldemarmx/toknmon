@@ -33,7 +33,6 @@ exposure before redistributing this repository or firmware built from it.**
 | Tiempos Text (generated LVGL bitmap fonts) | `firmware/src/font_tiempos_*.c`, `assets/TiemposText-400-Regular.otf` | Klim Type Foundry, licensed to Anthropic |
 | Styrene B (generated LVGL bitmap fonts) | `firmware/src/font_styrene_*.c`, `assets/StyreneB-Regular.otf` | Commercial Type, licensed to Anthropic |
 | Claude Code logo | `assets/Claude Code Logo.png`, `firmware/src/logo.h` | Anthropic |
-| Clawd GIFs used by the upstream README | `assets/readme/*.gif` | Anthropic |
 
 The source GIF/Lottie files for the Clawd animations are **not** committed;
 `tools/fetch_official_clawd.sh` downloads them on demand from claude.ai into a
