@@ -33,7 +33,7 @@ New art; Linux/Windows daemons; Kimi monthly limits.
 
 ## Tasks
 - [x] T1 — Daemon: Kimi refresh (evidence-based endpoint) + Codex key omission + tests. Route: delegated writer A (mapping + writer triggers: >5 lookups in the Kimi bundle, 10 files). Evidence below; commit pending (parent).
-- [ ] T2 — Firmware: provider palettes + dot-grid Codex screen + has_* flags + sim scenario; autoshots. Route: delegated writer B.
+- [x] T2 — Firmware: provider palettes + dot-grid Codex screen + has_* flags + sim scenario; autoshots. Route: delegated writer B (mapping + writer triggers: ui.cpp 1.2k lines, 5 files). Done, uncommitted; evidence below.
 - [ ] T3 — Hardware: flash, restart daemon, screenshots of Codex dot screen and Kimi screen with a refreshed token; commit. Route: parent + verification.
 
 ## Verification
@@ -42,6 +42,32 @@ New art; Linux/Windows daemons; Kimi monthly limits.
 - Live: `launchctl kickstart -k gui/$(id -u)/com.user.claude-usage-daemon` → log shows `Sending[kimi]` with `ok:true` after a refresh; `screenshot.sh --screen usage` + `slot 1`/`slot 2`.
 
 ## Verification evidence
+
+### Firmware evidence (T2)
+Changes: `data.h` (`has_session`/`has_weekly`), `main.cpp` (flags from key presence + transitional
+Codex `s:0,sr:0` → no window), `theme.h` (`ProviderTheme` + `provider_theme()`; Codex warn `#C9D42B`,
+Kimi warn `#8B5CF6`, danger `#E5484D`), `ui.cpp` (`pct_color(pct, provider)`, status line and bars in
+the provider palette, `LAYOUT_DOTS` for Codex, `layout_for()` picks BARS/DENSE/DOTS),
+`sim/scenario.jsonl` (Codex weekly-only line + Codex-with-5h line, 12 s each).
+- Dot grid is one `lv_canvas` over a PSRAM buffer (`heap_caps_malloc`, 254×254×2 at 480 px), drawn
+  row by row with `lv_draw_rect` radius-circle. The first attempt (100 `lv_obj` circles) segfaulted
+  in `lv_draw_add_task`: the builtin LVGL pool is the 64 KB default on every env (no `LV_MEM_SIZE`
+  override), and the draw tasks of 100 objects exhausted it. Canvas gated on `BOARD_HAS_PSRAM`
+  (existing pattern); C6 keeps the bar layout for Codex.
+- Geometry at 480: percentage row 100-151, grid pitch 26 / dot 20 (254 px) without the 5h row,
+  pitch 23 / dot 17 with it; 5h row sits at 400-421, status line starts at 431.
+- `pio run -d firmware -e sim`: SUCCESS. Headless autoshots (temporary `SCREEN_USAGE` boot, reverted;
+  `git diff --stat firmware/src/main.cpp` = 12 insertions, parse block only):
+  `<scratchpad>/h5/codex-dots.png` (54 %, no 5h row), `codex-5h.png` (40 % + "5h - 12% - Resets in 4h 0m"
+  bar), `codex-legacy.png` (`s:0,sr:0` → no row), `kimi.png` (63 % violet / 9 % blue, blue status line),
+  `claude3.png` (3 bars, unchanged colors).
+- `pio run -d firmware -e waveshare_amoled_216`: SUCCESS — RAM 33.9 % (110984 B), Flash 65.7 % (2194463 B).
+- `grep -rn "ifdef BOARD_" firmware/src/*.cpp firmware/src/*.h`: only `BOARD_HAS_PSRAM` (splash.cpp:407,
+  main.cpp:33, ui.cpp:297, ui.cpp:928).
+- Hardware (board re-enumerated as `/dev/cu.usbmodem101`): flashed with `--name "ToknMon Desk One"`;
+  live daemon data arrived before the first poll. `hw-codex.png` (91 % weekly, dot grid, no 5h row),
+  `hw-kimi.png` (0 % / 0 %, blue title + status), `hw-claude.png` (15/91/18 %, terra-cotta). Board left on
+  `screen usage`.
 
 ### Daemon evidence (T1)
 Kimi refresh endpoint, read out of the CLI bundle (`~/.kimi-code/bin/kimi` v2.1.1 is a

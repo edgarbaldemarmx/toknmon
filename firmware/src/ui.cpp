@@ -2,6 +2,7 @@
 #include "splash.h"
 #include <lvgl.h>
 #include <time.h>
+#include <esp_heap_caps.h>
 #include "logo.h"
 #include "clawd_still.h"
 #include "icons.h"
@@ -283,7 +284,34 @@ static lv_obj_t* lbl_third_reset;
 static lv_obj_t* panel_session = nullptr;
 static lv_obj_t* panel_weekly = nullptr;
 static lv_obj_t* panel_third = nullptr;
-static bool      layout_dense = false;   // current panel layout; see apply_usage_layout
+// Usage layouts. BARS is the historical two-panel view, DENSE stacks three
+// panels when the visible slot carries a third bar (Claude only), DOTS is
+// the Codex view: a 10×10 dot grid for the weekly window plus an optional
+// compact 5h bar. See apply_usage_layout().
+enum usage_layout_t { LAYOUT_BARS, LAYOUT_DENSE, LAYOUT_DOTS };
+static usage_layout_t layout_mode = LAYOUT_BARS;
+// Dot grid (LAYOUT_DOTS). The 10×10 dots are drawn into one canvas whose
+// pixel buffer lives in PSRAM (100 separate objects would overflow the
+// 64 KB LVGL pool through their draw tasks alone). The C6 boards have no
+// PSRAM to spare for the buffer, so there the Codex slot keeps the bar layout.
+#ifdef BOARD_HAS_PSRAM
+static const bool DOTS_AVAILABLE = true;
+#else
+static const bool DOTS_AVAILABLE = false;
+#endif
+#define DOT_COUNT 100
+#define DOT_COLS  10
+static lv_obj_t* dots_group = nullptr;        // transparent container for the whole dots view
+static lv_obj_t* dots_canvas = nullptr;       // the grid itself
+static uint16_t* dots_buf = nullptr;          // RGB565 pixels, sized for the largest grid
+static int       dots_pitch = 0, dots_dia = 0, dots_grid = 0;   // current grid geometry (px)
+static int       dots_filled = -1;            // dots currently drawn in the accent color
+static lv_obj_t* lbl_dots_pct;                // big weekly percentage
+static lv_obj_t* lbl_dots_pill;               // "Weekly" pill
+static lv_obj_t* lbl_dots_reset;              // "Resets in …" for the weekly window
+static lv_obj_t* bar_dots_session;            // compact 5h bar under the grid
+static lv_obj_t* lbl_dots_session;            // "5h - 12% - Resets in …" beside the bar
+static bool      dots_with_session = false;   // geometry currently laid out for the 5h row
 // Enterprise-only widgets inside panel_session
 static lv_obj_t* lbl_session_pct_sym = nullptr;  // "%" in smaller font
 static lv_obj_t* lbl_spending_desc = nullptr;     // "of your monthly budget"
@@ -341,11 +369,7 @@ static int next_fresh_slot(int from) {
 }
 
 static lv_color_t provider_color(int i) {
-    switch (i) {
-    case PROVIDER_CODEX: return THEME_CODEX;
-    case PROVIDER_KIMI:  return THEME_KIMI;
-    default:             return THEME_CLAUDE;
-    }
+    return provider_theme(i).accent;
 }
 
 // ---- Shared ----
@@ -408,10 +432,12 @@ static const char* const anim_messages[] = {
 };
 #define ANIM_MSG_COUNT (sizeof(anim_messages) / sizeof(anim_messages[0]))
 
-static lv_color_t pct_color(float pct) {
-    if (pct >= 80.0f) return COL_RED;
-    if (pct >= 50.0f) return COL_AMBER;
-    return COL_GREEN;
+// Bar fill tier for a percentage, in the given provider's palette.
+static lv_color_t pct_color(float pct, int provider) {
+    const ProviderTheme th = provider_theme(provider);
+    if (pct >= 80.0f) return th.bar_danger;
+    if (pct >= 50.0f) return th.bar_warn;
+    return th.bar_ok;
 }
 
 static void format_reset_time(int mins, char* buf, size_t len) {
@@ -430,7 +456,10 @@ static void format_reset_time(int mins, char* buf, size_t len) {
 static void global_click_cb(lv_event_t* e);
 static void usage_tap_cb(lv_event_t* e);
 static void usage_long_press_cb(lv_event_t* e);
-static void apply_usage_layout(bool dense);
+static void apply_usage_layout(usage_layout_t mode);
+static void layout_dots(bool with_session);
+static void dots_geometry(bool with_session, int* pitch, int* dia, int* grid);
+static void style_pill_geometry(lv_obj_t* pill, const lv_font_t* font, int16_t px, int16_t py);
 static void carousel_timer_cb(lv_timer_t* t);
 
 static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
@@ -590,6 +619,159 @@ static void build_idle_group(lv_obj_t* parent) {
     lv_obj_add_flag(idle_group, LV_OBJ_FLAG_HIDDEN);  // update_view_state decides
 }
 
+// Codex dot grid (LAYOUT_DOTS). Everything lives in one transparent container
+// so the layout switch is a single show/hide. Objects are created once here;
+// layout_dots() places them and show_slot() recolors the dots.
+static void build_dots_group(lv_obj_t* parent) {
+    dots_group = lv_obj_create(parent);
+    lv_obj_set_size(dots_group, L.scr_w, L.scr_h);
+    lv_obj_set_pos(dots_group, 0, 0);
+    lv_obj_set_style_bg_opa(dots_group, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(dots_group, 0, 0);
+    lv_obj_set_style_pad_all(dots_group, 0, 0);
+    lv_obj_clear_flag(dots_group, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(dots_group, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    lbl_dots_pct = lv_label_create(dots_group);
+    lv_label_set_text(lbl_dots_pct, "---%");
+    lv_obj_set_style_text_font(lbl_dots_pct, L.pct_font, 0);
+    lv_obj_set_style_text_color(lbl_dots_pct, COL_TEXT, 0);
+
+    lbl_dots_pill = make_pill(dots_group, "Weekly");
+    style_pill_geometry(lbl_dots_pill, L.dense_pill_font, L.dense_pill_pad_x, L.dense_pill_pad_y);
+
+    lbl_dots_reset = lv_label_create(dots_group);
+    lv_label_set_text(lbl_dots_reset, "---");
+    lv_obj_set_style_text_font(lbl_dots_reset, L.dense_reset_font, 0);
+    lv_obj_set_style_text_color(lbl_dots_reset, COL_DIM, 0);
+
+    // The buffer is sized for the largest grid (no 5h row) and reused, with a
+    // smaller canvas size, when the row is present.
+    int pitch, dia, grid;
+    dots_geometry(false, &pitch, &dia, &grid);
+    dots_buf = (uint16_t*)heap_caps_malloc((size_t)grid * grid * 2, MALLOC_CAP_SPIRAM);
+    if (dots_buf) {
+        dots_canvas = lv_canvas_create(dots_group);
+        lv_canvas_set_buffer(dots_canvas, dots_buf, grid, grid, LV_COLOR_FORMAT_RGB565);
+        lv_obj_clear_flag(dots_canvas, LV_OBJ_FLAG_CLICKABLE);   // taps go to the carousel
+    }
+
+    bar_dots_session = make_bar(dots_group, 0, 0, 10, L.dense_bar_h);
+    lbl_dots_session = lv_label_create(dots_group);
+    lv_label_set_text(lbl_dots_session, "");
+    lv_obj_set_style_text_font(lbl_dots_session, L.dense_reset_font, 0);
+    lv_obj_set_style_text_color(lbl_dots_session, COL_DIM, 0);
+
+    layout_dots(false);
+    lv_obj_add_flag(dots_group, LV_OBJ_FLAG_HIDDEN);   // apply_usage_layout decides
+}
+
+// Vertical budget of the dots view: from the top of the percentage row to
+// just above the status line (which is bottom-aligned at L.anim_y).
+static int dots_row_top(void)  { return L.content_y; }
+static int dots_grid_top(void) { return L.content_y + lv_font_get_line_height(L.pct_font) + L.usage_panel_gap / 2; }
+static int dots_bottom(void)   { return L.scr_h + L.anim_y - lv_font_get_line_height(L.anim_font) - L.panel_pad_y; }
+
+// Grid geometry for the available height: the largest 10×10 square that fits
+// between the percentage row and the status line, less the compact 5h row
+// when the slot has a session window. Dots are 3/4 of the pitch.
+static void dots_geometry(bool with_session, int* pitch, int* dia, int* grid) {
+    const int reset_h = lv_font_get_line_height(L.dense_reset_font);
+    const int sess_h  = with_session ? (reset_h + L.usage_panel_gap / 2) : 0;
+    int avail = dots_bottom() - dots_grid_top() - sess_h;
+    if (avail > L.content_w) avail = L.content_w;
+    if (avail < DOT_COLS) avail = DOT_COLS;
+    *pitch = avail / DOT_COLS;
+    *dia   = (*pitch * 3 + 2) / 4;
+    *grid  = (DOT_COLS - 1) * *pitch + *dia;
+}
+
+// Draw the grid: `filled` dots in the accent, the rest in dot_empty, left to
+// right then top to bottom. Drawn one row per layer so the transient draw
+// tasks stay small on the LVGL pool.
+static void draw_dots(int filled, const ProviderTheme& th) {
+    if (!dots_canvas) return;
+    lv_canvas_fill_bg(dots_canvas, COL_BG, LV_OPA_COVER);
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.bg_opa = LV_OPA_COVER;
+    dsc.radius = LV_RADIUS_CIRCLE;
+    dsc.border_width = 0;
+    for (int row = 0; row < DOT_COLS; row++) {
+        lv_layer_t layer;
+        lv_canvas_init_layer(dots_canvas, &layer);
+        for (int col = 0; col < DOT_COLS; col++) {
+            const int i = row * DOT_COLS + col;
+            dsc.bg_color = (i < filled) ? th.accent : th.dot_empty;
+            lv_area_t a;
+            a.x1 = col * dots_pitch;
+            a.y1 = row * dots_pitch;
+            a.x2 = a.x1 + dots_dia - 1;
+            a.y2 = a.y1 + dots_dia - 1;
+            lv_draw_rect(&layer, &dsc, &a);
+        }
+        lv_canvas_finish_layer(dots_canvas, &layer);
+    }
+    dots_filled = filled;
+}
+
+// The compact 5h bar sits right of its label and takes the rest of the row,
+// so it is re-placed whenever the label text changes.
+static void place_dots_session_bar(void) {
+    const int reset_h = lv_font_get_line_height(L.dense_reset_font);
+    const int sess_y  = dots_bottom() - reset_h;
+    lv_obj_update_layout(lbl_dots_session);
+    const int gap   = L.panel_pad_x;
+    int bar_x = L.margin + lv_obj_get_width(lbl_dots_session) + gap;
+    int bar_w = L.margin + L.content_w - bar_x;
+    if (bar_w < L.content_w / 5) {   // label too long for the row: keep a minimum bar
+        bar_w = L.content_w / 5;
+        bar_x = L.margin + L.content_w - bar_w;
+    }
+    lv_obj_set_size(bar_dots_session, bar_w, L.dense_bar_h);
+    lv_obj_set_pos(bar_dots_session, bar_x, sess_y + (reset_h - L.dense_bar_h) / 2);
+}
+
+// Place the dots view. Top row: big weekly percentage left, "Weekly" pill +
+// reset time right. Grid centered in the remaining height; 5h row at the bottom.
+static void layout_dots(bool with_session) {
+    if (!dots_group) return;
+    dots_with_session = with_session;
+    const int row_gap = L.usage_panel_gap / 2;
+    const int pill_h  = lv_font_get_line_height(L.dense_pill_font) + 2 * L.dense_pill_pad_y;
+    const int reset_h = lv_font_get_line_height(L.dense_reset_font);
+    const int bottom  = dots_bottom();
+    const int grid_top = dots_grid_top();
+
+    lv_obj_set_pos(lbl_dots_pct, L.margin, dots_row_top());
+    lv_obj_align(lbl_dots_pill, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top());
+    lv_obj_align(lbl_dots_reset, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top() + pill_h + 4);
+
+    const int sess_h = with_session ? (reset_h + row_gap) : 0;
+    const int avail  = bottom - grid_top - sess_h;
+    dots_geometry(with_session, &dots_pitch, &dots_dia, &dots_grid);
+    if (dots_canvas) {
+        // Same buffer, possibly a smaller canvas: the buffer was sized for
+        // the no-session grid, which is the larger of the two.
+        lv_canvas_set_buffer(dots_canvas, dots_buf, dots_grid, dots_grid, LV_COLOR_FORMAT_RGB565);
+        lv_obj_set_pos(dots_canvas, L.margin + (L.content_w - dots_grid) / 2,
+                       grid_top + (avail - dots_grid) / 2);
+        dots_filled = -1;   // geometry changed → redraw on the next render
+    }
+
+    // 5h row: label left, bar filling the rest of the row; see
+    // place_dots_session_bar() for the bar, which follows the label width.
+    lv_obj_set_pos(lbl_dots_session, L.margin, bottom - reset_h);
+    place_dots_session_bar();
+    if (with_session) {
+        lv_obj_clear_flag(bar_dots_session, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_dots_session, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(bar_dots_session, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(lbl_dots_session, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void init_usage_screen(lv_obj_t* scr) {
     usage_container = lv_obj_create(scr);
     lv_obj_set_size(usage_container, L.scr_w, L.scr_h);
@@ -677,6 +859,8 @@ static void init_usage_screen(lv_obj_t* scr) {
                      &bar_third, &lbl_third_reset);
     lv_obj_add_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
 
+    if (DOTS_AVAILABLE) build_dots_group(usage_group);
+
     build_pair_group(usage_container);
     build_idle_group(usage_container);
 
@@ -762,7 +946,7 @@ void ui_init(void) {
     }
 
     init_alert();
-    apply_usage_layout(false);
+    apply_usage_layout(LAYOUT_BARS);
     carousel_timer = lv_timer_create(carousel_timer_cb, CAROUSEL_MS, NULL);
 }
 
@@ -811,8 +995,19 @@ static void style_pill_geometry(lv_obj_t* pill, const lv_font_t* font, int16_t p
     lv_obj_set_style_pad_bottom(pill, py, 0);
 }
 
-static void apply_usage_layout(bool dense) {
-    layout_dense = dense;
+static void apply_usage_layout(usage_layout_t mode) {
+    layout_mode = mode;
+    const bool dense = (mode == LAYOUT_DENSE);
+    const bool dots  = (mode == LAYOUT_DOTS);
+    lv_obj_t* bar_panels[2] = { panel_session, panel_weekly };
+    for (lv_obj_t* p : bar_panels) {
+        if (dots) lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
+        else      lv_obj_clear_flag(p, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (dots_group) {
+        if (dots) lv_obj_clear_flag(dots_group, LV_OBJ_FLAG_HIDDEN);
+        else      lv_obj_add_flag(dots_group, LV_OBJ_FLAG_HIDDEN);
+    }
     const int16_t ph      = dense ? L.dense_panel_h   : L.usage_panel_h;
     const int16_t gap     = dense ? L.dense_panel_gap : L.usage_panel_gap;
     const int16_t bar_y   = dense ? L.dense_bar_y     : L.usage_bar_y;
@@ -851,8 +1046,45 @@ static void apply_usage_layout(bool dense) {
     if (dense) lv_obj_clear_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
     else       lv_obj_add_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
     // The mascot's full-size lurk peeks in over the lower panel area, which
-    // the dense layout fills with the third panel: pause trips while dense.
-    splash_mascot_set_trips(!dense);
+    // the dense layout fills with the third panel and the dots layout with
+    // the grid: pause trips on both.
+    splash_mascot_set_trips(mode == LAYOUT_BARS);
+}
+
+// Which layout a slot's payload wants. Dense is Claude-only (the third,
+// model-scoped bar); dots is Codex-only and needs the dot objects.
+static usage_layout_t layout_for(int idx, const UsageData* data) {
+    if (idx == PROVIDER_CODEX && DOTS_AVAILABLE && dots_group) return LAYOUT_DOTS;
+    if (data->has_third) return LAYOUT_DENSE;
+    return LAYOUT_BARS;
+}
+
+// Render a Codex payload into the dots view: weekly % as filled dots (one
+// per percent, left→right then top→bottom), plus the compact 5h row when
+// the plan has a session window.
+static void render_dots(int idx, const UsageData* data) {
+    const ProviderTheme th = provider_theme(idx);
+    if (dots_with_session != data->has_session) layout_dots(data->has_session);
+
+    int w_pct = (int)(data->weekly_pct + 0.5f);
+    if (w_pct < 0) w_pct = 0;
+    if (w_pct > 100) w_pct = 100;
+    lv_label_set_text_fmt(lbl_dots_pct, "%d%%", w_pct);
+    char buf[48];
+    format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
+    lv_label_set_text(lbl_dots_reset, buf);
+    lv_obj_align(lbl_dots_pill, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top());
+    if (w_pct != dots_filled) draw_dots(w_pct, th);
+
+    if (data->has_session) {
+        int s_pct = (int)(data->session_pct + 0.5f);
+        char when[32];
+        format_reset_time(data->session_reset_mins, when, sizeof(when));
+        lv_label_set_text_fmt(lbl_dots_session, "5h - %d%% - %s", s_pct, when);
+        place_dots_session_bar();
+        lv_bar_set_value(bar_dots_session, s_pct, LV_ANIM_ON);
+        lv_obj_set_style_bg_color(bar_dots_session, pct_color(data->session_pct, idx), LV_PART_INDICATOR);
+    }
 }
 
 // ---- Carousel ----
@@ -942,7 +1174,17 @@ static void show_slot(int idx) {
     refresh_title();
     splash_mascot_set_provider(idx);   // corner mascot follows the visible provider
 
-    if (layout_dense != data->has_third) apply_usage_layout(data->has_third);
+    // Everything colored on this screen follows the provider's palette.
+    const ProviderTheme th = provider_theme(idx);
+    lv_obj_set_style_text_color(lbl_anim, th.status_text, 0);
+
+    const usage_layout_t mode = layout_for(idx, data);
+    if (layout_mode != mode) apply_usage_layout(mode);
+    if (mode == LAYOUT_DOTS) {
+        render_dots(idx, data);
+        return;
+    }
+    const bool layout_dense = (mode == LAYOUT_DENSE);
 
     int s_pct = (int)(data->session_pct + 0.5f);
 
@@ -968,14 +1210,15 @@ static void show_slot(int idx) {
 
     char buf[48];
 
-    // Pace vars used in both enterprise blocks below
+    // Pace vars used in both enterprise blocks below. Enterprise accounts are
+    // Claude-only, so the recolor hex strings match the Claude tiers.
     const char* pace_text = "Under pace";
-    lv_color_t  pace_color = COL_GREEN;
+    lv_color_t  pace_color = th.bar_ok;
     const char* pace_hex   = "788c5d";   // matches THEME_GREEN
     if (data->session_pct > (float)data->time_pct + 15.0f) {
-        pace_text = "Over pace";  pace_color = COL_RED;   pace_hex = "c0392b";
+        pace_text = "Over pace";  pace_color = th.bar_danger; pace_hex = "c0392b";
     } else if (data->session_pct > (float)data->time_pct - 15.0f) {
-        pace_text = "On pace";    pace_color = COL_AMBER; pace_hex = "d97757";
+        pace_text = "On pace";    pace_color = th.bar_warn;   pace_hex = "d97757";
     }
 
     if (data->enterprise) {
@@ -989,16 +1232,16 @@ static void show_slot(int idx) {
     }
 
     lv_bar_set_value(bar_session, s_pct, LV_ANIM_ON);
-    lv_obj_set_style_bg_color(bar_session, pct_color(data->session_pct), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(bar_session, pct_color(data->session_pct, idx), LV_PART_INDICATOR);
 
     if (data->enterprise) {
         // Period box: time % + dynamic pace color + "Resets <date>" label
         lv_label_set_text(lbl_weekly_label, "Period");
         lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", data->time_pct);
         lv_bar_set_value(bar_weekly, data->time_pct, LV_ANIM_ON);
-        lv_color_t bar_pace = (data->session_pct <= (float)data->time_pct) ? COL_GREEN :
-                              (data->session_pct <= (float)data->time_pct + 15.0f) ? COL_AMBER :
-                              COL_RED;
+        lv_color_t bar_pace = (data->session_pct <= (float)data->time_pct) ? th.bar_ok :
+                              (data->session_pct <= (float)data->time_pct + 15.0f) ? th.bar_warn :
+                              th.bar_danger;
         lv_obj_set_style_bg_color(bar_weekly, bar_pace, LV_PART_INDICATOR);
         snprintf(buf, sizeof(buf), "#%s %s# - #faf9f5 Resets %s#",
                  pace_hex, pace_text, data->reset_date);
@@ -1007,7 +1250,7 @@ static void show_slot(int idx) {
         int w_pct = (int)(data->weekly_pct + 0.5f);
         lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", w_pct);
         lv_bar_set_value(bar_weekly, w_pct, LV_ANIM_ON);
-        lv_obj_set_style_bg_color(bar_weekly, pct_color(data->weekly_pct), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(bar_weekly, pct_color(data->weekly_pct, idx), LV_PART_INDICATOR);
         format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
         lv_label_set_text(lbl_weekly_reset, buf);
     }
@@ -1018,7 +1261,7 @@ static void show_slot(int idx) {
         lv_obj_align(lbl_third_label, LV_ALIGN_TOP_RIGHT, 0, 1);
         lv_label_set_text_fmt(lbl_third_pct, "%d%%", t_pct);
         lv_bar_set_value(bar_third, t_pct, LV_ANIM_ON);
-        lv_obj_set_style_bg_color(bar_third, pct_color(data->third_pct), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(bar_third, pct_color(data->third_pct, idx), LV_PART_INDICATOR);
         format_reset_time(data->third_reset_mins, buf, sizeof(buf));
         lv_label_set_text(lbl_third_reset, buf);
     }

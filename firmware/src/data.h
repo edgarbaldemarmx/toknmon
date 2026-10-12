@@ -29,6 +29,12 @@ static inline const char* provider_short(int i) {
 
 struct UsageData {
     uint8_t provider;        // PROVIDER_* slot this payload belongs to
+    // Window presence: the payload carried the "s" / "w" key. A missing key
+    // means the plan has no such window (e.g. weekly-only Codex plans), so
+    // the UI omits that bar instead of drawing an empty one. Claude payloads
+    // always carry both.
+    bool has_session;
+    bool has_weekly;
     float session_pct;       // utilization 0-100 (5h window Pro/Max; spending % Enterprise)
     int session_reset_mins;  // minutes until reset
     float weekly_pct;        // 7-day utilization (Pro/Max only; 0 for Enterprise)

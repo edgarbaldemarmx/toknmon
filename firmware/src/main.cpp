@@ -135,10 +135,22 @@ static parse_result_t parse_json(const char* json, UsageData* slots_out, int* ou
     UsageData* out = &slots_out[idx];
     out->provider = (uint8_t)idx;
 
+    // Window presence flags (see data.h): a key the daemon omitted means the
+    // plan has no such window.
+    out->has_session = !doc["s"].isNull();
+    out->has_weekly  = !doc["w"].isNull();
     out->session_pct = doc["s"] | 0.0f;
     out->session_reset_mins = doc["sr"] | -1;
     out->weekly_pct = doc["w"] | 0.0f;
     out->weekly_reset_mins = doc["wr"] | -1;
+    // Transitional rule: daemons older than H5 send "s":0,"sr":0 for Codex
+    // plans that report no 5h window instead of omitting the keys. Treat that
+    // exact pair as "no window" on the Codex slot only; drop this once every
+    // deployed daemon omits the keys.
+    if (idx == PROVIDER_CODEX && out->has_session &&
+        out->session_pct == 0.0f && out->session_reset_mins == 0) {
+        out->has_session = false;
+    }
     // Optional third bar: a model-scoped weekly limit ("f"/"fr"), labelled by
     // "fl" when the daemon sends one, "Fable" otherwise.
     out->has_third = !doc["f"].isNull();
