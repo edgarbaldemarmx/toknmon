@@ -34,8 +34,8 @@ README controls table; CLAUDE.md gesture paragraph.
 
 ## Tasks
 - [ ] T1 — Art: four scenes by the Kimi agent; converter clean; `--verify` strips reviewed. Route: the multiplexer `kimi` agent `animator`.
-- [ ] T2 — Firmware: gesture navigation, tap-advances-on-splash, scene wiring, serial QA. Route: delegated writer.
-- [ ] T3 — Verify: sim autoshots of each scene full-size; hardware flash + `screen splash codex` + `splash next` ×N screenshots; swipe tested by the user on the device. Commit.
+- [x] T2 — Firmware: gesture navigation, tap-advances-on-splash, scene wiring, serial QA. Route: delegated writer (one bounded writer: `splash.{cpp,h}`, `ui.{cpp,h}`, `main.cpp`, README, CLAUDE.md). Uncommitted; see evidence below.
+- [ ] T3 — Verify: sim autoshots of each scene full-size (pending the art); hardware flash + `screen splash codex` + `splash next` ×N screenshots (done, firmware part); swipe tested by the user on the device (pending). Commit (pending).
 
 ## Verification
 - `node --test tools/test/`; `node tools/convert_grid_animations.js` idempotent
@@ -43,7 +43,12 @@ README controls table; CLAUDE.md gesture paragraph.
 - `pio run -d firmware -e waveshare_amoled_216` + flash + screenshots
 
 ## Verification evidence
-(pending)
+### T2 firmware (2026-10-12, writer; scenes not yet in the catalog — `grep -c "scene\." firmware/src/custom_animations.h` → 0)
+- `pio run -d firmware -e sim`: SUCCESS. `pio run -d firmware -e waveshare_amoled_216`: SUCCESS. `grep -rn "ifdef BOARD_" firmware/src/*.cpp firmware/src/*.h`: only the pre-existing `BOARD_HAS_PSRAM` guards.
+- Sim autoshots (scratchpad `h7/`): `SIM_SPLASH_PROVIDER=codex` at 2 s = `codex.idle` with the Codex label, at 9 s = `codex.dots` (set advanced on completion); default boot splash at 3 s = Claude (magnifier). No regression.
+- Hardware (AMOLED 2.16, `/dev/cu.usbmodem101`, flashed as "ToknMon Desk One"), serial → screenshot: `screen splash codex` → codex.idle (`hw-01`); `splash next` → `splash: -> codex.dots` (`hw-02`); `splash next` → `splash: -> codex.think` (`hw-03`, frame 0 is the shared idle pose, so the still looks like idle; the log names the act); `splash prev` → codex.dots (`hw-04`); `swipe up` → usage view, Codex (`hw-05`); `swipe left` → Kimi (`hw-06`); `swipe right` → Codex (`hw-07`); `swipe down` → default Claude splash (`hw-08`); `swipe left` on the splash → `splash: -> claude.bike` (`hw-09`); `screen usage` → ok.
+- Missing-name skip: `screen splash codex` + `splash next` ×4 steps idle → dots → think → bike → idle, logging `splash: set entry 'codex.scene.wave' not in catalog; skipped` and the same for `codex.scene.rain` once each; `splash prev` from idle logs nothing new and lands on bike.
+- LVGL 9.6.0 (`.pio/libdeps/sim/lvgl/src/indev/lv_indev.c`): a swipe emits `LV_EVENT_GESTURE` (bubbling to the screen object) and still ends with RELEASED → SHORT_CLICKED → CLICKED, so `ui.cpp` guards the tap/long-press handlers with `gesture_seen` (set in the gesture handler, cleared on the indev `LV_EVENT_PRESSED`). Real finger taps/swipes on the panel are not covered by the serial path: the user verifies them on the device.
 
 ## Next step
-Start the Kimi agent (art) and the firmware writer in parallel.
+Wait for T1 (art) to land in `custom_animations.h`, rebuild + autoshot each scene (`SIM_SPLASH_PROVIDER=codex|kimi`), flash, user swipe test on the device, then commit T2 + T3.

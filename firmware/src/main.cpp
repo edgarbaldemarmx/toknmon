@@ -295,7 +295,9 @@ static void set_device_name(char* text) {
 // Hands-free QA: `screen usage|splash [claude|codex|kimi]` (a provider name
 // opens mascot mode for it; bare `splash` is the default Claude splash),
 // `parade on|off`, `next` (page the carousel like a tap), `slot <0-2>` (show
-// that provider slot if fresh). Reply `ok` / `err <why>`.
+// that provider slot if fresh), `splash next|prev` (step the splash like a
+// tap / horizontal swipe), `swipe up|down|left|right` (the touch gesture
+// handler). Reply `ok` / `err <why>`.
 static void qa_reply(bool ok, const char* why) {
     if (ok) Serial.println("ok");
     else    Serial.printf("err %s\n", why);
@@ -335,6 +337,23 @@ static void cmd_slot(const char* arg) {
     qa_reply(ui_show_slot((int)idx), "slot not fresh");
 }
 
+static void cmd_splash(const char* arg) {
+    if (ui_get_current_screen() != SCREEN_SPLASH) { qa_reply(false, "splash not on screen"); return; }
+    if (strcmp(arg, "next") == 0)      { splash_next(); qa_reply(true, NULL); }
+    else if (strcmp(arg, "prev") == 0) { splash_prev(); qa_reply(true, NULL); }
+    else                               qa_reply(false, "splash next|prev");
+}
+
+static void cmd_swipe(const char* arg) {
+    lv_dir_t dir;
+    if (strcmp(arg, "up") == 0)         dir = LV_DIR_TOP;
+    else if (strcmp(arg, "down") == 0)  dir = LV_DIR_BOTTOM;
+    else if (strcmp(arg, "left") == 0)  dir = LV_DIR_LEFT;
+    else if (strcmp(arg, "right") == 0) dir = LV_DIR_RIGHT;
+    else { qa_reply(false, "swipe up|down|left|right"); return; }
+    qa_reply(ui_handle_swipe(dir), "nothing to do (alert on screen or single provider)");
+}
+
 static void check_serial_cmd() {
     while (Serial.available()) {
         char c = Serial.read();
@@ -348,6 +367,8 @@ static void check_serial_cmd() {
             else if (strcmp(cmd_buf, "next") == 0) qa_reply(ui_carousel_next(), "need usage view with 2+ fresh slots");
             else if (strncmp(cmd_buf, "slot ", 5) == 0) cmd_slot(cmd_buf + 5);
             else if (strncmp(cmd_buf, "parade ", 7) == 0) cmd_parade(cmd_buf + 7);
+            else if (strncmp(cmd_buf, "splash ", 7) == 0) cmd_splash(cmd_buf + 7);
+            else if (strncmp(cmd_buf, "swipe ", 6) == 0)  cmd_swipe(cmd_buf + 6);
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;

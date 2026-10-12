@@ -131,15 +131,18 @@ static bool     pending_pick = false;   // rotate requested; honor at completion
 // list, and the rate-group pick is a no-op. Claude has no list — selecting
 // it (or -1) restores the default behavior, so the boot path is untouched.
 // The parade cycles providers every PARADE_PROVIDER_MS across the fresh
-// slots the UI handed over, each playing its own set.
-#define SET_MAX 4
+// slots the UI handed over, each playing its own set. The `*.scene.*`
+// entries are the full-screen scenes (H7); a name absent from the catalog is
+// skipped (logged once), so the sets play before and after the art lands.
+#define SET_MAX 6
 static const char* const PROVIDER_SETS[PROVIDER_COUNT][SET_MAX] = {
-    { NULL, NULL, NULL, NULL },                                       // Claude: rate groups
-    { "codex.idle", "codex.dots", "codex.think", "codex.bike" },
-    { "kimi.idle",  "kimi.glow",  "kimi.sleep",  "kimi.bike"  },
+    { NULL, NULL, NULL, NULL, NULL, NULL },                           // Claude: rate groups
+    { "codex.idle", "codex.dots", "codex.think", "codex.bike", "codex.scene.wave",  "codex.scene.rain"  },
+    { "kimi.idle",  "kimi.glow",  "kimi.sleep",  "kimi.bike",  "kimi.scene.night",  "kimi.scene.orbit"  },
 };
 static int      provider_mode = -1;     // -1 = Claude default; else PROVIDER_* with a set
 static uint8_t  set_pos = 0;            // index into PROVIDER_SETS[provider_mode]
+static bool     set_missing_logged[PROVIDER_COUNT][SET_MAX] = {};
 #define PARADE_PROVIDER_MS 20000
 static bool     parade_on = false;
 static bool     parade_fresh[PROVIDER_COUNT] = { false, false, false };
@@ -942,15 +945,22 @@ void splash_mascot_set_trips(bool enabled) {
 
 // Start entry `pos` of the active provider set on the stage (frame 0 drawn
 // now; the direct path defers while hidden). A name missing from the catalog
-// is skipped so a half-compiled set still plays.
-static void set_play(uint8_t pos) {
+// is skipped in the direction of travel (`step` = +1 forward, -1 backward)
+// so a half-compiled set still plays.
+static void set_play(uint8_t pos, int step) {
     if (provider_mode < 0) return;
     for (int tries = 0; tries < SET_MAX; tries++) {
-        const uint8_t p = (uint8_t)((pos + tries) % SET_MAX);
+        const uint8_t p = (uint8_t)((pos + SET_MAX + tries * step) % SET_MAX);
         const char *name = PROVIDER_SETS[provider_mode][p];
         if (!name) continue;
         const int idx = anim_index_by_name(name);
-        if (idx < 0) continue;
+        if (idx < 0) {
+            if (!set_missing_logged[provider_mode][p]) {
+                set_missing_logged[provider_mode][p] = true;
+                Serial.printf("splash: set entry '%s' not in catalog; skipped\n", name);
+            }
+            continue;
+        }
         const splash_anim_def_t *a = anim_at(idx);
         set_pos = p;
         cur_anim = (uint16_t)idx;
@@ -959,8 +969,14 @@ static void set_play(uint8_t pos) {
         last_pick_ms = frame_started_ms;
         anim_reset(a);
         render_frame(compose_stage(a, 0), a->palette);
+        Serial.printf("splash: -> %s\n", a->name);
         return;
     }
+}
+
+// Move `step` entries (+1 / -1) within the active set, skipping gaps.
+static void set_step(int step) {
+    set_play((uint8_t)((set_pos + SET_MAX + step) % SET_MAX), step);
 }
 
 // Next fresh parade slot after `from` in rotation order (wrapping, so a
@@ -1135,7 +1151,7 @@ void splash_tick(void) {
 
     if (next >= a->frame_count) {              // completed the file
         if (provider_mode >= 0) {              // mascot mode: next set entry
-            set_play((uint8_t)((set_pos + 1) % SET_MAX));
+            set_step(+1);
             return;
         }
         if (pending_pick) {
@@ -1175,13 +1191,15 @@ void splash_tick(void) {
     render_frame(compose_stage(a, cur_frame), a->palette);
 }
 
-void splash_next(void) {
+// Step the stage by `step` (+1 / -1): within the set in mascot mode, through
+// the whole catalog on the Claude default.
+static void splash_step(int step) {
     if (anim_count() == 0) return;
     if (provider_mode >= 0) {                  // mascot mode: within the set
-        set_play((uint8_t)((set_pos + 1) % SET_MAX));
+        set_step(step);
         return;
     }
-    cur_anim = (cur_anim + 1) % anim_count();
+    cur_anim = (uint16_t)((cur_anim + anim_count() + step) % anim_count());
     cur_frame = 0;
     frame_started_ms = millis();
     last_pick_ms = frame_started_ms;
@@ -1190,6 +1208,9 @@ void splash_next(void) {
     render_frame(compose_stage(a, 0), a->palette);
     Serial.printf("splash: -> %s\n", a->name);
 }
+
+void splash_next(void) { splash_step(+1); }
+void splash_prev(void) { splash_step(-1); }
 
 void splash_pick_for_current_rate(void) {
     if (anim_count() == 0) return;
@@ -1229,7 +1250,7 @@ void splash_set_provider(int slot) {
         }
     }
     if (!active) return;                       // splash_show() starts playback
-    if (has_set) set_play(0);
+    if (has_set) set_play(0, +1);
     else         splash_pick_for_current_rate();
 }
 
@@ -1257,7 +1278,7 @@ bool splash_is_active(void) { return active; }
 void splash_show(void) {
     // Select the animation; the direct path defers the draw. Mascot mode
     // starts its set at the retained position, the default path picks by rate.
-    if (provider_mode >= 0) set_play(set_pos);
+    if (provider_mode >= 0) set_play(set_pos, +1);
     else                    splash_pick_for_current_rate();
     if (splash_container) lv_obj_clear_flag(splash_container, LV_OBJ_FLAG_HIDDEN);
     active = true;

@@ -284,14 +284,27 @@ idle, glow, sleep, bike): entries play in order (intro → loop for
 is a no-op, and a `styrene_20` label in the provider accent names the
 provider top-center. Claude or `-1` restores the default — the boot path
 never calls it. The UI opens mascot mode on a long-press of the usage view
-(`ui_show_mascot(visible_slot)`); any tap goes back to usage, and
+(`ui_show_mascot(visible_slot)`); a vertical swipe goes back to usage, and
 `ui_show_screen()` resets the provider and stops the parade on every
-non-splash screen. The parade (`splash_parade_start(fresh[])`) rotates the
+non-splash screen. Gestures (H7): one `LV_EVENT_GESTURE` handler on the
+screen object (gestures bubble up from the splash root and the usage
+container) feeds `ui_handle_swipe(dir)` — vertical toggles splash ↔ usage,
+horizontal is next/prev animation (`splash_next`/`splash_prev`, within the
+provider set in mascot mode) or next/prev provider — and a tap on the splash
+now steps the animation instead of leaving. LVGL 9 still emits
+SHORT_CLICKED/CLICKED after a GESTURE on the same press, so `gesture_seen`
+(set in the gesture handler, cleared on the indev `LV_EVENT_PRESSED`) makes
+the tap and long-press handlers ignore a swipe; serial `splash next|prev`
+and `swipe up|down|left|right` drive the same handlers. The provider sets
+end with the full-screen scenes (`codex.scene.wave/rain`,
+`kimi.scene.night/orbit`); a name missing from the catalog is skipped and
+logged once. The parade (`splash_parade_start(fresh[])`) rotates the
 fresh slots every `PARADE_PROVIDER_MS` (20 s), Claude included with its
 rate-group pick; `ui_parade_start()` builds the mask and runs after
 `IDLE_PARADE_MS` (5 min) without input on the usage view — touches reset the
 timer through an indev `LV_EVENT_PRESSED` callback, buttons through
-`ui_note_activity()` from `main.cpp`. QA without hands: serial `screen splash
+`ui_note_activity()` from `main.cpp`; the parade ends on a vertical swipe,
+taps only step its current animation. QA without hands: serial `screen splash
 codex|kimi|claude` and `parade on|off` (`./screenshot.sh out.png [port]
 --screen splash:codex`); in the sim, `SIM_SPLASH_PROVIDER=codex` and
 `SIM_PARADE=1` (the parade needs fresh slots, so pair it with a

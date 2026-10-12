@@ -351,7 +351,8 @@ static const uint32_t CAROUSEL_MS = 8000;
 // ---- Ambient parade ----
 // After IDLE_PARADE_MS without a touch or button press on the usage view, the
 // splash parades the full-size mascots of every fresh provider. Any input
-// resets the timer (ui_note_activity); a touch on the splash ends the parade.
+// resets the timer (ui_note_activity); a vertical swipe on the splash ends
+// the parade (taps step the animation and leave the rotation running).
 static lv_timer_t* parade_timer = nullptr;
 static const uint32_t IDLE_PARADE_MS = 5UL * 60UL * 1000UL;
 
@@ -370,6 +371,15 @@ static int fresh_count(void) {
 static int next_fresh_slot(int from) {
     for (int k = 1; k <= PROVIDER_COUNT; k++) {
         int i = (from + k) % PROVIDER_COUNT;
+        if (slot_fresh(i)) return i;
+    }
+    return -1;
+}
+
+// Previous fresh slot before `from` in rotation order, or -1 when none is fresh.
+static int prev_fresh_slot(int from) {
+    for (int k = 1; k <= PROVIDER_COUNT; k++) {
+        int i = (from + PROVIDER_COUNT * k - k) % PROVIDER_COUNT;
         if (slot_fresh(i)) return i;
     }
     return -1;
@@ -463,6 +473,7 @@ static void format_reset_time(int mins, char* buf, size_t len) {
 static void global_click_cb(lv_event_t* e);
 static void usage_tap_cb(lv_event_t* e);
 static void usage_long_press_cb(lv_event_t* e);
+static void gesture_cb(lv_event_t* e);
 static void apply_usage_layout(usage_layout_t mode);
 static void layout_dots(bool with_session);
 static void dots_geometry(bool with_session, int* pitch, int* dia, int* grid);
@@ -896,10 +907,17 @@ static void alert_tap_cb(lv_event_t* e) {
     lv_indev_stop_processing((lv_indev_t*)lv_event_get_user_data(e));
 }
 
+// Swipe bookkeeping. LVGL 9 keeps sending RELEASED → SHORT_CLICKED → CLICKED
+// after a GESTURE (pointer.pressed only records that the press began on the
+// object), so a swipe would also count as a tap. The gesture handler raises
+// this flag and the tap handlers skip the press; a new press clears it.
+static bool gesture_seen = false;
+
 // Every touch, on any screen (usage panels, alert dismissals, the splash),
 // counts as activity for the parade timer.
 static void activity_press_cb(lv_event_t* e) {
     (void)e;
+    gesture_seen = false;
     ui_note_activity();
 }
 
@@ -934,6 +952,10 @@ void ui_init(void) {
     if (splash_get_root()) {
         lv_obj_add_event_cb(splash_get_root(), global_click_cb, LV_EVENT_CLICKED, NULL);
     }
+    // Gestures bubble (LV_OBJ_FLAG_GESTURE_BUBBLE, default on) from the splash
+    // root and the usage container up to the screen, so one handler there
+    // covers both views; it dispatches on current_screen.
+    lv_obj_add_event_cb(scr, gesture_cb, LV_EVENT_GESTURE, NULL);
 
     // Corner mascot in the old logo slot. The still Clawd is shorter than the
     // 80/40 px slot the spark logo used; center it vertically in that slot.
@@ -1125,6 +1147,15 @@ static void carousel_timer_cb(lv_timer_t* t) {
 bool ui_carousel_next(void) {
     if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_count() < 2) return false;
     carousel_advance();
+    return true;
+}
+
+bool ui_carousel_prev(void) {
+    if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_count() < 2) return false;
+    int prv = prev_fresh_slot(visible_slot);
+    if (prv < 0 || prv == visible_slot) return false;
+    show_slot(prv);
+    if (carousel_timer) lv_timer_reset(carousel_timer);
     return true;
 }
 
@@ -1377,9 +1408,13 @@ static void apply_battery_visibility(void) {
     else                                  lv_obj_clear_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
 }
 
+// Splash tap: next animation (within the set in mascot mode and the parade,
+// through the catalog on the default splash). A vertical swipe leaves.
 static void global_click_cb(lv_event_t* e) {
     (void)e;
-    if (current_screen == SCREEN_SPLASH) ui_show_screen(prev_non_splash_screen);
+    if (gesture_seen) return;
+    ui_note_activity();
+    if (current_screen == SCREEN_SPLASH) splash_next();
     else                                  ui_show_screen(SCREEN_SPLASH);
 }
 
@@ -1389,7 +1424,8 @@ static void global_click_cb(lv_event_t* e) {
 // alert_tap_cb vetoes, so a tap that dismisses an alert must do nothing here.
 static void usage_tap_cb(lv_event_t* e) {
     (void)e;
-    if (alert_active) return;
+    if (gesture_seen || alert_active) return;
+    ui_note_activity();
     if (current_screen == SCREEN_USAGE && view_state == 2 && fresh_count() > 1) {
         carousel_advance();
         return;
@@ -1400,8 +1436,38 @@ static void usage_tap_cb(lv_event_t* e) {
 // Long press on the usage view: mascot mode for the provider on screen.
 static void usage_long_press_cb(lv_event_t* e) {
     (void)e;
-    if (alert_active) return;
+    if (gesture_seen || alert_active) return;
     if (current_screen == SCREEN_USAGE) ui_show_mascot(visible_slot);
+}
+
+// Swipe on either view (fires once per press, when the finger has travelled
+// LV_INDEV_DEF_GESTURE_LIMIT). Vertical toggles splash ↔ usage; horizontal
+// steps the item: animation on the splash, provider on the usage view.
+static void gesture_cb(lv_event_t* e) {
+    (void)e;
+    gesture_seen = true;
+    ui_handle_swipe(lv_indev_get_gesture_dir(lv_indev_active()));
+}
+
+bool ui_handle_swipe(lv_dir_t dir) {
+    ui_note_activity();
+    if (alert_active) return false;            // the alert owns the touch
+    const bool vertical = (dir == LV_DIR_TOP || dir == LV_DIR_BOTTOM);
+    switch (current_screen) {
+    case SCREEN_SPLASH:
+        // ui_show_screen() ends the parade and resets the provider.
+        if (vertical)                 { ui_show_screen(prev_non_splash_screen); return true; }
+        if (dir == LV_DIR_LEFT)       { splash_next(); return true; }
+        if (dir == LV_DIR_RIGHT)      { splash_prev(); return true; }
+        return false;
+    case SCREEN_USAGE:
+        if (vertical)                 { ui_show_screen(SCREEN_SPLASH); return true; }
+        if (dir == LV_DIR_LEFT)       return ui_carousel_next();
+        if (dir == LV_DIR_RIGHT)      return ui_carousel_prev();
+        return false;
+    default:
+        return false;
+    }
 }
 
 void ui_show_screen(screen_t screen) {

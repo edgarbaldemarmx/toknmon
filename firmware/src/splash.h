@@ -10,8 +10,10 @@ void splash_init(lv_obj_t *parent);
 // Advance animation frame if hold time elapsed. Call from main loop.
 void splash_tick(void);
 
-// Cycle to the next animation in the catalog.
+// Cycle to the next / previous animation: within the provider set in mascot
+// mode, through the whole catalog on the Claude default.
 void splash_next(void);
+void splash_prev(void);
 
 // Show/hide the splash container.
 void splash_show(void);

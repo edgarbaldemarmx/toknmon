@@ -14,16 +14,25 @@ Shift+Tab over BLE HID for Claude Code's voice mode and mode-toggle shortcuts.
 
 ## Screens
 
-The device boots into the splash. Tap the screen anywhere to switch to the Usage view; tap again to flip back to the splash.
+The device boots into the splash. Swipe up or down anywhere to move between the splash and the Usage view; on the splash a tap steps to the next animation.
 
 |              Splash               |              Usage              |
 | :-------------------------------: | :-----------------------------: |
 | ![Splash](screenshots/splash.gif) | ![Usage](screenshots/usage.png) |
-|   Splash; touch-toggle anytime    | Session and weekly utilization  |
+|   Splash; swipe to the meter      | Session and weekly utilization  |
+
+| Input            | On the splash                         | On the Usage view                                 |
+| ---------------- | ------------------------------------- | ------------------------------------------------- |
+| Tap              | Next animation                        | Next provider (one provider: back to the splash)  |
+| Swipe up / down  | Usage view                            | Splash                                            |
+| Swipe left       | Next animation                        | Next provider                                     |
+| Swipe right      | Previous animation                    | Previous provider                                 |
+| Long-press       | —                                     | Mascot mode for the provider on screen            |
+| PWR button       | Next animation                        | Cycle brightness                                  |
 
 While the splash is up, the middle (PWR) button cycles animations. **Hold the power button for 3 seconds, then release, to put the device into pairing mode** — this clears the saved Bluetooth bond and re-advertises. The firmware also auto-rotates animations every 20 s within the current usage-rate group, so a long stretch on the splash isn't just one Clawd on loop.
 
-**Mascot mode and the parade.** Long-press the Usage view to open the full-size mascot of the provider on screen — Codex's thinking dots or Kimi's moon cycle through their own idle, acts, and mountain-bike ride (Claude keeps the official splash), with the provider name on top; the PWR button skips to the next act and a tap returns to Usage. Leave the device untouched on the Usage view for 5 minutes and it starts a parade: every provider with live data gets 20 s of full-size mascot in turn, until you touch the screen. Both are also reachable over serial for hands-free checks: `screen splash codex` (or `kimi`, `claude`) and `parade on` / `parade off`.
+**Mascot mode and the parade.** Long-press the Usage view to open the full-size mascot of the provider on screen — Codex's thinking dots or Kimi's moon cycle through their own idle, acts, and mountain-bike ride (Claude keeps the official splash), with the provider name on top; a tap, a horizontal swipe, or the PWR button steps through the acts and the full-screen scenes, and a vertical swipe returns to Usage. Leave the device untouched on the Usage view for 5 minutes and it starts a parade: every provider with live data gets 20 s of full-size mascot in turn (taps step the animation, the rotation keeps going) until you swipe back to Usage. All of it is also reachable over serial for hands-free checks: `screen splash codex` (or `kimi`, `claude`), `splash next` / `splash prev`, `swipe up|down|left|right`, and `parade on` / `parade off`.
 
 ## Hardware
 
