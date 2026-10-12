@@ -317,6 +317,13 @@ sim`, then `cd firmware && .pio/build/sim/program`). See
   provenance notes in [`research/clawd-official/`](research/clawd-official/);
   `node tools/convert_official_clawd.js` regenerates
   `firmware/src/splash_animations.h`. See [`tools/README.md`](tools/README.md).
+- **Custom animations** — the Codex and Kimi corner mascots are hand-drawn
+  text grids in `assets/animations/` (one character per cell, a palette
+  legend, `---` between frames). `node tools/convert_grid_animations.js`
+  compiles them into `firmware/src/custom_animations.h` in the same format as
+  the official set, and `--verify DIR` writes a PNG strip per animation to
+  eyeball. The usage screen swaps the corner mascot to match the provider on
+  screen. See the "Custom animations" section of [`CLAUDE.md`](CLAUDE.md).
 - **Icons** — Lucide PNGs convert to LVGL C arrays with
   `tools/png_to_lvgl.js`. See [`tools/README.md`](tools/README.md).
 - **Fonts** — the pre-compiled LVGL fonts and the LVGL-9 patching they need:

@@ -32,19 +32,25 @@ Bike variants (H4); full-splash per-provider scenes; replacing official Clawd ar
 `ask-on-risk`. Forecast ~700 authored changed lines (converter ~200, engine ~150, art files ~250, docs/tests ~100).
 
 ## Tasks
-- [ ] T1 — Converter + authoring format + a Node test (fixture grid → expected header bytes). Route: delegated writer.
-- [ ] T2 — Engine: dual-table registry, provider mascot spec, `splash_mascot_set_provider`, UI hook on carousel change. Route: same writer.
-- [ ] T3 — Art: `codex.idle`, `codex.dots`, `kimi.idle`, `kimi.glow`; iterate in `sim` with autoshots until clean. Route: same writer.
-- [ ] T4 — Build + flash + hardware screenshot; docs (`CLAUDE.md` section "Custom animations", README); commit.
+- [x] T1 — Converter + authoring format + a Node test (fixture grid → expected header bytes). Route: delegated writer. Evidence: `tools/convert_grid_animations.js` (parse → validate/crop → emit, `--verify DIR` via `magick`), `tools/test/convert_grid_animations.test.js` (8 tests: struct fields, header bytes, empty set, too many colors, uneven frames, feet rule, unknown char / loop range, edge-snap + mascot-envelope warnings). RED observed on the missing module, then GREEN 8/8.
+- [x] T2 — Engine: dual-table registry, provider mascot spec, `splash_mascot_set_provider`, UI hook on carousel change. Route: same writer. Evidence: `anim_count()`/`anim_at()`/`anim_by_name()` replace every `splash_anims[]` index in `splash.cpp`; `MASCOT_SPECS[PROVIDER_COUNT]` `{idle, walk, gait, acts[4][4], lurk}` (Claude = previous behavior); `splash_mascot_set_provider()` called from `show_slot()`; `mas_buf` sized from the largest frame across specs and `mas_render()` takes a byte cap (skip + log once). Decision: trips are paused while the dense layout is active (`apply_usage_layout` → `splash_mascot_set_trips(!dense)`) — simpler than clamping the walk range, and the walk-off itself never crossed the panels; only the full-size lurk did.
+- [x] T3 — Art: `codex.idle`, `codex.dots`, `kimi.idle`, `kimi.glow`; iterate in `sim` with autoshots until clean. Route: same writer. Evidence: `assets/animations/*.txt` (24×16 grids at `origin: 15 21`, crops 23×7 / 23×15 / 19×15 / 23×16, same `ox` 15 per provider), verify PNG strips and sim autoshots listed below. Docs done alongside: `CLAUDE.md` "Custom animations (grid pipeline)", README Development bullet.
+- [ ] T4 — Build + flash + hardware screenshot; commit. (Parent: hardware verification + commit. Flash build passes, see below.)
 
 ## Verification
 - `node tools/convert_grid_animations.js` (regenerates `custom_animations.h`; idempotent)
-- `node --test tools/` (converter test)
+- `node --test tools/test/` (converter test)
 - `pio run -d firmware -e sim` + autoshots per provider slot
 - `pio run -d firmware -e waveshare_amoled_216` + flash + `screenshot.sh`
 
 ## Verification evidence
-(pending)
+- `node --test tools/test/`: pass 8, fail 0 (RED first: module missing).
+- `node tools/convert_grid_animations.js` ×3: identical md5 of `firmware/src/custom_animations.h` (idempotent); output `codex.dots 23x15 at 15,22 8 frames`, `codex.idle 23x7 at 15,30`, `kimi.glow 23x16 at 15,21 6 frames`, `kimi.idle 19x15 at 15,22`; no warnings.
+- `node tools/convert_grid_animations.js --verify <scratch>/anim-verify`: PNG strips read as three bouncing dots with a face on the middle dot, and a crescent moon with eyes, glow ring, blink and two twinkling stars.
+- `pio run -d firmware -e sim`: SUCCESS. Headless autoshots (temporary `SCREEN_USAGE` boot, reverted; `grep -rn QA-TEMP firmware/src` → 0 hits, `main.cpp` has no diff), scratch single-provider scenarios: `codex-10350.png` / `codex-10650.png` (dots mid-wave), `kimi-10350.png` / `kimi-10700.png` (moon + star), `claude-10500.png` / `claude-30000.png` (Fable dense layout, Clawd in the corner, third panel never covered).
+- `pio run -d firmware -e waveshare_amoled_216`: SUCCESS, RAM 33.8%, Flash 65.2% (2180783 / 3342336 bytes).
+- `grep -rn "ifdef BOARD_" firmware/src/*.cpp firmware/src/*.h`: only the three pre-existing `BOARD_HAS_PSRAM` hits.
+- Pending: hardware flash + `screenshot.sh` (T4, parent).
 
 ## Next step
-Branch from H2 once committed; launch writer.
+T4: flash the 2.16, screenshot each provider slot on hardware, commit (`feat(firmware): per-provider corner mascots + grid animation pipeline`).

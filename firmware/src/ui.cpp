@@ -850,6 +850,9 @@ static void apply_usage_layout(bool dense) {
 
     if (dense) lv_obj_clear_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
     else       lv_obj_add_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
+    // The mascot's full-size lurk peeks in over the lower panel area, which
+    // the dense layout fills with the third panel: pause trips while dense.
+    splash_mascot_set_trips(!dense);
 }
 
 // ---- Carousel ----
@@ -922,6 +925,7 @@ static void show_slot(int idx) {
     visible_slot = idx;
     const UsageData* data = &slots[idx].data;
     refresh_title();
+    splash_mascot_set_provider(idx);   // corner mascot follows the visible provider
 
     if (layout_dense != data->has_third) apply_usage_layout(data->has_third);
 

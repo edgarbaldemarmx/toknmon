@@ -229,6 +229,45 @@ World Cup). To hunt for new ones: run `research/clawd-official/fetch.sh`
 for `/images/` paths (`research/clawd-official/CLAUDE.md` documents the full
 methodology, including the Lottie sources and the assets-proxy).
 
+### Custom animations (grid pipeline)
+
+Hand-authored art (the Codex and Kimi corner mascots) lives as text grids in
+`assets/animations/<provider>.<role>.txt` and compiles into
+`firmware/src/custom_animations.h` (generated, do not hand-edit):
+
+```bash
+node tools/convert_grid_animations.js                 # → firmware/src/custom_animations.h
+node tools/convert_grid_animations.js --verify DIR    # + one PNG frame strip per animation
+node --test tools/test/                               # converter unit tests
+```
+
+File format: `name:`, `origin: <x> <y>` (stage cell of grid column 0 / row 0),
+`palette:` followed by legend lines `<char> = transparent|#RRGGBB` (exactly one
+transparent entry, up to 15 colors), optional `hold: <ms>` and `loop: <a>-<b>`
+(inclusive), then grid rows; `---` separates frames and may carry `hold=<ms>`
+for the frame that follows plus a trailing `# comment`. Lines starting with `#`
+are comments. The converter crops to the union bounding box and emits the
+same `splash_anim_def_t` layout as the official set, so the engine treats
+both tables as one catalog (`anim_count()` / `anim_at()` in `splash.cpp`).
+
+Rules it enforces: feet on stage row 36 (`oy + h == 37`), uniform frame size,
+≤ 15 colors + transparent, loop inside the frame range; it warns on edge snap
+(`ox == 0` / `ox + w == 55`) and on art larger than the 28×21-cell mascot
+envelope. **Index 0 is opaque black on the full splash but transparent on the
+corner mascot**, so visible black ink must be a real color (`#141413`). Keep
+idle and act files at the same left edge (`ox`): the corner mascot is
+bottom-left anchored and ignores `ox`/`oy`, so differing crops would shift
+the character between idle and act.
+
+Corner mascots are per provider (`MASCOT_SPECS` in `splash.cpp`: idle, walk
+gait, acts per usage-rate group, lurk). `ui.cpp` calls
+`splash_mascot_set_provider()` when the carousel changes slot, and
+`splash_mascot_set_trips(false)` while the dense three-panel layout is up,
+because the full-size lurk peeks in over the third panel; Codex and Kimi
+have no walk gait, so they only ever act in place. The corner buffer is sized
+from the largest frame across all specs at create time and `mas_render()`
+refuses (and logs once) any frame that would not fit.
+
 
 ## User profile / preferences
 
