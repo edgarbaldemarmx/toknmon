@@ -10,8 +10,10 @@ refreshes it.
 
 import httpx
 
-from .base import ProviderResult, iso_to_epoch, window_bar
+from .base import DetectResult, ProviderResult, iso_to_epoch, tilde, window_bar
 import time
+from collections.abc import Callable
+from pathlib import Path
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 # Newer endpoints reject old client versions (2.1.5 is refused); keep current.
@@ -22,6 +24,32 @@ HEADERS_TEMPLATE = {
     "Accept": "application/json",
 }
 TIMEOUT = 20.0
+
+
+# Detection hooks injected by the main module (the package cannot import it):
+# ``config_dirs()`` lists the Claude config dirs to check and
+# ``token_source(dir)`` names where a usable OAuth token for that dir lives
+# ("macOS Keychain" or the ``.credentials.json`` path) or returns None. The
+# defaults make detection fail closed when nothing is injected.
+config_dirs: Callable[[], list[Path]] = lambda: [Path.home() / ".claude"]
+token_source: Callable[[Path], str | None] = lambda config_dir: None
+
+
+def detect() -> DetectResult:
+    """Claude Code is usable when any configured dir has an OAuth token source.
+    Local and cheap: reads the Keychain/credentials file through the injected
+    hook, never logs and never returns the token itself."""
+    dirs = config_dirs() or [Path.home() / ".claude"]
+    for config_dir in dirs:
+        source = token_source(config_dir)
+        if source:
+            return DetectResult(True, f"Claude Code credentials found ({source})")
+    where = " or ".join(f"{tilde(d)}/.credentials.json" for d in dirs)
+    return DetectResult(
+        False,
+        "Claude Code CLI not found: no OAuth token in the macOS Keychain "
+        f'("Claude Code-credentials") or in {where}. Install Claude Code and run '
+        "`claude login` once.")
 
 
 class TokenExpired(Exception):

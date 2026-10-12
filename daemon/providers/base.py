@@ -18,6 +18,7 @@ text.
 import datetime
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 Bar = tuple[str, int, int]  # (label, percent 0-100, minutes until reset)
 
@@ -29,6 +30,24 @@ class ProviderResult:
     status: str = "allowed"
     ok: bool = True
     extra: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DetectResult:
+    """Outcome of a cheap, local, network-free check for one provider: is its
+    CLI installed and logged in on this machine? ``reason`` is a one-line,
+    human-readable explanation suitable for the installer and the daemon log
+    (where to look, how to enable the provider). It never contains a token."""
+    available: bool
+    reason: str
+
+
+def tilde(path: Path) -> str:
+    """Render a path under the home directory as ``~/...`` for messages."""
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
 
 
 SESSION_KEYS = ("s", "sr")

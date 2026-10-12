@@ -15,7 +15,7 @@ import os
 import time
 from pathlib import Path
 
-from .base import ProviderResult, window_bar
+from .base import DetectResult, ProviderResult, tilde, window_bar
 
 MAX_AGE_DAYS = 7
 # Windows up to this many minutes land on the short ("5h") bar, longer ones on
@@ -25,6 +25,24 @@ SHORT_WINDOW_MAX_MINUTES = 600
 
 def codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex")).expanduser()
+
+
+def detect() -> DetectResult:
+    """The Codex CLI is usable when ``$CODEX_HOME/sessions`` holds at least one
+    ``rollout-*.jsonl`` of any age (polling then only reads the last 7 days)."""
+    sessions = codex_home() / "sessions"
+    shown = tilde(sessions)
+    if not sessions.is_dir():
+        return DetectResult(False, f"Codex CLI not found: {shown} does not exist. Install the "
+                                   "Codex CLI and run it once to create a session log.")
+    try:
+        found = next(sessions.rglob("rollout-*.jsonl"), None)
+    except OSError:
+        found = None
+    if found is None:
+        return DetectResult(False, f"Codex CLI not found: {shown} has no session logs "
+                                   "(rollout-*.jsonl). Install the Codex CLI and run it once.")
+    return DetectResult(True, f"Codex session logs found ({shown})")
 
 
 def _recent_rollouts(root: Path, now: float) -> list[Path]:

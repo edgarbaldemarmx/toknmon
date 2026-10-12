@@ -29,7 +29,7 @@ from pathlib import Path
 
 import httpx
 
-from .base import ProviderResult, iso_to_epoch, window_bar
+from .base import DetectResult, ProviderResult, iso_to_epoch, tilde, window_bar
 
 DEFAULT_BASE_URL = "https://api.kimi.com/coding/v1"
 DEFAULT_OAUTH_HOST = "https://auth.kimi.com"
@@ -101,6 +101,25 @@ def read_credentials(home: Path | None = None) -> tuple[Path, dict] | None:
         if best is None or exp > best[0]:
             best = (exp, path, blob)
     return (best[1], best[2]) if best else None
+
+
+def detect() -> DetectResult:
+    """The Kimi Code CLI is usable when a credential file with an access token
+    exists under ``$KIMI_CODE_HOME/credentials``; an expired token is fine
+    because the daemon refreshes it the way the CLI does."""
+    creds_dir = kimi_home() / "credentials"
+    shown = tilde(creds_dir)
+    try:
+        files = sorted(creds_dir.glob("*.json")) if creds_dir.is_dir() else []
+    except OSError:
+        files = []
+    if not files:
+        return DetectResult(False, f"Kimi Code CLI not found: {shown} has no credential files. "
+                                   "Install the Kimi Code CLI and run it once to log in.")
+    if read_credentials() is None:
+        return DetectResult(False, f"Kimi Code CLI not usable: no credential file in {shown} "
+                                   "has an access token. Run the Kimi Code CLI once to log in.")
+    return DetectResult(True, f"Kimi Code credentials found ({shown})")
 
 
 def read_token(now: float, home: Path | None = None) -> str | None:

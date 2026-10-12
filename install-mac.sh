@@ -5,13 +5,20 @@
 # Usage:
 #   ./install-mac.sh                       # interactive (prompts for each setting)
 #   ./install-mac.sh --yes --no-prime      # non-interactive, defaults everywhere
-#   ./install-mac.sh --yes --providers claude,codex,kimi --device-name "Desk 2"
+#   ./install-mac.sh --yes --providers auto --device-name "Desk 2"
+#   ./install-mac.sh --yes --providers claude,codex  # pin an explicit list
 #
 # Options:
 #   --yes, -y             Accept the default answer for every prompt. Existing
 #                         config values are kept; the permission-priming run is
 #                         bounded to a few seconds instead of waiting for Ctrl+C.
-#   --providers <list>    Comma-separated providers to monitor (claude, codex, kimi).
+#   --providers auto|<list>
+#                         'auto' (default) polls every provider whose CLI is
+#                         installed and logged in on this Mac, re-checked by the
+#                         daemon on every poll (install a CLI later and it shows
+#                         up by itself). Or a comma-separated list to pin
+#                         (claude, codex, kimi); a listed provider that is not
+#                         installed shows "no data" on the device.
 #   --device-name <name>  Bluetooth name of the board, as set when flashing
 #                         (1-18 printable ASCII characters, no '#').
 #   --no-prime            Skip the Bluetooth permission-priming daemon run.
@@ -56,7 +63,7 @@ while [ $# -gt 0 ]; do
         --no-prime) NO_PRIME=1 ;;
         --providers)
             shift
-            [ -n "${1:-}" ] || { echo "Error: --providers needs a value (e.g. claude,codex,kimi)" >&2; exit 2; }
+            [ -n "${1:-}" ] || { echo "Error: --providers needs a value (auto, or e.g. claude,codex,kimi)" >&2; exit 2; }
             OPT_PROVIDERS="$1" ;;
         --providers=*) OPT_PROVIDERS="${1#*=}" ;;
         --device-name)
@@ -256,51 +263,103 @@ configure_device_name() {
     echo "  Set: device_name = $ans"
 }
 
-# Pick which providers the daemon polls (`providers` key). Detects Codex and
-# Kimi Code installs to suggest a default; Claude is always suggested.
-# `--providers <list>` sets the key without asking (an unknown provider is an
-# error); `--yes` keeps the current value, else the detected suggestion.
+# Pick which providers the daemon polls (`providers` key). Runs the daemon's
+# own detection (`claude_usage_daemon.py --detect`: local files only, no
+# network, no Bluetooth) and prints what it found. The default `auto` makes the
+# daemon repeat that detection on every poll, so a CLI installed later appears
+# on the device without a reinstall. `--providers auto|<list>` sets the key
+# without asking (an unknown provider is an error); `--yes` keeps an existing
+# value, else `auto`.
 configure_providers() {
-    local ans cur suggested="claude" detected="" explicit=0
+    local ans cur suggested="auto" explicit=0 detected=0
+    local -a found=() missing=() reasons=()
     cur=$(current_config_value providers)
-    [ -d "$HOME/.codex/sessions" ] && { suggested="$suggested,codex"; detected="$detected Codex"; }
-    [ -d "$HOME/.kimi-code/credentials" ] && { suggested="$suggested,kimi"; detected="$detected Kimi"; }
+
+    local line name state
+    while IFS= read -r line; do
+        name="${line%%:*}"
+        state="${line#*: }"
+        case "$state" in
+            available) found+=("$name"); detected=1 ;;
+            "unavailable — "*) missing+=("$name"); reasons+=("${state#unavailable — }"); detected=1 ;;
+        esac
+    done < <("$PYTHON_BIN" "$DAEMON_PY" --detect 2>/dev/null || true)
+
+    if [ "$detected" = 0 ]; then
+        echo "  Provider detection did not answer; choose the providers by hand below."
+    else
+        echo "  +-- Provider detection (this Mac) -----------------------------------"
+        local i
+        for name in "${found[@]}"; do
+            echo "  | $name: found"
+        done
+        for i in "${!missing[@]}"; do
+            echo "  | ${missing[$i]}: not found"
+            echo "  |   ${reasons[$i]}"
+            echo "  |   Once it is installed and logged in, 'auto' picks it up on the next"
+            echo "  |   poll — no reinstall, no restart."
+        done
+        echo "  +--------------------------------------------------------------------"
+        if [ ${#found[@]} -eq 0 ]; then
+            echo "  WARNING: no provider detected. The daemon will install and connect, but the"
+            echo "  device stays on its splash screen until a supported CLI (claude, codex or"
+            echo "  kimi) is installed and logged in; it is then picked up automatically."
+        fi
+    fi
+
     [ -n "$cur" ] && suggested=$(echo "$cur" | tr -d ' ')
     if [ -n "$OPT_PROVIDERS" ]; then
         ans="$OPT_PROVIDERS"; explicit=1
     elif ! interactive; then
         ans="$suggested"
-        echo "  Providers: $ans (${cur:+kept}${cur:-detected default})."
+        if [ -n "$cur" ]; then
+            echo "  Providers: $ans (kept from config)."
+        else
+            echo "  Providers: $ans (default)."
+        fi
     else
-        echo "  The device can cycle through several providers (claude, codex, kimi)."
-        [ -n "$detected" ] && echo "  Detected on this Mac:$detected"
-        read -r -p "  Providers to monitor [claude,codex,kimi] (default $suggested): " ans || ans=""
+        echo "  'auto' (default) polls whatever is detected above and re-checks on every"
+        echo "  poll, so a CLI you install later shows up on the device by itself. Type"
+        echo "  an explicit list (e.g. claude,codex) to pin the set instead; a listed"
+        echo "  provider that is not installed shows 'no data' on the device."
+        read -r -p "  Providers to monitor [auto | claude,codex,kimi] (default $suggested): " ans || ans=""
     fi
     ans=$(echo "${ans:-$suggested}" | tr 'A-Z' 'a-z' | tr -d ' ')
     local p valid=""
-    IFS=',' read -r -a parts <<< "$ans"
-    for p in "${parts[@]}"; do
-        case "$p" in
-            claude|codex|kimi) valid="${valid:+$valid, }$p" ;;
-            "") ;;
-            *)
-                if [ "$explicit" = 1 ]; then
-                    echo "Error: --providers: unknown provider '$p' (use claude, codex, kimi)." >&2
-                    exit 2
-                fi
-                echo "  Unknown provider '$p' — ignoring." ;;
-        esac
-    done
+    if [ "$ans" = "auto" ]; then
+        valid="auto"
+    else
+        IFS=',' read -r -a parts <<< "$ans"
+        for p in "${parts[@]}"; do
+            case "$p" in
+                claude|codex|kimi) valid="${valid:+$valid, }$p" ;;
+                "") ;;
+                auto)
+                    if [ "$explicit" = 1 ]; then
+                        echo "Error: --providers: 'auto' cannot be combined with a list." >&2
+                        exit 2
+                    fi
+                    echo "  'auto' cannot be combined with a list — using auto."
+                    valid="auto"; break ;;
+                *)
+                    if [ "$explicit" = 1 ]; then
+                        echo "Error: --providers: unknown provider '$p' (use auto, or claude, codex, kimi)." >&2
+                        exit 2
+                    fi
+                    echo "  Unknown provider '$p' — ignoring." ;;
+            esac
+        done
+    fi
     if [ -n "$cur" ] && [ "$(echo "$valid" | tr -d ' ')" = "$(echo "$cur" | tr -d ' ')" ]; then
         echo "  providers = $valid (unchanged)."
         return 0
     fi
-    if [ -z "$valid" ] || [ "$valid" = "claude" ]; then
+    if [ -z "$valid" ] || [ "$valid" = "auto" ]; then
         if [ -n "$cur" ]; then
-            upsert_config_key providers claude
-            echo "  Set: providers = claude"
+            upsert_config_key providers auto
+            echo "  Set: providers = auto"
         else
-            echo "  Claude only (default) — no config change needed."
+            echo "  Automatic detection (default) — no config change needed."
         fi
         return 0
     fi

@@ -29,7 +29,25 @@
 # config_dirs = ~/.claude, ~/.claude-work
 
 # Providers to monitor (macOS daemon). The device keeps one usage slot per
-# provider and cycles through them (tap to advance). Comma-separated, any order:
+# provider and cycles through them (tap to advance).
+#   auto (default) = poll every provider whose CLI is installed and logged in on
+#            this Mac, re-checked on every poll: install or log in to a CLI
+#            later and it appears on the device within a minute, no reinstall
+#            and no restart. The daemon logs the resolved set whenever it
+#            changes ("Providers (auto): claude, codex — kimi skipped: ...").
+#            Detection is local, never touches the network, and looks for:
+#              claude = an OAuth token in the macOS Keychain ("Claude Code-
+#                       credentials") or in <config_dir>/.credentials.json for
+#                       any dir in config_dirs
+#              codex  = at least one rollout-*.jsonl under
+#                       ${CODEX_HOME:-~/.codex}/sessions (any age)
+#              kimi   = a credential file with an access token under
+#                       ~/.kimi-code/credentials (an expired token is fine)
+#            When only Claude is detected the payload is identical to older
+#            daemons (no provider tag); when nothing is detected the device
+#            stays on the splash screen.
+#   explicit list = comma-separated, any order; polled exactly as written even
+#            when a provider is not detected (it then shows "no data"):
 #   claude = Claude Code (OAuth usage endpoint; shows 5h, weekly and, when the
 #            subscription exposes it, the model-scoped weekly window)
 #   codex  = OpenAI Codex CLI (reads ${CODEX_HOME:-~/.codex}/sessions logs; no
@@ -37,7 +55,7 @@
 #   kimi   = Kimi Code (uses the token in ~/.kimi-code/credentials and refreshes
 #            it when expired, exactly like the Kimi CLI; override the API with
 #            KIMI_CODE_BASE_URL)
-#   Unset (default) = claude only, identical payload to older daemons.
+# providers = auto
 # providers = claude, codex, kimi
 
 # Kimi OAuth token endpoint used to refresh an expired Kimi access token (HTTPS

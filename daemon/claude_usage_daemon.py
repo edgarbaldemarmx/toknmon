@@ -31,11 +31,15 @@ from bleak.exc import BleakError
 # daemon/), so try the package-qualified import first and fall back to the
 # sibling package.
 try:
-    from daemon.providers import PROVIDERS, parse_providers_setting, to_payload
+    from daemon.providers import (
+        AUTO, PROVIDERS, detect, parse_providers_setting, resolve_providers, to_payload,
+    )
     from daemon.providers import claude as claude_provider
     from daemon.providers import kimi as kimi_provider
 except ImportError:  # running as a script from daemon/
-    from providers import PROVIDERS, parse_providers_setting, to_payload
+    from providers import (
+        AUTO, PROVIDERS, detect, parse_providers_setting, resolve_providers, to_payload,
+    )
     from providers import claude as claude_provider
     from providers import kimi as kimi_provider
 
@@ -185,11 +189,12 @@ def _decode_keychain_blob(raw: str) -> str:
     return raw
 
 
-def _read_token_keychain() -> str | None:
+def _read_token_keychain(quiet: bool = False) -> str | None:
     """Read the OAuth access token from the macOS Keychain, or None.
 
     ``security … -w`` may hex-dump the stored secret (see _decode_keychain_blob),
-    so decode before extracting the access token.
+    so decode before extracting the access token. ``quiet`` suppresses the
+    failure log lines (provider detection probes the Keychain on purpose).
     """
     try:
         out = subprocess.run(
@@ -208,10 +213,12 @@ def _read_token_keychain() -> str | None:
             timeout=10,
         )
     except subprocess.CalledProcessError as e:
-        log(f"Keychain read failed (rc={e.returncode}): {e.stderr.strip()}")
+        if not quiet:
+            log(f"Keychain read failed (rc={e.returncode}): {e.stderr.strip()}")
         return None
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        log(f"Keychain access error: {e}")
+        if not quiet:
+            log(f"Keychain access error: {e}")
         return None
     return _extract_access_token(_decode_keychain_blob(out.stdout))
 
@@ -344,6 +351,29 @@ def read_token_for(config_dir: Path) -> str | None:
     if sys.platform == "darwin" and config_dir == DEFAULT_CONFIG_DIR:
         return _read_token_keychain()
     return None
+
+
+def claude_token_source(config_dir: Path) -> str | None:
+    """Where a usable Claude OAuth token for ``config_dir`` lives, for provider
+    detection: the ``.credentials.json`` path or ``"macOS Keychain"``; None when
+    neither holds a token. Same lookup order as :func:`read_token_for`, but it
+    never logs and never returns the token itself.
+    """
+    cred = config_dir / ".credentials.json"
+    try:
+        if cred.exists() and _extract_access_token(cred.read_text()):
+            return f"{cred}".replace(str(Path.home()), "~", 1)
+    except OSError:
+        pass
+    if sys.platform == "darwin" and config_dir == DEFAULT_CONFIG_DIR:
+        if _read_token_keychain(quiet=True):
+            return f"macOS Keychain, {KEYCHAIN_SERVICE!r}"
+    return None
+
+
+# Claude's detector reads the token through the daemon (Keychain + config_dirs).
+claude_provider.config_dirs = read_config_dirs
+claude_provider.token_source = claude_token_source
 
 
 def load_cached_address() -> str | None:
@@ -563,13 +593,53 @@ def add_clock_fields(payload: dict) -> None:
     payload["tf"] = tf
 
 
-def read_providers() -> list[str]:
-    """Providers to poll this cycle (`providers = claude, codex, kimi`).
+# Last ``(providers, skipped)`` resolved from ``providers = auto``; the daemon
+# logs the resolved set only when it changes (a CLI was installed or removed).
+_last_auto_resolution: tuple[list[str], dict[str, str]] | None = None
 
-    Default (unset) is `["claude"]`, which keeps the single-provider payload
-    byte-for-byte compatible with older firmware (no `p` field).
+
+def format_auto_resolution(providers: list[str], skipped: dict[str, str]) -> str:
+    """One log line: ``Providers (auto): claude, codex — kimi skipped: <reason>``."""
+    head = "Providers (auto): " + (", ".join(providers) if providers else "none available")
+    if not skipped:
+        return head
+    return head + " — " + "; ".join(f"{pid} skipped: {reason}" for pid, reason in skipped.items())
+
+
+def read_providers() -> list[str]:
+    """Providers to poll this cycle, re-read from the config every poll.
+
+    ``providers = auto`` (or no key) polls whatever :func:`detect` finds on this
+    machine, so a freshly installed CLI is picked up without a restart; an
+    explicit list (``claude, codex``) is honored as written. When auto resolves
+    to Claude alone the payload stays byte-for-byte compatible with older
+    firmware (no ``p`` field, see :func:`collect_payloads`).
     """
-    return parse_providers_setting(read_config_value("providers"), log=log)
+    global _last_auto_resolution
+    setting = parse_providers_setting(read_config_value("providers"), log=log)
+    providers, skipped = resolve_providers(setting)
+    if setting is AUTO and (providers, skipped) != _last_auto_resolution:
+        _last_auto_resolution = (providers, skipped)
+        log(format_auto_resolution(providers, skipped))
+    return providers
+
+
+def detection_lines() -> list[str]:
+    """``--detect`` output: one line per known provider, ``<id>: available`` or
+    ``<id>: unavailable — <reason>``; consumed by install-mac.sh."""
+    lines = []
+    for pid in PROVIDERS:
+        res = detect(pid)
+        lines.append(f"{pid}: available" if res.available else f"{pid}: unavailable — {res.reason}")
+    return lines
+
+
+def print_detection() -> int:
+    """Print :func:`detection_lines` and return the process exit code (always 0:
+    "nothing installed" is a valid answer, not an error)."""
+    for line in detection_lines():
+        print(line)
+    return 0
 
 
 def should_poll_now(elapsed: float, *, alert_pending: bool, refresh_requested: bool,
@@ -813,11 +883,14 @@ async def collect_payloads(providers: list[str], claude_payload: dict | None,
 
     ``claude_payload``/``claude_dead`` come from :func:`poll_active` (polled by
     the caller so the token/plan logic stays in one place). Alert extras
-    (``b``/``m``/``x``) ride only on the Claude payload. With the default
-    ``providers = claude`` the payload has no ``p`` field, matching older
-    firmware byte-for-byte; otherwise every payload is tagged.
+    (``b``/``m``/``x``) ride only on the Claude payload. When ``providers``
+    resolves to Claude alone (an explicit ``claude`` or ``auto`` on a machine
+    where only Claude is detected) the payload has no ``p`` field, matching
+    older firmware byte-for-byte; otherwise every payload is tagged.
 
-    Other providers are polled here; a provider that raises or reports
+    Only the providers in ``providers`` (the list :func:`read_providers`
+    resolved this cycle) are polled or emitted; with ``auto`` an undetected
+    provider never reaches the device. A provider that raises or reports
     ``ok=False`` yields ``{"p": id, "ok": false}`` and never affects the rest.
     """
     claude_only = providers == ["claude"]
@@ -1235,6 +1308,10 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # `--detect`: report which providers are usable on this machine and exit
+    # without touching Bluetooth or the poll loop (used by install-mac.sh).
+    if "--detect" in sys.argv[1:]:
+        sys.exit(print_detection())
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

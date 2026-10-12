@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 
 from daemon.providers import (
-    PROVIDERS, ProviderResult, parse_providers_setting, to_payload,
+    AUTO, DETECTORS, PROVIDERS, DetectResult, ProviderResult, parse_providers_setting,
+    to_payload,
 )
 import daemon.claude_usage_daemon as mod
 
@@ -54,9 +55,12 @@ def test_to_payload_fits_ble_write_budget():
 
 # --- parse_providers_setting ----------------------------------------------
 
-def test_parse_providers_default_is_claude_only():
-    assert parse_providers_setting(None) == ["claude"]
-    assert parse_providers_setting("") == ["claude"]
+def test_parse_providers_default_is_auto():
+    """An absent or empty key means "poll what is installed here" (see
+    test_provider_detection.py); the legacy Claude-only default is now the
+    auto resolution on a machine where only Claude is logged in."""
+    assert parse_providers_setting(None) is AUTO
+    assert parse_providers_setting("") is AUTO
 
 
 def test_parse_providers_splits_lowercases_and_dedupes():
@@ -69,8 +73,8 @@ def test_parse_providers_ignores_unknown_names():
     assert any("gemini" in line for line in logged)
 
 
-def test_parse_providers_all_unknown_falls_back_to_default():
-    assert parse_providers_setting("gemini") == ["claude"]
+def test_parse_providers_all_unknown_falls_back_to_auto():
+    assert parse_providers_setting("gemini") is AUTO
 
 
 def test_registry_has_all_three_providers():
@@ -86,8 +90,12 @@ def test_read_providers_from_config(tmp_path, monkeypatch):
     assert mod.read_providers() == ["claude", "kimi"]
 
 
-def test_read_providers_absent_config(tmp_path, monkeypatch):
+def test_read_providers_absent_config_is_auto_detected(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "CONFIG_FILE", tmp_path / "config")
+    monkeypatch.setattr(mod, "_last_auto_resolution", None)
+    monkeypatch.setattr(mod, "log", lambda _m: None)
+    for pid, ok in (("claude", True), ("codex", False), ("kimi", False)):
+        monkeypatch.setitem(DETECTORS, pid, lambda ok=ok: DetectResult(ok, "fake"))
     assert mod.read_providers() == ["claude"]
 
 
