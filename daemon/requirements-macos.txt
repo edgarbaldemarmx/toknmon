@@ -1,0 +1,5 @@
+# ToknMon macOS daemon dependencies (install-mac.sh installs these into daemon/.venv).
+bleak>=0.22
+httpx>=0.27
+pillow>=10
+pytest>=8

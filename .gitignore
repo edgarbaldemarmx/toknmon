@@ -15,6 +15,15 @@ tools/package-lock.json
 # Mac daemon venv
 daemon/.venv/
 
-# Python bytecode cache
+# Python bytecode cache / pytest
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Official Clawd sources fetched on demand by tools/fetch_official_clawd.sh
+# (Anthropic assets; not redistributed — the generated header is committed)
+research/
+
+# Simulator screenshots and other BMP dumps
+*.bmp
+sim-autoshot*

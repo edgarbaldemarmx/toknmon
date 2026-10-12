@@ -39,9 +39,9 @@ The repo still says Clawdmeter everywhere (install label, config dir, device def
 `ask-on-risk`. Forecast ~1500 authored changed lines (docs-heavy). Single branch, work-unit commits per task.
 
 ## Tasks
-- [ ] T1 — Rebrand + cleanup (writer A).
+- [x] T1 — Rebrand + cleanup (writer A). Route: delegated writer A (multi-file; mapping done inline by the writer). Evidence below; uncommitted in the working tree except the layout moves, which landed in `834e3d5` (see note).
 - [ ] T2 — Gallery media + GIF export (worker B).
-- [ ] T4 — CI workflow (worker D).
+- [x] T4 — CI workflow (worker D). Route: delegated writer D; files `.github/workflows/ci.yml`, `.github/dependabot.yml`, `.github/ISSUE_TEMPLATE/{bug_report,feature_request}.yml`; local dry run green, GitHub run pending (uncommitted).
 - [ ] T3 — README + docs + LICENSE/NOTICE/CHANGELOG (writer C, after T1+T2).
 - [ ] T5 — Author rewrite, repo creation, push, daemon reinstall (parent, with user confirmation before push).
 
@@ -53,6 +53,28 @@ The repo still says Clawdmeter everywhere (install label, config dir, device def
 
 ## Verification evidence
 (pending)
+
+### CI evidence (T4, local dry run on macOS, 2026-10-12)
+- `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"`: ok (also dependabot.yml and both issue templates)
+- `actionlint`: not installed locally, skipped
+- `daemon/.venv/bin/python -m pytest daemon/tests -q`: 212 passed, 2 skipped (the 2 skips are Linux-only subprocess tests in `test_windows_token.py`; they run on ubuntu CI)
+- `node --test tools/test/`: 8 tests, 8 pass, 0 fail
+- `bash tools/test/shell/test_device_name_validator.sh`: all passed, exit 0
+- `node tools/convert_grid_animations.js && git diff --exit-code -- firmware/src/custom_animations.h`: no diff (idempotent; ImageMagick only needed with `--verify`)
+- `pio run -d firmware -e sim`: 1 succeeded
+- Headless smoke `SDL_VIDEODRIVER=dummy SIM_AUTOSHOT_MS=3000 SIM_AUTOSHOT_PATH=... .pio/build/sim/program` from `firmware/`: exit 0, 480x480 24-bit BMP written
+- Only confirmable on GitHub: `libsdl2-dev` providing `sdl2-config` for `[env:sim]`, `pip install -r daemon/requirements-macos.txt` (file authored by T1), PlatformIO cache hit rates, `waveshare_amoled_216` build on ubuntu runners.
+
+### T1 evidence (writer A, macOS, 2026-10-12)
+- Daemon: `DEFAULT_DEVICE_NAME = "ToknMon"`, `LEGACY_DEVICE_NAMES = ("TokenMon", "Clawdmeter")`; `CONFIG_DIR = ~/.config/toknmon` (`config`, `ble-address`), `LEGACY_CONFIG_DIR` kept; `migrate_legacy_config()` runs at startup, copies `config` and `ble-address` when the new file is absent, logs one line per copy, never deletes. `ATTENTION_DIR` stays at the legacy path on purpose (shared with `daemon/attention-hook.sh`, outside T1's surface; flags are transient). Plist template renamed `daemon/com.toknmon.daemon.plist` (label `com.toknmon.daemon`); `daemon/requirements-macos.txt` added; `daemon/config.example` updated; Linux/Windows daemons and installers carry the two-line "inherited from Clawdmeter" header, no functional change.
+- `install-mac.sh`: label/plist/logs (`~/Library/Logs/toknmon.{out,err}.log`) renamed; `pip install -r daemon/requirements-macos.txt`; mirrors the config migration before the prompts; `retire_legacy_agent` boots out `com.user.claude-usage-daemon` (failure ignored) and moves its plist to `~/.config/toknmon/legacy/`; flags `--yes/-y`, `--providers <list>`, `--device-name <name>`, `--no-prime`, `-h/--help`; interactive path unchanged when flags are absent; bash 3.2 compatible (no `declare -A`, no `${var,,}`).
+- Firmware: `BLE_DEFAULT_DEVICE_NAME "ToknMon"`; sim `ble_get_device_name()` → `"ToknMon (sim)"`, sim window title "ToknMon sim"; NVS namespaces `clawdmeter`/`clawd` unchanged with comments in `ble.h`/`ble.cpp` explaining why (name and bond survive reflash). `main.cpp`/`ble.cpp` print no brand string at boot (only `board_caps().name`), so nothing to rename there.
+- Layout: `odd/tasks/*` → `docs/odd/`, `SIM-USAGE.md` → `docs/simulator.md` (stale `"ss"` session-payload paragraph replaced; `SIM_SCENARIO`, `SIM_AUTOSHOT_MS`, `SIM_AUTOSHOT_PATH`, `SIM_SPLASH_PROVIDER`, `SIM_PARADE`, `SIM_NO_BATTERY` documented), `research/clawd-official/` removed, `fetch.sh` → `tools/fetch_official_clawd.sh` (now takes `[DEST_DIR]`, default `research/clawd-official`, which is git-ignored), `tools/convert_official_clawd.js --src DIR` (`--in` alias, `--help`), `tools/README.md` and `CLAUDE.md` updated; `.gitignore` adds `.pytest_cache/`, `research/`, `*.bmp`, `sim-autoshot*` (`daemon/.venv/`, `firmware/.pio/`, `__pycache__/` were already there).
+- `CLAUDE.md`: ToknMon project context with Clawdmeter attribution and inherited hardware notes; "Maintainer notes" replaces the user-profile section; daemon section rewritten around the macOS daemon; technical sections intact.
+- Note: the layout moves were staged with `git mv`/`git rm` and were swept into the T4 commit `834e3d5 ci: …` (44 files, all pure renames/deletions). Everything else from T1 is uncommitted in the working tree.
+- Tests: `daemon/.venv/bin/python -m pytest daemon/tests -q` → 218 passed, 2 skipped (baseline 212 + 6 new in `daemon/tests/test_config_migration.py`; written together with the implementation, so no RED run was observed). `bash tools/test/shell/test_device_name_validator.sh` → "All device-name validator tests passed." `bash -n install-mac.sh flash-mac.sh screenshot.sh tools/fetch_official_clawd.sh` → ok. `./install-mac.sh --help` prints the flags; `--providers`/`--device-name` without value and unknown options exit 2 before any side effect.
+- Builds: `pio run -d firmware -e sim` → SUCCESS; `-e waveshare_amoled_216` → SUCCESS (not flashed).
+- Brand audit (`grep -rni 'clawdmeter\|claude-usage-monitor\|TokenMon'`, excluding `.git/.pio/.venv`, `docs/odd/`, `splash_animations.h`): 147 hits. Remaining: attribution and legacy-compat constants/comments (CLAUDE.md, daemon, ble.h/ble.cpp, brightness.cpp NVS, config.example, install-mac.sh legacy handling, tests of the legacy names), inherited Linux/Windows files (`install.sh`, `install-windows.ps1`, `daemon/claude-usage-daemon.sh`, `daemon/*_windows.py`, `daemon/README-windows.md`, `daemon/tests/test_windows_*`), generator command lines in `font_*.c`, and `README.md` (T3). Outside T1's surface and still carrying the old name: `firmware/src/boards/sim/display.cpp` (window title "Clawdmeter sim"), `firmware/src/boards/sim/sim_main.cpp` (usage text), `docs/porting/adding-a-board.md` (title), `daemon/test_macos_connect.py` (docstring), `daemon/attention-hook.sh` (legacy dir, intentional), `firmware/src/clawd_still.h` / `splash_animations.h` headers (generated; mention `research/clawd-official/`).
 
 ## Next step
 Branch, then launch A, B, D in parallel; C after A and B.

@@ -5,7 +5,7 @@
 
 int main(void) {
     printf(
-        "Clawdmeter simulator\n"
+        "ToknMon simulator\n"
         "  mouse          touch (tap toggles splash/usage)\n"
         "  space          play/pause scenario    left/right step    1-9 jump\n"
         "  d              toggle BLE link\n"

@@ -90,7 +90,9 @@ static char mac_str[18];
 // The board is a BLE peripheral that any central in range could connect to and
 // write usage data to. To stop the display rotating to another machine's
 // account, it locks to ONE owner: the identity address of the machine it is
-// bonded to, persisted in NVS. Only that owner (over a bonded+encrypted link)
+// bonded to, persisted in NVS (namespace "clawd" — inherited from Clawdmeter and
+// kept so bonds survive a reflash to ToknMon; see BLE_NAME_NVS_NAMESPACE in
+// ble.h). Only that owner (over a bonded+encrypted link)
 // may write usage data; a second machine that pairs is rejected so the board
 // stays paired to a single machine. The hold-power bond-clear gesture resets
 // the owner so the board can be handed to a different machine.

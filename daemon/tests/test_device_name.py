@@ -21,8 +21,9 @@ from daemon.claude_usage_daemon import (
 # read_device_name
 # ---------------------------------------------------------------------------
 
-def test_default_name_is_tokenmon():
-    assert DEFAULT_DEVICE_NAME == "TokenMon"
+def test_default_name_is_toknmon():
+    assert DEFAULT_DEVICE_NAME == "ToknMon"
+    assert "TokenMon" in LEGACY_DEVICE_NAMES
     assert "Clawdmeter" in LEGACY_DEVICE_NAMES
 
 
@@ -82,7 +83,7 @@ def test_accepted_names_include_configured_and_legacy(tmp_path, monkeypatch):
 def test_accepted_names_default_include_legacy(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "CONFIG_FILE", tmp_path / "config")
     names = accepted_device_names()
-    assert names >= {"TokenMon", "Clawdmeter"}
+    assert names >= {"ToknMon", "TokenMon", "Clawdmeter"}
 
 
 def test_is_device_name_matches_configured_and_legacy_only(tmp_path, monkeypatch):
@@ -91,7 +92,7 @@ def test_is_device_name_matches_configured_and_legacy_only(tmp_path, monkeypatch
     monkeypatch.setattr(mod, "CONFIG_FILE", cfg)
     assert is_device_name("Desk-2")
     assert is_device_name("Clawdmeter")
-    assert not is_device_name("TokenMon")       # default is not implied once configured
+    assert not is_device_name("ToknMon")        # default is not implied once configured
     assert not is_device_name("Magic Keyboard")
     assert not is_device_name(None)
 

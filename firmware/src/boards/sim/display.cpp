@@ -29,7 +29,7 @@ void display_hal_init(void) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         exit(1);
     }
-    win = SDL_CreateWindow("Clawdmeter sim",
+    win = SDL_CreateWindow("ToknMon sim",
                            SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                            LCD_WIDTH, LCD_HEIGHT, 0);
     ren = SDL_CreateRenderer(win, -1, 0);

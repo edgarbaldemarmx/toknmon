@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Inherited from Clawdmeter (https://github.com/HermannBjorgvin/Clawdmeter); Claude-only.
+# Not ported to the ToknMon providers and untested with ToknMon — kept as-is.
 """Windows system-tray entry and state bridge for Clawdmeter — APP-01.
 
 Provides:

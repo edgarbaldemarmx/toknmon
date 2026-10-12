@@ -1,10 +1,10 @@
 #!/bin/bash
-# Build and flash TokenMon firmware on macOS, then (optionally) give the board
+# Build and flash ToknMon firmware on macOS, then (optionally) give the board
 # its Bluetooth name.
 # Usage:
 #   ./flash-mac.sh <board>                             # auto-detect /dev/cu.usbmodem*
 #   ./flash-mac.sh <board> /dev/cu.usbmodem1101        # explicit USB serial port
-#   ./flash-mac.sh <board> --name "ToknMon Desk One"  # non-interactive name
+#   ./flash-mac.sh <board> --name "Desk 2"             # non-interactive name
 #   DEVICE_NAME="Desk 2" ./flash-mac.sh <board>        # same, via environment
 #   ./flash-mac.sh --rename "Desk 2" [port]            # rename an already-flashed
 #                                                      # board, no build/upload
@@ -12,19 +12,19 @@
 # <board> is the PlatformIO env name, e.g. waveshare_amoled_216 or waveshare_amoled_18.
 #
 # After a successful upload the script asks for the device's Bluetooth name
-# (default: the last one saved in ~/.config/claude-usage-monitor/config, else
-# "TokenMon"), sends `name <text>` to the firmware over USB serial, echoes the
+# (default: the last one saved in ~/.config/toknmon/config, else
+# "ToknMon"), sends `name <text>` to the firmware over USB serial, echoes the
 # board's reply, and records the name as `device_name` in the daemon config.
 # Press Enter to keep the default; leave DEVICE_NAME unset in a non-interactive
 # shell to skip the naming step entirely.
 #
 # `--rename` skips the build and upload: it only sends `name <text>` to the board
-# that is already running TokenMon firmware and updates the daemon config.
+# that is already running ToknMon firmware and updates the daemon config.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG_FILE="$HOME/.config/claude-usage-monitor/config"
-DEFAULT_NAME="TokenMon"
+CONFIG_FILE="$HOME/.config/toknmon/config"
+DEFAULT_NAME="ToknMon"
 NAME_MAX_LEN=18
 NAME_RULES="1-$NAME_MAX_LEN printable ASCII characters, no '#'; surrounding whitespace is trimmed"
 
@@ -224,7 +224,7 @@ apply_device_name() {
 
 # --- rename-only mode ------------------------------------------------------
 if [ -n "$RENAME" ]; then
-    echo "=== Renaming TokenMon ==="
+    echo "=== Renaming ToknMon ==="
     echo "Port:  $PORT"
     echo ""
     apply_device_name "$RENAME"
@@ -233,7 +233,7 @@ if [ -n "$RENAME" ]; then
     exit 0
 fi
 
-echo "=== Flashing TokenMon ==="
+echo "=== Flashing ToknMon ==="
 echo "Board: $BOARD"
 echo "Port:  $PORT"
 echo ""
@@ -252,7 +252,7 @@ if [ -n "$NAME_ARG" ]; then
     chosen="$NAME_ARG"
 elif [ -t 0 ]; then
     echo "Each board can advertise its own Bluetooth name ($NAME_RULES),"
-    echo "handy when several TokenMons share an office. Press Enter to keep the default."
+    echo "handy when several ToknMon boards share an office. Press Enter to keep the default."
     read -r -p "Device Bluetooth name [$default_name]: " chosen || chosen=""
     [ -z "$chosen" ] && chosen="$default_name"
 else

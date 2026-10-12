@@ -1,4 +1,4 @@
-"""Usage providers for the TokenMon daemon.
+"""Usage providers for the ToknMon daemon.
 
 Importable both as ``daemon.providers`` (tests) and ``providers`` (launchd runs
 ``claude_usage_daemon.py`` as a script with ``daemon/`` as ``sys.path[0]``);

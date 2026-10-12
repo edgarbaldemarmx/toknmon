@@ -1,11 +1,20 @@
 #!/bin/bash
-# Re-download the official Clawd assets from claude.ai (static assets are not
-# Cloudflare-gated; only HTML routes are). Also probes for not-yet-referenced
+# Download the official Clawd assets from claude.ai (static assets are not
+# Cloudflare-gated; only HTML routes are) into a local, git-ignored directory
+# for tools/convert_official_clawd.js. Also probes for not-yet-referenced
 # names — the server answers a real GIF for valid names and an HTML catch-all
-# otherwise, so magic bytes distinguish hits. See CLAUDE.md for methodology.
+# otherwise, so magic bytes distinguish hits. See CLAUDE.md, "Splash
+# animations", for the methodology. These assets are Anthropic's and are not
+# redistributed with ToknMon; fetch them on demand only.
+#
+# Usage: tools/fetch_official_clawd.sh [DEST_DIR]   (default research/clawd-official)
 set -u
 UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-cd "$(dirname "$0")"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DEST="${1:-$REPO_ROOT/research/clawd-official}"
+mkdir -p "$DEST"
+cd "$DEST"
+echo "== destination: $DEST"
 
 KNOWN="
 clawd/core/Clawd-CrabWalking.gif
@@ -47,7 +56,7 @@ for n in $PROBE; do
     curl -s -A "$UA" -o "$tmp" "https://claude.ai/images/clawd/$d/Clawd-$n.gif"
     if head -c 6 "$tmp" | grep -qE 'GIF8|PNG'; then
       mv "$tmp" "Clawd-$n.gif"
-      echo "NEW HIT: $d/Clawd-$n.gif  <-- add to KNOWN and README"
+      echo "NEW HIT: $d/Clawd-$n.gif  <-- add to KNOWN and to the ANIMS catalog in tools/convert_official_clawd.js"
     else
       rm -f "$tmp"
     fi

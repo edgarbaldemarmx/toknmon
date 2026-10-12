@@ -1,18 +1,77 @@
 #!/bin/bash
-# macOS installer for Clawdmeter daemon (Python + bleak + launchd).
+# macOS installer for the ToknMon daemon (Python + bleak + launchd).
 # Mirrors install.sh but uses LaunchAgents instead of systemd user units.
+#
+# Usage:
+#   ./install-mac.sh                       # interactive (prompts for each setting)
+#   ./install-mac.sh --yes --no-prime      # non-interactive, defaults everywhere
+#   ./install-mac.sh --yes --providers claude,codex,kimi --device-name "Desk 2"
+#
+# Options:
+#   --yes, -y             Accept the default answer for every prompt. Existing
+#                         config values are kept; the permission-priming run is
+#                         bounded to a few seconds instead of waiting for Ctrl+C.
+#   --providers <list>    Comma-separated providers to monitor (claude, codex, kimi).
+#   --device-name <name>  Bluetooth name of the board, as set when flashing
+#                         (1-18 printable ASCII characters, no '#').
+#   --no-prime            Skip the Bluetooth permission-priming daemon run.
+#   -h, --help            Show this help and exit.
+#
+# Upgrading from Clawdmeter: the legacy launch agent (com.user.claude-usage-daemon)
+# is stopped and its plist moved to ~/.config/toknmon/legacy/, and the legacy
+# config under ~/.config/claude-usage-monitor is copied to ~/.config/toknmon
+# (never deleted).
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVICE_LABEL="com.user.claude-usage-daemon"
+SERVICE_LABEL="com.toknmon.daemon"
 PLIST_SRC="$SCRIPT_DIR/daemon/$SERVICE_LABEL.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/$SERVICE_LABEL.plist"
+LEGACY_LABEL="com.user.claude-usage-daemon"
+LEGACY_PLIST="$HOME/Library/LaunchAgents/$LEGACY_LABEL.plist"
 VENV_DIR="$SCRIPT_DIR/daemon/.venv"
 DAEMON_PY="$SCRIPT_DIR/daemon/claude_usage_daemon.py"
+REQUIREMENTS="$SCRIPT_DIR/daemon/requirements-macos.txt"
 LOG_DIR="$HOME/Library/Logs"
-LOG_OUT="$LOG_DIR/claude-usage-daemon.out.log"
-LOG_ERR="$LOG_DIR/claude-usage-daemon.err.log"
-CONFIG_FILE="$HOME/.config/claude-usage-monitor/config"
+LOG_OUT="$LOG_DIR/toknmon.out.log"
+LOG_ERR="$LOG_DIR/toknmon.err.log"
+CONFIG_DIR="$HOME/.config/toknmon"
+CONFIG_FILE="$CONFIG_DIR/config"
+LEGACY_CONFIG_DIR="$HOME/.config/claude-usage-monitor"
+LEGACY_KEEP_DIR="$CONFIG_DIR/legacy"
+DEFAULT_DEVICE_NAME="ToknMon"
+PRIME_SECONDS=25   # bounded priming run under --yes
+
+usage() {
+    sed -n '/^# Usage:/,/^set -e/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
+}
+
+ASSUME_YES=0
+NO_PRIME=0
+OPT_PROVIDERS=""
+OPT_DEVICE_NAME=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --yes|-y) ASSUME_YES=1 ;;
+        --no-prime) NO_PRIME=1 ;;
+        --providers)
+            shift
+            [ -n "${1:-}" ] || { echo "Error: --providers needs a value (e.g. claude,codex,kimi)" >&2; exit 2; }
+            OPT_PROVIDERS="$1" ;;
+        --providers=*) OPT_PROVIDERS="${1#*=}" ;;
+        --device-name)
+            shift
+            [ -n "${1:-}" ] || { echo "Error: --device-name needs a value" >&2; exit 2; }
+            OPT_DEVICE_NAME="$1" ;;
+        --device-name=*) OPT_DEVICE_NAME="${1#*=}" ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $1" >&2; echo "" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# True when we may ask the user questions: a terminal on stdin and no --yes.
+interactive() { [ -t 0 ] && [ "$ASSUME_YES" = 0 ]; }
 
 # Render an absolute path under $HOME back to a ~ form for tidy config entries.
 _tilde() { case "$1" in "$HOME"/*) echo "~${1#"$HOME"}";; *) echo "$1";; esac; }
@@ -79,10 +138,10 @@ configure_config_dirs() {
 
     echo "  Found multiple Claude config dirs. The daemon can poll several plans"
     echo "  and show whichever one you're actively using."
-    if [ ! -t 0 ]; then
+    if ! interactive; then
         local list=""
         for d in "${candidates[@]}"; do list="${list:+$list, }$(_tilde "$d")"; done
-        echo "  Non-interactive shell — skipping. To enable, add to $CONFIG_FILE:"
+        echo "  Non-interactive — keeping the default (~/.claude). To poll several, add to $CONFIG_FILE:"
         echo "    config_dirs = $list"
         return 0
     fi
@@ -119,9 +178,12 @@ configure_config_dirs() {
 # Offer the optional clock display (shown in place of the "Usage" title). Only
 # writes the key when it actually changes the current/default value.
 configure_clock() {
-    [ -t 0 ] || return 0
     local ans cur
     cur=$(current_config_value clock)
+    if ! interactive; then
+        echo "  Clock: ${cur:-off} (${cur:+kept}${cur:-default})."
+        return 0
+    fi
     read -r -p "  Show a clock instead of the \"Usage\" title? [off/auto/12/24] (default off) " ans || ans=""
     ans=$(echo "$ans" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
     [ -z "$ans" ] && ans="off"
@@ -139,9 +201,12 @@ configure_clock() {
 
 # Offer the optional session-reset chime (sound through the board speaker).
 configure_chime() {
-    [ -t 0 ] || return 0
     local ans cur
     cur=$(current_config_value chime)
+    if ! interactive; then
+        echo "  Chime: ${cur:-off} (${cur:+kept}${cur:-default})."
+        return 0
+    fi
     read -r -p "  Chime through the speaker when your 5h session limit resets? [y/N] " ans || ans=""
     if [[ "$ans" =~ ^[Yy]$ ]]; then
         upsert_config_key chime on
@@ -157,24 +222,34 @@ configure_chime() {
 # Record the board's Bluetooth name so the daemon's HID fallback and stale-bond
 # repair match the right device. The name itself lives on the board (set by
 # flash-mac.sh or the `name <text>` serial command); this only stores it in the
-# config. Defaults to the saved value, else "TokenMon".
+# config. Defaults to the saved value, else "ToknMon". `--device-name` sets it
+# without asking (an invalid value is an error); `--yes` keeps the default.
 configure_device_name() {
-    [ -t 0 ] || return 0
     local ans cur def
     cur=$(current_config_value device_name)
-    def="${cur:-TokenMon}"
-    read -r -p "  Device Bluetooth name (as set when flashing) [$def]: " ans || ans=""
-    [ -z "$ans" ] && ans="$def"
-    if ! ans=$(valid_device_name "$ans"); then
-        echo "  Invalid name (1-18 printable ASCII characters, no '#'; surrounding whitespace is trimmed) — leaving device_name unchanged."
-        return 0
+    def="${cur:-$DEFAULT_DEVICE_NAME}"
+    if [ -n "$OPT_DEVICE_NAME" ]; then
+        ans="$OPT_DEVICE_NAME"
+        if ! ans=$(valid_device_name "$ans"); then
+            echo "Error: --device-name '$OPT_DEVICE_NAME' is invalid (1-18 printable ASCII characters, no '#')." >&2
+            exit 2
+        fi
+    elif ! interactive; then
+        ans="$def"
+    else
+        read -r -p "  Device Bluetooth name (as set when flashing) [$def]: " ans || ans=""
+        [ -z "$ans" ] && ans="$def"
+        if ! ans=$(valid_device_name "$ans"); then
+            echo "  Invalid name (1-18 printable ASCII characters, no '#'; surrounding whitespace is trimmed) — leaving device_name unchanged."
+            return 0
+        fi
     fi
     if [ "$ans" = "$cur" ]; then
         echo "  device_name = $ans (unchanged)."
         return 0
     fi
-    if [ "$ans" = "TokenMon" ] && [ -z "$cur" ]; then
-        echo "  device_name = TokenMon (default)."
+    if [ "$ans" = "$DEFAULT_DEVICE_NAME" ] && [ -z "$cur" ]; then
+        echo "  device_name = $DEFAULT_DEVICE_NAME (default)."
         return 0
     fi
     upsert_config_key device_name "$ans"
@@ -183,16 +258,24 @@ configure_device_name() {
 
 # Pick which providers the daemon polls (`providers` key). Detects Codex and
 # Kimi Code installs to suggest a default; Claude is always suggested.
+# `--providers <list>` sets the key without asking (an unknown provider is an
+# error); `--yes` keeps the current value, else the detected suggestion.
 configure_providers() {
-    [ -t 0 ] || return 0
-    local ans cur suggested="claude" detected=""
+    local ans cur suggested="claude" detected="" explicit=0
     cur=$(current_config_value providers)
     [ -d "$HOME/.codex/sessions" ] && { suggested="$suggested,codex"; detected="$detected Codex"; }
     [ -d "$HOME/.kimi-code/credentials" ] && { suggested="$suggested,kimi"; detected="$detected Kimi"; }
     [ -n "$cur" ] && suggested=$(echo "$cur" | tr -d ' ')
-    echo "  The device can cycle through several providers (claude, codex, kimi)."
-    [ -n "$detected" ] && echo "  Detected on this Mac:$detected"
-    read -r -p "  Providers to monitor [claude,codex,kimi] (default $suggested): " ans || ans=""
+    if [ -n "$OPT_PROVIDERS" ]; then
+        ans="$OPT_PROVIDERS"; explicit=1
+    elif ! interactive; then
+        ans="$suggested"
+        echo "  Providers: $ans (${cur:+kept}${cur:-detected default})."
+    else
+        echo "  The device can cycle through several providers (claude, codex, kimi)."
+        [ -n "$detected" ] && echo "  Detected on this Mac:$detected"
+        read -r -p "  Providers to monitor [claude,codex,kimi] (default $suggested): " ans || ans=""
+    fi
     ans=$(echo "${ans:-$suggested}" | tr 'A-Z' 'a-z' | tr -d ' ')
     local p valid=""
     IFS=',' read -r -a parts <<< "$ans"
@@ -200,9 +283,18 @@ configure_providers() {
         case "$p" in
             claude|codex|kimi) valid="${valid:+$valid, }$p" ;;
             "") ;;
-            *) echo "  Unknown provider '$p' — ignoring." ;;
+            *)
+                if [ "$explicit" = 1 ]; then
+                    echo "Error: --providers: unknown provider '$p' (use claude, codex, kimi)." >&2
+                    exit 2
+                fi
+                echo "  Unknown provider '$p' — ignoring." ;;
         esac
     done
+    if [ -n "$cur" ] && [ "$(echo "$valid" | tr -d ' ')" = "$(echo "$cur" | tr -d ' ')" ]; then
+        echo "  providers = $valid (unchanged)."
+        return 0
+    fi
     if [ -z "$valid" ] || [ "$valid" = "claude" ]; then
         if [ -n "$cur" ]; then
             upsert_config_key providers claude
@@ -218,9 +310,12 @@ configure_providers() {
 
 # Offer the optional attention beep (Claude Code hooks, see the README).
 configure_beep() {
-    [ -t 0 ] || return 0
     local ans cur
     cur=$(current_config_value beep)
+    if ! interactive; then
+        echo "  Beep: ${cur:-off} (${cur:+kept}${cur:-default})."
+        return 0
+    fi
     read -r -p "  Beep through the speaker when Claude Code needs your attention? [y/N] " ans || ans=""
     if [[ "$ans" =~ ^[Yy]$ ]]; then
         upsert_config_key beep on
@@ -233,7 +328,38 @@ configure_beep() {
     fi
 }
 
-echo "=== Clawdmeter macOS install ==="
+# Mirror of the daemon's migrate_legacy_config(): copy the Clawdmeter-era
+# config and cached BLE address into ~/.config/toknmon when the new files are
+# absent, so the prompts below start from the user's existing settings. The
+# legacy files are never deleted.
+migrate_legacy_config() {
+    [ -d "$LEGACY_CONFIG_DIR" ] || return 0
+    local f
+    for f in config ble-address; do
+        if [ -f "$LEGACY_CONFIG_DIR/$f" ] && [ ! -e "$CONFIG_DIR/$f" ]; then
+            mkdir -p "$CONFIG_DIR"
+            cp -p "$LEGACY_CONFIG_DIR/$f" "$CONFIG_DIR/$f"
+            echo "  Migrated $(_tilde "$LEGACY_CONFIG_DIR/$f") -> $(_tilde "$CONFIG_DIR/$f") (legacy file kept)."
+        fi
+    done
+}
+
+# Stop and park the Clawdmeter-era launch agent so two daemons never fight over
+# the board. Its plist is moved (not deleted) to ~/.config/toknmon/legacy/.
+retire_legacy_agent() {
+    [ -f "$LEGACY_PLIST" ] || return 0
+    echo "  Legacy launch agent found: $LEGACY_LABEL"
+    if launchctl bootout "gui/$(id -u)/$LEGACY_LABEL" 2>/dev/null; then
+        echo "  Stopped $LEGACY_LABEL."
+    else
+        echo "  $LEGACY_LABEL was not running (bootout skipped)."
+    fi
+    mkdir -p "$LEGACY_KEEP_DIR"
+    mv "$LEGACY_PLIST" "$LEGACY_KEEP_DIR/"
+    echo "  Moved $(_tilde "$LEGACY_PLIST") -> $(_tilde "$LEGACY_KEEP_DIR")/"
+}
+
+echo "=== ToknMon macOS install ==="
 echo ""
 
 echo "[1/6] Checking prerequisites..."
@@ -290,7 +416,7 @@ if [ ! -d "$VENV_DIR" ]; then
     "$PYTHON3" -m venv "$VENV_DIR"
 fi
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-"$VENV_DIR/bin/pip" install --quiet "bleak>=0.22" "httpx>=0.27"
+"$VENV_DIR/bin/pip" install --quiet -r "$REQUIREMENTS"
 PYTHON_BIN="$VENV_DIR/bin/python"
 echo "  OK ($PYTHON_BIN)"
 echo ""
@@ -312,6 +438,7 @@ echo ""
 # providers to poll, plus the optional clock display, session-reset chime and
 # attention beep. All re-read by the daemon each poll.
 echo "[4/6] Configuring the daemon..."
+migrate_legacy_config
 configure_device_name
 configure_config_dirs
 configure_providers
@@ -321,15 +448,30 @@ configure_beep
 echo ""
 
 echo "[5/6] Bluetooth permission check..."
-echo "  On first run the daemon will trigger a Bluetooth permission prompt."
-echo "  macOS only prompts for foreground processes — so we'll run it"
-echo "  interactively once below. Press Ctrl+C after you see 'Scanning...'"
-echo "  and grant permission when prompted. Then re-run this installer"
-echo "  (or just continue) to enable launchd autostart."
-echo ""
-read -r -p "Run a permission-priming scan now? [Y/n] " ans
-if [[ ! "$ans" =~ ^[Nn]$ ]]; then
-    "$PYTHON_BIN" "$DAEMON_PY" || true
+if [ "$NO_PRIME" = 1 ]; then
+    echo "  Skipped (--no-prime). If macOS never asked for Bluetooth access, run"
+    echo "  once in a terminal and grant it when prompted:  $PYTHON_BIN $DAEMON_PY"
+elif ! interactive; then
+    echo "  On first run the daemon triggers a Bluetooth permission prompt, and"
+    echo "  macOS only prompts for foreground processes. Running it for"
+    echo "  ${PRIME_SECONDS}s — grant access if prompted."
+    "$PYTHON_BIN" "$DAEMON_PY" &
+    prime_pid=$!
+    ( sleep "$PRIME_SECONDS"; kill "$prime_pid" 2>/dev/null ) >/dev/null 2>&1 &
+    prime_killer=$!
+    wait "$prime_pid" 2>/dev/null || true
+    kill "$prime_killer" 2>/dev/null || true
+else
+    echo "  On first run the daemon will trigger a Bluetooth permission prompt."
+    echo "  macOS only prompts for foreground processes — so we'll run it"
+    echo "  interactively once below. Press Ctrl+C after you see 'Scanning...'"
+    echo "  and grant permission when prompted. Then re-run this installer"
+    echo "  (or just continue) to enable launchd autostart."
+    echo ""
+    read -r -p "Run a permission-priming scan now? [Y/n] " ans
+    if [[ ! "$ans" =~ ^[Nn]$ ]]; then
+        "$PYTHON_BIN" "$DAEMON_PY" || true
+    fi
 fi
 echo ""
 
@@ -356,6 +498,7 @@ fi
 echo ""
 
 echo "[6/6] Loading launchd service..."
+retire_legacy_agent
 launchctl unload "$PLIST_DST" 2>/dev/null || true
 launchctl load -w "$PLIST_DST"
 echo "  Loaded."
@@ -366,11 +509,12 @@ echo ""
 echo "First-time Bluetooth pairing (after firmware is flashed):"
 echo "  1. Power on the device."
 echo "  2. Open System Settings → Bluetooth."
-echo "  3. Click 'Connect' next to 'Clawdmeter'."
+final_name=$(current_config_value device_name)
+echo "  3. Click 'Connect' next to '${final_name:-$DEFAULT_DEVICE_NAME}'."
 echo "  4. The daemon will discover it within ~30 s and start polling."
 echo ""
 echo "Useful commands:"
-echo "  launchctl list | grep claude-usage     # check it's running"
+echo "  launchctl list | grep toknmon          # check it's running"
 echo "  tail -F $LOG_OUT                       # live logs"
 echo "  launchctl unload $PLIST_DST            # stop"
 echo "  launchctl load -w $PLIST_DST           # start"

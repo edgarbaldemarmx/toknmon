@@ -1,12 +1,25 @@
 # Project context
 
-ESP32-S3 / ESP32-C6 firmware for a desk-side Claude Code usage monitor. Each
-supported board lives in its own `firmware/src/boards/<name>/` folder and is
-selected via PlatformIO's `build_src_filter`. Adding a board means dropping in
-a new folder + a new `[env:...]` block — `main.cpp`, `ui.cpp`, and `splash.cpp`
-never see board-specific code. See [`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md).
+**ToknMon** is a desk-side usage monitor for AI coding assistants: an ESP32-S3
+board with a small AMOLED shows the rate-limit windows of Claude Code, OpenAI
+Codex CLI and Kimi Code side by side (carousel, per-provider mascots and
+scenes), fed over BLE by a host daemon running on a Mac. It derives from
+[Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) by Hermann
+Bjorgvin (single-provider Claude monitor); the firmware architecture, board
+ports and the hardware notes below are inherited from it and credited to that
+project. ToknMon adds multi-provider polling, a configurable BLE device name,
+hand-drawn Codex/Kimi mascots, mascot mode, the parade and gesture navigation
+(design log per milestone in `docs/odd/`). Only the Waveshare ESP32-S3
+Touch AMOLED 2.16 is verified with ToknMon; the other ports build but are
+untested since the fork.
 
-Seven ports today (two SoC families, five panel sizes):
+ESP32-S3 / ESP32-C6 firmware. Each supported board lives in its own
+`firmware/src/boards/<name>/` folder and is selected via PlatformIO's
+`build_src_filter`. Adding a board means dropping in a new folder + a new
+`[env:...]` block — `main.cpp`, `ui.cpp`, and `splash.cpp` never see
+board-specific code. See [`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md).
+
+Seven ports today (two SoC families, five panel sizes; hardware notes inherited from Clawdmeter):
 
 - `boards/waveshare_amoled_216/` — original Waveshare ESP32-S3-Touch-AMOLED-2.16 (CO5300, 480×480 square, CST9220 touch, IMU rotation). Build env: `waveshare_amoled_216`.
 - `boards/waveshare_amoled_18/` — Waveshare ESP32-S3-Touch-AMOLED-1.8 (368×448 portrait, XCA9554 IO expander). Build env: `waveshare_amoled_18`. **Two panel revisions are auto-detected at boot** (`board_rev()` in `board_init.cpp`, enum in `board_rev.h`): original = SH8601 display + FT3168 touch (0x38); later = CO5300 display + CST816 touch (0x15). One binary drives both.
@@ -16,13 +29,13 @@ Seven ports today (two SoC families, five panel sizes):
 - `boards/waveshare_lcd_154/` — Waveshare ESP32-S3-Touch-LCD-1.54 (ST7789, 240×240 square, CST816T touch @ 0x15). Build env: `waveshare_lcd_154`. **The first non-AMOLED port**: a plain 4-wire SPI TFT, not QSPI, and the panel has no brightness command — backlight is LEDC PWM on `LCD_BL`. **No PMU**: battery is an ADC divider on GPIO1 and `BAT_EN` (GPIO2) is a power-hold line that must be driven HIGH early in `board_init()` or the board browns out on battery. Three buttons (BOOT + GPIO5 + a PWR-role GPIO4); ES8311 chime wired up; QMI8658 populated but unused (fixed orientation, no rotation).
 - `boards/waveshare_lcd_4/` — Waveshare ESP32-S3-Touch-LCD-4 (ST7701 RGB parallel, 480×480 square, GT911 touch). Build env: `waveshare_lcd_4`. **RGB-panel port**: Arduino_ESP32RGBPanel + bounce buffers (tearing fix). IO expander @ 0x24 (TCA9554 / CH32V003) must init before `gfx->begin()` or the panel stays dark; backlight is expander pin 2 (on/off only). No AXP2101 / IMU; KEY/PWR is hardware RST. Single BOOT button (GPIO 0 → Space/PTT).
 
-Plus one non-hardware target: `boards/sim/` — **native desktop simulator** (SDL2 window, 480×480, `platform = native`). Build env: `sim`. See "Desktop simulator" below.
+Plus one non-hardware target: `boards/sim/` — **native desktop simulator** (SDL2 window, 480×480, `platform = native`). Build env: `sim`. See "Desktop simulator" below and `docs/simulator.md`.
 
 **C6 ports have no PSRAM** — shared code gates on `BOARD_HAS_PSRAM` (absent on C6) to use `MALLOC_CAP_INTERNAL` for LVGL/splash buffers, and the `screenshot` serial command is disabled (`LV_USE_SNAPSHOT=0`), so UI changes on a C6 board must be eyeballed on hardware, not auto-captured.
 
 The shared code calls a small HAL (`firmware/src/hal/`) that each board implements: display, touch, input, power, IMU. Optional features are guarded by `BoardCaps` (runtime) and `BOARD_HAS_*` (compile-time) rather than `#ifdef BOARD_*`.
 
-Connects to a host daemon over BLE; daemon polls Anthropic API for usage data. This file is for future Claude Code sessions to bootstrap quickly. Read this first.
+Connects to a host daemon over BLE; the daemon polls each enabled provider (Claude usage endpoint, Codex session logs, Kimi usage API) and pushes one JSON payload per provider. This file is for future Claude Code sessions to bootstrap quickly. Read this first.
 
 ## Hardware (critical pins)
 
@@ -59,7 +72,7 @@ ESP32-C6 sibling of the S3 1.8: same 368×448 SH8601 panel + FocalTech touch, di
 - Touch: **FT3168** via I2C (SDA=15, SCL=14, **INT=38, RST=9** direct GPIO, addr=0x38). Same inline FocalTech reader as the 1.8 port (no GPLv3 `Arduino_DriveBus` dependency). Coordinates verified end-to-end with the BLE reset zone.
 - PMU: AXP2101 @ 0x34 (same chip as 2.16/1.8 — `XPowersLib` reused). PWR button routes through AXP PKEY IRQs (short / long / positive), same path as the 2.16 — no IO expander.
 - IMU: QMI8658 @ 0x6B (initialized for I2C bus health; rotation logic disabled — fixed watch enclosure orientation).
-- RTC: **PCF85063** on the same I2C bus, powered through AXP2101 for retention. Not used by Clawdmeter but present for future features.
+- RTC: **PCF85063** on the same I2C bus, powered through AXP2101 for retention. Not used by the firmware but present for future features.
 - Audio codec: **ES8311** + ES7210 ADC on the same I2C bus. The amp path is unverified on this board, so `sound.cpp` no-ops (same posture as the C6 1.8) — the shared `chime.cpp` engine is ready to wire up once it's tested on hardware.
 - **No IO expander** despite the Waveshare wiki FAQ implying one. The schematic shows Key3/PWR wired directly to AXP2101 PWRON; touch reset and display reset are direct GPIOs. `board_init()` pulses LCD_RESET (GPIO 8) and TP_RESET (GPIO 9) before display/touch HAL init.
 - Buttons: GPIO 0 (BOOT → Space/voice-mode), AXP PKEY (PWR → cycle screens; hold-to-pair). **No third button**.
@@ -101,8 +114,13 @@ firmware/src/
   icons.h                   — icon arrays. Battery (5×) are RGB565A8 with alpha; rest are raw RGB565.
   logo.h                    — 80×80 RGB565 logo
   font_*.c                  — pre-compiled LVGL 9 bitmap fonts (Tiempos 56/34, Styrene 48/28/24/20/16/14/12, Mono 32/18)
-  splash_animations.h       — generated, do not hand-edit
+  splash_animations.h       — generated, do not hand-edit (official Clawd set)
+  custom_animations.h       — generated, do not hand-edit (Codex/Kimi grids)
+daemon/                     — macOS host daemon (claude_usage_daemon.py + providers/), launchd template, tests
+tools/                      — asset converters, fetch_official_clawd.sh, tests (see tools/README.md)
 docs/porting/               — adding-a-board.md, hal-contract.md, capability-flags.md
+docs/simulator.md           — desktop simulator usage (controls, scenarios, env hooks)
+docs/odd/                   — design log: one feature document per milestone (H0–H8)
 ```
 
 Each board folder contains: `board.h` (pins, I2C addresses, `BOARD_HAS_*` flags),
@@ -128,6 +146,8 @@ pio run -d firmware -e waveshare_amoled_216 -t upload --upload-port /dev/ttyACM0
 ```
 
 If `pio` isn't on PATH: try `~/.platformio/penv/bin/pio` (Linux/macOS pio install) or `brew install platformio` on macOS.
+
+On macOS prefer `./flash-mac.sh <board> [port] [--name "<bluetooth name>"]`: it builds, uploads, then sets the board's BLE name over serial (default `ToknMon`, max 18 ASCII chars, stored in NVS) and records it as `device_name` in `~/.config/toknmon/config`. `./flash-mac.sh --rename "<name>" [port]` renames without reflashing.
 
 Device path differs by OS: `/dev/cu.usbmodem*` on macOS, `/dev/ttyACM0` on Linux. Both expose the ESP32-S3 native USB-JTAG (no boot-mode dance needed).
 
@@ -187,12 +207,16 @@ The boot screen is `SCREEN_SPLASH` and only advances on a physical button press,
 
 ## Splash animations
 
-17 official Anthropic Clawd animations (core poses + persona scenes), archived
-with full provenance in `research/clawd-official/`. Pipeline:
+17 official Anthropic Clawd animations (core poses + persona scenes). The
+source GIFs/Lottie files are **not committed** (they are Anthropic's assets);
+`tools/fetch_official_clawd.sh` downloads them on demand into the git-ignored
+`research/clawd-official/`, and the generated header is what ships. Pipeline:
 
 ```bash
+bash tools/fetch_official_clawd.sh              # once → research/clawd-official/ (git-ignored)
 node tools/convert_official_clawd.js            # → firmware/src/splash_animations.h
 node tools/convert_official_clawd.js --verify DIR   # + per-animation PNGs for eyeballing
+node tools/convert_official_clawd.js --src DIR  # sources fetched elsewhere
 ```
 
 Requires ImageMagick; Laptop and Soccer convert from their Lottie exports
@@ -224,10 +248,12 @@ real GIF for a valid filename and an HTML catch-all (both HTTP 200) otherwise,
 so **name probing works**: fetch `Clawd-<Name>.gif` and check the magic bytes.
 Seven current animations are referenced by no shipped bundle and were found
 exactly this way (Anthropic stages seasonal drops — Soccer appeared for the
-World Cup). To hunt for new ones: run `research/clawd-official/fetch.sh`
-(extend its probe list), and grep a fresh desktop .deb's `ion-dist/` bundles
-for `/images/` paths (`research/clawd-official/CLAUDE.md` documents the full
-methodology, including the Lottie sources and the assets-proxy).
+World Cup). To hunt for new ones: run `tools/fetch_official_clawd.sh`
+(extend its `PROBE` list; a hit must then be added to its `KNOWN` list and to
+the `ANIMS` catalog in `tools/convert_official_clawd.js`), and grep a fresh
+Claude desktop .deb's `ion-dist/` bundles for `/images/` paths. The Lottie
+exports (Laptop, Soccer) come from the same bundles via the assets proxy;
+the converter prefers them over the antialiased GIF rescales.
 
 ### Custom animations (grid pipeline)
 
@@ -311,9 +337,14 @@ codex|kimi|claude` and `parade on|off` (`./screenshot.sh out.png [port]
 multi-provider scenario via `SIM_SCENARIO`).
 
 
-## User profile / preferences
+## Maintainer notes
 
-See `~/.claude/projects/.../memory/` files for persistent context (user is an embedded-beginner senior dev, brand-conscious, prefers iterative UI refinement, dislikes me authoring my own art when third-party assets are intended). Always read those memory files at session start.
+- ToknMon is a personal project by Edgar (github.com/edgarbaldemarmx). Issues and PRs are welcome but there is no support commitment.
+- The Waveshare ESP32-S3 Touch AMOLED 2.16 is the only hardware verified with ToknMon; every other board folder is inherited from Clawdmeter and compiles but is untested since the fork. Say so in docs rather than implying support.
+- Documentation, code comments, commit messages and task documents are written in English.
+- Commits follow Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:` …), one reviewable work unit per commit, tests and docs alongside the behavior.
+- Feature work is tracked in `docs/odd/<feature>.md` (objective, scope, checklist, verification evidence). Read the latest one before resuming a milestone.
+- Keep "Clawdmeter" only in attribution and in legacy-compatibility constants (NVS namespaces `clawd`/`clawdmeter`, `LEGACY_DEVICE_NAMES`, the legacy config dir); the Linux/Windows daemons and installers are inherited, Claude-only and untested — do not rebrand them, just keep their header note.
 
 ## Recent session highlights
 
@@ -329,13 +360,15 @@ See `~/.claude/projects/.../memory/` files for persistent context (user is an em
 
 ## Daemon / host side
 
-Bash daemon (`daemon/claude-usage-daemon.sh`) reads OAuth token, polls Anthropic API, sends JSON over BLE GATT. Run with `systemctl --user start claude-usage-daemon`. The unit file's `ExecStart` is the absolute path to the script — repoint it when switching between the worktree and the main checkout.
+**macOS (the ToknMon daemon):** `daemon/claude_usage_daemon.py` (Python, bleak/CoreBluetooth) with one module per provider under `daemon/providers/` (`claude.py` OAuth usage endpoint, `codex.py` local session logs, `kimi.py` usage API with token refresh). `install-mac.sh` creates `daemon/.venv` from `daemon/requirements-macos.txt`, renders `daemon/com.toknmon.daemon.plist` into `~/Library/LaunchAgents/com.toknmon.daemon.plist` (logs: `~/Library/Logs/toknmon.{out,err}.log`) and walks the config prompts; `--yes --no-prime [--providers a,b] [--device-name N]` runs it non-interactively. Config: `~/.config/toknmon/config` (keys in `daemon/config.example`, re-read every poll). On first start the daemon copies a Clawdmeter-era `~/.config/claude-usage-monitor/{config,ble-address}` into the new dir (`migrate_legacy_config()`, never deletes) and the installer boots out the legacy `com.user.claude-usage-daemon` agent, parking its plist under `~/.config/toknmon/legacy/`. Tests: `daemon/.venv/bin/python -m pytest daemon/tests -q`. The daemon finds the board by service UUID; `device_name` (default `ToknMon`, legacy `TokenMon`/`Clawdmeter` always accepted) only matters for the HID fallback and the stale-bond repair via `blueutil`. The attention-card hook (`daemon/attention-hook.sh`) still drops its flags in `~/.config/claude-usage-monitor` and the daemon reads them there.
 
-**Discovery & resilience:**
+**Linux (inherited from Clawdmeter, Claude-only, untested with ToknMon):** Bash daemon (`daemon/claude-usage-daemon.sh`) reads OAuth token, polls Anthropic API, sends JSON over BLE GATT. Run with `systemctl --user start claude-usage-daemon`. The unit file's `ExecStart` is the absolute path to the script — repoint it when switching between the worktree and the main checkout. Windows (`daemon/*_windows.py`, `install-windows.ps1`) is in the same inherited state.
 
-- Connects by name (`"Clawdmeter"`) on first run, caches resolved MAC at `~/.config/claude-usage-monitor/ble-address`. ESP32 BLE addresses are factory-burned per-chip, so swapping any board invalidates the cache.
+**Discovery & resilience (Linux daemon):**
+
+- Connects by name (`"Clawdmeter"`, the upstream default) on first run, caches resolved MAC at `~/.config/claude-usage-monitor/ble-address`. ESP32 BLE addresses are factory-burned per-chip, so swapping any board invalidates the cache.
 - On connect failure: cache is dropped AND device is removed from bluez (`bluetoothctl remove`) so the next scan won't re-pick a dead MAC. Multi-candidate scans pick `head -1` and let the failure cycle converge.
-- `POLL_INTERVAL=60` (override with `poll_interval = N` in `~/.config/claude-usage-monitor/config`, re-read every tick; or the `POLL_INTERVAL` env var), `heartbeat_interval` (default 60; replays the last payload with aged `sr`/`wr`/`t` so the firmware's 90s `DATA_FRESH_MS` never lapses when polling slower than that; the device has no timer and no tap-to-refresh, its only refresh request is once per connection at cold start), `TICK=5`. Inner loop wakes every 5s to detect disconnects fast; polls Anthropic when the poll interval elapsed OR when ESP fires a refresh request; otherwise heartbeats when the heartbeat interval elapsed since the last write.
+- `POLL_INTERVAL=60` (override with `poll_interval = N` in the config, re-read every tick; or the `POLL_INTERVAL` env var), `heartbeat_interval` (default 60; replays the last payload with aged `sr`/`wr`/`t` so the firmware's 90s `DATA_FRESH_MS` never lapses when polling slower than that; the device has no timer and no tap-to-refresh, its only refresh request is once per connection at cold start), `TICK=5`. Inner loop wakes every 5s to detect disconnects fast; polls Anthropic when the poll interval elapsed OR when ESP fires a refresh request; otherwise heartbeats when the heartbeat interval elapsed since the last write.
 - **Heartbeat side effects (known, not bugs):** (1) `usage_rate.cpp` samples every payload, so with a 300s poll and 60s heartbeat its 6-slot ring mostly holds identical values and `usage_rate_group()` skews toward Idle. This only affects which splash animation is picked, never the bars, percentages, countdowns, or chime. (2) The chime cannot re-fire on a replay: `usage_rate_sample` only reports a reset on a >5-point drop in session %, and a heartbeat sends the identical value. (3) Aged `sr`/`wr` clamp at 0 in the daemon, so the label reads "Resets in 0m" (not "---") for up to one poll interval around a reset boundary.
 
 **GATT characteristics on service `4c41555a-...0001`:**

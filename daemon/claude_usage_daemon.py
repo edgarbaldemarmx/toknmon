@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Claude Usage Tracker Daemon (BLE) — macOS port of claude-usage-daemon.sh.
+"""ToknMon usage daemon (BLE) — macOS host side.
 
-Polls Claude API rate-limit headers and writes a JSON payload to the
-ESP32 "Clawdmeter" peripheral over a custom GATT service. Uses
-bleak (CoreBluetooth backend on macOS).
+Polls each enabled provider (Claude, Codex, Kimi) for usage data and writes a
+JSON payload to the ESP32 "ToknMon" peripheral over a custom GATT service.
+Uses bleak (CoreBluetooth backend on macOS). Derived from the Clawdmeter
+daemon by Hermann Bjorgvin (https://github.com/HermannBjorgvin/Clawdmeter).
 """
 
 import asyncio
@@ -38,13 +39,15 @@ except ImportError:  # running as a script from daemon/
     from providers import claude as claude_provider
     from providers import kimi as kimi_provider
 
-# BLE device name. The firmware default is "TokenMon"; users can rename their
+# BLE device name. The firmware default is "ToknMon"; users can rename their
 # board (`name <text>` over USB serial, or via flash-mac.sh) and record the same
 # name in the config as `device_name`. The daemon finds the device primarily by
 # service UUID; the name only matters for the HID fallback and stale-bond repair,
 # where any of accepted_device_names() is honored (configured + legacy names).
-DEFAULT_DEVICE_NAME = "TokenMon"
-LEGACY_DEVICE_NAMES = ("Clawdmeter",)
+# Legacy names: boards flashed before the rename still advertise "TokenMon"
+# (early ToknMon builds) or "Clawdmeter" (upstream firmware).
+DEFAULT_DEVICE_NAME = "ToknMon"
+LEGACY_DEVICE_NAMES = ("TokenMon", "Clawdmeter")
 DEVICE_NAME_MAX_LEN = 18  # firmware advertising budget (bytes, printable ASCII)
 SERVICE_UUID = "4c41555a-4465-7669-6365-000000000001"
 RX_CHAR_UUID = "4c41555a-4465-7669-6365-000000000002"
@@ -58,12 +61,18 @@ CONNECT_TIMEOUT = 20.0
 # Linux: token lives in ~/.claude/.credentials.json.
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 DEFAULT_CONFIG_DIR = Path.home() / ".claude"
-SAVED_ADDR_FILE = Path.home() / ".config" / "claude-usage-monitor" / "ble-address"
-CONFIG_FILE = Path.home() / ".config" / "claude-usage-monitor" / "config"
+# State lives under ~/.config/toknmon. LEGACY_CONFIG_DIR is the Clawdmeter-era
+# location; migrate_legacy_config() copies its files over once (never deletes).
+CONFIG_DIR = Path.home() / ".config" / "toknmon"
+LEGACY_CONFIG_DIR = Path.home() / ".config" / "claude-usage-monitor"
+SAVED_ADDR_FILE = CONFIG_DIR / "ble-address"
+CONFIG_FILE = CONFIG_DIR / "config"
 # Written by Claude Code hooks: `attention` holds {"m", "s"} (message, session
 # id) when a session needs the user, and `clear-<session id>` is touched when
-# that session moves on.
-ATTENTION_DIR = Path.home() / ".config" / "claude-usage-monitor"
+# that session moves on. Kept at the legacy path on purpose: it is shared with
+# daemon/attention-hook.sh, which writes there, and the flags are transient
+# (consumed within ATTENTION_MAX_AGE), so there is nothing to migrate.
+ATTENTION_DIR = LEGACY_CONFIG_DIR
 ATTENTION_FLAG = ATTENTION_DIR / "attention"
 ATTENTION_MAX_AGE = 60
 DEFAULT_MAX_WRITE = 180
@@ -91,6 +100,37 @@ TokenExpired = claude_provider.TokenExpired
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+# Files carried over from the Clawdmeter-era config dir on first start.
+LEGACY_STATE_FILES = ("config", "ble-address")
+
+
+def migrate_legacy_config() -> list[str]:
+    """One-time copy of legacy state into CONFIG_DIR.
+
+    For each file in LEGACY_STATE_FILES: if it exists under LEGACY_CONFIG_DIR
+    and is absent under CONFIG_DIR, copy it (metadata included) and log one
+    line. The legacy files are never deleted or modified, so an older daemon
+    keeps working from them. Returns the names that were copied.
+    """
+    copied: list[str] = []
+    if not LEGACY_CONFIG_DIR.is_dir():
+        return copied
+    for name in LEGACY_STATE_FILES:
+        src = LEGACY_CONFIG_DIR / name
+        dst = CONFIG_DIR / name
+        if not src.is_file() or dst.exists():
+            continue
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        except OSError as e:
+            log(f"Config migration: could not copy {src} -> {dst}: {e}")
+            continue
+        log(f"Config migration: copied {src} -> {dst} (legacy file kept)")
+        copied.append(name)
+    return copied
 
 
 def _extract_access_token(blob: str) -> str | None:
@@ -352,7 +392,7 @@ async def _get_cb_manager():
 
 
 async def retrieve_connected_macos(skip_addr: str | None = None):
-    """Return a BLEDevice for a system-connected 'Clawdmeter', or None.
+    """Return a BLEDevice for a system-connected ToknMon board, or None.
 
     Two-step lookup, strongest signal first:
 
@@ -976,9 +1016,9 @@ def unpair_macos() -> bool:
         return False
 
     # Each line looks like:
-    #   address: aa-bb-cc-dd-ee-04, ... name: "TokenMon", ...
+    #   address: aa-bb-cc-dd-ee-04, ... name: "ToknMon", ...
     # Accept the configured name and legacy names (boards flashed before the
-    # rename still advertise "Clawdmeter").
+    # rename still advertise "TokenMon" or "Clawdmeter").
     names = accepted_device_names()
     addr = None
     matched = None
@@ -1155,7 +1195,8 @@ async def main() -> None:
         except NotImplementedError:
             signal.signal(sig, _stop)
 
-    log("=== Claude Usage Tracker Daemon (BLE, macOS) ===")
+    log("=== ToknMon usage daemon (BLE, macOS) ===")
+    migrate_legacy_config()
     log(f"Poll interval: {POLL_INTERVAL}s")
 
     backoff = 1

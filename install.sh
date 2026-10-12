@@ -1,4 +1,6 @@
 #!/bin/bash
+# Inherited from Clawdmeter (https://github.com/HermannBjorgvin/Clawdmeter); Claude-only.
+# Not ported to the ToknMon providers and untested with ToknMon — kept as-is.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

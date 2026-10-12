@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Inherited from Clawdmeter (https://github.com/HermannBjorgvin/Clawdmeter); Claude-only.
+# Not ported to the ToknMon providers and untested with ToknMon — kept as-is.
 """Claude Usage Tracker Daemon — Windows (Phase 2).
 
 Reads the Claude OAuth token from the native-Windows credentials path and

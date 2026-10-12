@@ -1,3 +1,5 @@
+# Inherited from Clawdmeter (https://github.com/HermannBjorgvin/Clawdmeter); Claude-only.
+# Not ported to the ToknMon providers and untested with ToknMon — kept as-is.
 # install-windows.ps1 - Clawdmeter Windows turnkey bootstrap (D-09)
 #
 # Creates a Python virtual environment, installs dependencies from

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.user.claude-usage-daemon</string>
+    <string>com.toknmon.daemon</string>
 
     <key>ProgramArguments</key>
     <array>

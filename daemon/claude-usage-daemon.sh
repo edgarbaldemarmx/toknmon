@@ -1,4 +1,6 @@
 #!/bin/bash
+# Inherited from Clawdmeter (https://github.com/HermannBjorgvin/Clawdmeter); Claude-only.
+# Not ported to the ToknMon providers and untested with ToknMon — kept as-is.
 # Claude Usage Tracker Daemon (BLE)
 # Reads Claude Code OAuth token, polls usage via API, sends to ESP32 over BLE GATT.
 # Auto-connects and reconnects to the Clawdmeter BLE device.

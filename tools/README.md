@@ -1,15 +1,24 @@
 # Asset tools
 
-## Splash animations
+## Splash animations (official Clawd set)
 
 ```bash
-node convert_official_clawd.js
+bash fetch_official_clawd.sh                 # download the sources (once; git-ignored)
+node convert_official_clawd.js               # → firmware/src/splash_animations.h
 node convert_official_clawd.js --verify /tmp/verify   # + per-animation PNGs
+node convert_official_clawd.js --src /path/to/sources # sources elsewhere
 ```
 
-Converts the official Anthropic Clawd animations archived in
-`research/clawd-official/` (GIFs decoded via ImageMagick, the Laptop and
-Soccer Lottie exports read directly) into a single
+The official Anthropic Clawd GIFs and Lottie exports are not committed to this
+repository (they are Anthropic's assets); `fetch_official_clawd.sh` downloads
+them on demand into `research/clawd-official/` (git-ignored; pass a directory
+to put them elsewhere) and probes claude.ai for new seasonal names. The
+generated `firmware/src/splash_animations.h` *is* committed, so you only need
+this pipeline when adding or re-converting animations.
+
+`convert_official_clawd.js` reads the sources from `--src DIR` (default
+`research/clawd-official`; GIFs decoded via ImageMagick, the Laptop and
+Soccer Lottie exports read directly) and writes a single
 `firmware/src/splash_animations.h`:
 
 - frames as bounding-box crops on the shared 55×37 art stage, one byte per
@@ -21,9 +30,22 @@ Soccer Lottie exports read directly) into a single
 - contrast recolors (trumpet notes → ivory, magnifier fedora → gray) and the
   sailing-loop cross-match that defines the sailing scene's loop window
 
-See `research/clawd-official/CLAUDE.md` for asset provenance and the format
-details, and `--in` / `--out` to override paths. Rebuild firmware after
+See `CLAUDE.md` ("Splash animations") for asset provenance and the format
+details; `--out FILE` overrides the output path. Rebuild firmware after
 running.
+
+## Custom animations (grid pipeline)
+
+```bash
+node convert_grid_animations.js              # assets/animations/*.txt → firmware/src/custom_animations.h
+node convert_grid_animations.js --verify DIR # + one PNG frame strip per animation
+node --test test/                            # converter unit tests
+bash test/shell/test_device_name_validator.sh   # install-mac.sh / flash-mac.sh name validator
+```
+
+Hand-authored provider mascots (Codex, Kimi) live as text grids under
+`assets/animations/`; the format and rules are documented in `CLAUDE.md`
+("Custom animations").
 
 ## Icons
 

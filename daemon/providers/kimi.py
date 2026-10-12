@@ -39,7 +39,7 @@ CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098"
 TIMEOUT = 10.0
 # Refresh when the freshest token expires within this many seconds.
 REFRESH_MARGIN_S = 60
-USER_AGENT = "tokenmon-daemon"
+USER_AGENT = "toknmon-daemon"
 
 # Config accessor injected by the main module (``read_config_value``); the
 # providers package cannot import the daemon module. Default: no config.

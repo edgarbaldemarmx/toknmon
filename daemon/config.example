@@ -1,8 +1,11 @@
-# Clawdmeter daemon config
+# ToknMon daemon config
 #
 # Copy this file to:
-#   macOS / Linux : ~/.config/claude-usage-monitor/config
-#   Windows       : %LOCALAPPDATA%\Clawdmeter\config
+#   macOS         : ~/.config/toknmon/config
+#                   (the daemon copies ~/.config/claude-usage-monitor/config here
+#                    on first start if it exists and this file does not)
+#   Linux         : ~/.config/claude-usage-monitor/config (inherited Clawdmeter daemon)
+#   Windows       : %LOCALAPPDATA%\Clawdmeter\config    (inherited Clawdmeter daemon)
 #
 # The daemon re-reads it on every poll, so edits take effect within ~60s — no restart needed.
 
@@ -10,9 +13,9 @@
 # it; or type `name <text>` into the board's USB serial console). Max 18 ASCII
 # characters. The daemon finds the device by its service UUID regardless of
 # name; this only matters for the HID fallback and stale-bond repair, where
-# the legacy name "Clawdmeter" is always accepted too.
-#   Unset (default) = TokenMon
-# device_name = TokenMon
+# the legacy names "TokenMon" and "Clawdmeter" are always accepted too.
+#   Unset (default) = ToknMon
+# device_name = ToknMon
 
 # Poll more than one Claude config dir and show whichever plan is currently
 # active. Use this if you run separate plans from different config dirs (e.g. a
