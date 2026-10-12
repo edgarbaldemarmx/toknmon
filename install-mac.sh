@@ -35,6 +35,28 @@ upsert_config_key() {
     echo "$key = $value" >> "$CONFIG_FILE"
 }
 
+# Validate a Bluetooth device name and echo the trimmed value on success.
+# Rules: leading/trailing whitespace is trimmed, then the name must be 1-18
+# printable ASCII characters (0x20-0x7E, so no newlines or other control
+# characters) and must not contain '#' (config readers strip "#..." comments).
+# The firmware enforces the same printable-ASCII/length rule.
+# NOTE: this function is duplicated verbatim in flash-mac.sh and install-mac.sh;
+# keep both copies byte-identical (tools/test/shell/test_device_name_validator.sh
+# fails otherwise).
+valid_device_name() {
+    local n="$1"
+    n="${n#"${n%%[![:space:]]*}"}"   # trim leading whitespace
+    n="${n%"${n##*[![:space:]]}"}"   # trim trailing whitespace
+    [ -n "$n" ] || return 1
+    # Any byte left after deleting printable ASCII is a control or non-ASCII
+    # character. tr is byte-based under LC_ALL=C and the count survives an
+    # embedded newline, unlike a per-line grep or a $(...) that strips it.
+    [ $(printf '%s' "$n" | LC_ALL=C tr -d '\040-\176' | wc -c) -eq 0 ] || return 1
+    case "$n" in *'#'*) return 1 ;; esac
+    [ ${#n} -le 18 ] || return 1
+    printf '%s\n' "$n"
+}
+
 # Detect ~/.claude* config dirs and, if more than one is found, let the user pick
 # which plans to show. The daemon polls all chosen dirs and displays whichever is
 # active. macOS note: the default ~/.claude stores its token in Keychain (often no
@@ -143,8 +165,8 @@ configure_device_name() {
     def="${cur:-TokenMon}"
     read -r -p "  Device Bluetooth name (as set when flashing) [$def]: " ans || ans=""
     [ -z "$ans" ] && ans="$def"
-    if [ ${#ans} -gt 18 ] || ! LC_ALL=C grep -qE '^[ -~]+$' <<< "$ans"; then
-        echo "  Invalid name (1-18 printable ASCII chars) — leaving device_name unchanged."
+    if ! ans=$(valid_device_name "$ans"); then
+        echo "  Invalid name (1-18 printable ASCII characters, no '#'; surrounding whitespace is trimmed) — leaving device_name unchanged."
         return 0
     fi
     if [ "$ans" = "$cur" ]; then
