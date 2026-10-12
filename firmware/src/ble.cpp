@@ -15,7 +15,10 @@ static char device_name[BLE_DEVICE_NAME_MAX_LEN + 1] = BLE_DEFAULT_DEVICE_NAME;
 #define TX_CHAR_UUID        "4c41555a-4465-7669-6365-000000000003"  // device ack/nack notifies
 #define REQ_CHAR_UUID       "4c41555a-4465-7669-6365-000000000004"  // device-initiated refresh request
 
-#define BLE_BUF_SIZE 512
+// RX queue: single producer (NimBLE host task, onWrite) / single consumer
+// (loop task, ble_next_packet). head/tail are only ever advanced by their
+// own side, so plain volatile indices are enough without a lock.
+#define BLE_BUF_SIZE BLE_RX_ITEM_SIZE
 
 // HID keyboard report descriptor (standard 6-KRO boot-protocol-compatible).
 // Includes the LED output report (Num/Caps/Scroll Lock indicators) — without
@@ -75,8 +78,9 @@ static const uint16_t DESIRED_TIMEOUT   = 600;   // ×10ms = 6s, matches PPCP
 static volatile uint16_t param_fix_handle = CONN_HANDLE_NONE;  // pending retry
 static volatile uint32_t param_fix_at_ms  = 0;                 // when to send it
 static volatile uint16_t param_fix_spent  = CONN_HANDLE_NONE;  // one per connection
-static char rx_buf[BLE_BUF_SIZE];
-static volatile bool data_ready = false;
+static char rx_queue[BLE_RX_QUEUE_DEPTH][BLE_BUF_SIZE];
+static volatile uint8_t rx_head = 0;   // next slot the producer writes
+static volatile uint8_t rx_tail = 0;   // next slot the consumer reads
 static volatile bool has_received_data = false;
 static char mac_str[18];
 
@@ -295,10 +299,17 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
             return;
         }
         std::string val = chr->getValue();
+        uint8_t next = (uint8_t)((rx_head + 1) % BLE_RX_QUEUE_DEPTH);
+        if (next == rx_tail) {
+            // Queue full: the loop task has not drained in a while. Keep the
+            // packets already queued (oldest first) and drop this one.
+            Serial.println("BLE: RX queue full, dropping packet");
+            return;
+        }
         size_t len = std::min(val.length(), (size_t)(BLE_BUF_SIZE - 1));
-        memcpy(rx_buf, val.c_str(), len);
-        rx_buf[len] = '\0';
-        data_ready = true;
+        memcpy(rx_queue[rx_head], val.c_str(), len);
+        rx_queue[rx_head][len] = '\0';
+        rx_head = next;
         has_received_data = true;
     }
 };
@@ -428,12 +439,14 @@ bool ble_has_bonds(void) {
 }
 
 bool ble_has_data(void) {
-    return data_ready;
+    return rx_head != rx_tail;
 }
 
-const char* ble_get_data(void) {
-    data_ready = false;
-    return rx_buf;
+bool ble_next_packet(char* out, size_t cap) {
+    if (!out || cap == 0 || rx_head == rx_tail) return false;
+    strlcpy(out, rx_queue[rx_tail], cap);
+    rx_tail = (uint8_t)((rx_tail + 1) % BLE_RX_QUEUE_DEPTH);
+    return true;
 }
 
 void ble_send_ack(void) {

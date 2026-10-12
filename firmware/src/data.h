@@ -1,11 +1,42 @@
 #pragma once
 #include <Arduino.h>
 
+// Provider slots. The daemon tags each payload with "p" (missing ⇒ claude);
+// the firmware keeps one UsageData per provider and shows them as a carousel.
+#define PROVIDER_COUNT 3
+enum provider_t {
+    PROVIDER_CLAUDE = 0,
+    PROVIDER_CODEX  = 1,
+    PROVIDER_KIMI   = 2,
+};
+
+// Display name ("Claude") and wire id ("claude", the value of the payload's
+// "p" key). Out-of-range indices fall back to the Claude strings.
+static inline const char* provider_name(int i) {
+    switch (i) {
+    case PROVIDER_CODEX: return "Codex";
+    case PROVIDER_KIMI:  return "Kimi";
+    default:             return "Claude";
+    }
+}
+static inline const char* provider_short(int i) {
+    switch (i) {
+    case PROVIDER_CODEX: return "codex";
+    case PROVIDER_KIMI:  return "kimi";
+    default:             return "claude";
+    }
+}
+
 struct UsageData {
+    uint8_t provider;        // PROVIDER_* slot this payload belongs to
     float session_pct;       // utilization 0-100 (5h window Pro/Max; spending % Enterprise)
     int session_reset_mins;  // minutes until reset
     float weekly_pct;        // 7-day utilization (Pro/Max only; 0 for Enterprise)
     int weekly_reset_mins;   // minutes until weekly reset (Pro/Max only)
+    bool has_third;          // payload carried "f": a third, model-scoped weekly bar
+    float third_pct;         // scoped weekly utilization ("f")
+    int third_reset_mins;    // minutes until the scoped weekly reset ("fr")
+    char third_label[12];    // pill text for the third bar ("fl"; defaults to "Fable")
     char status[16];         // "allowed", "limited", etc.
     bool chime;              // play the session-reset chime; false unless daemon opts in
     bool beep;               // Claude needs attention: play the chime once for this packet

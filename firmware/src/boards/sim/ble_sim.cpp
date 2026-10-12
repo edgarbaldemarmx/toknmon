@@ -1,7 +1,10 @@
 // BLE stub + scenario playback. Implements ble.h without any transport: a
 // JSONL scenario file stands in for the daemon, delivered through the same
-// ble_has_data()/ble_get_data() path main.cpp uses on hardware — so JSON
-// parsing, usage-rate tracking, and the chime trigger all run for real.
+// ble_has_data()/ble_next_packet() queue main.cpp drains on hardware — so
+// JSON parsing, usage-rate tracking, and the chime trigger all run for real.
+// A state with "hold_ms":0 is delivered together with the state that follows
+// it (same main-loop pass), mirroring the daemon's back-to-back provider
+// writes, so the RX-queue draining path is exercised in the sim too.
 #include "../../ble.h"
 #include "sim_platform.h"
 #include <Arduino.h>
@@ -24,8 +27,28 @@ static int      n_states = 0;
 static int      cur = 0;
 static bool     playing = true;
 static bool     connected = true;
-static bool     pending = false;      // a state is queued for main's next poll
 static uint32_t delivered_ms = 0;
+
+// Indices of states queued for main's next poll (mirrors the hardware RX queue).
+static int      queue[BLE_RX_QUEUE_DEPTH];
+static int      q_head  = 0;
+static int      q_count = 0;
+
+static void enqueue(int idx) {
+    if (q_count >= BLE_RX_QUEUE_DEPTH) return;
+    queue[(q_head + q_count) % BLE_RX_QUEUE_DEPTH] = idx;
+    q_count++;
+}
+
+// Queue `cur`, then every state chained to it with hold_ms == 0 (advancing
+// cur). Bounded by the queue depth so an all-zero scenario cannot spin.
+static void enqueue_chain(void) {
+    enqueue(cur);
+    while (n_states > 1 && states[cur].hold_ms == 0 && q_count < BLE_RX_QUEUE_DEPTH) {
+        cur = (cur + 1) % n_states;
+        enqueue(cur);
+    }
+}
 
 static const char* FALLBACK[] = {
     "{\"name\":\"fresh\",\"s\":3.0,\"sr\":295,\"w\":12.0,\"wr\":9000,\"st\":\"allowed\",\"ok\":true}",
@@ -87,15 +110,15 @@ static void refresh_title(void) {
 
 void ble_init(void) {
     load_scenario();
-    pending = true;
+    enqueue_chain();
     refresh_title();
 }
 
 void ble_tick(void) {
-    if (!connected || pending || !playing || n_states == 0) return;
+    if (!connected || q_count > 0 || !playing || n_states == 0) return;
     if (millis() - delivered_ms >= states[cur].hold_ms) {
         cur = (cur + 1) % n_states;
-        pending = true;
+        enqueue_chain();
         refresh_title();
     }
 }
@@ -109,11 +132,14 @@ const char* ble_get_mac_address(void) { return "00:51:4D:00:00:01"; }
 void ble_clear_bonds(void) { printf("[sim] pair gesture completed — bonds cleared\n"); }
 bool ble_has_bonds(void)   { return true; }
 
-bool ble_has_data(void) { return connected && pending; }
-const char* ble_get_data(void) {
-    pending = false;
+bool ble_has_data(void) { return connected && q_count > 0; }
+bool ble_next_packet(char* out, size_t cap) {
+    if (!connected || q_count == 0 || !out || cap == 0) return false;
+    snprintf(out, cap, "%s", states[queue[q_head]].json);
+    q_head = (q_head + 1) % BLE_RX_QUEUE_DEPTH;
+    q_count--;
     delivered_ms = millis();
-    return states[cur].json;
+    return true;
 }
 void ble_send_ack(void)  {}
 void ble_send_nack(void) { printf("[sim] payload NACKed — check the scenario JSON\n"); }
@@ -135,14 +161,16 @@ void sim_playback_step(int dir) {
     if (!n_states) return;
     playing = false;
     cur = (cur + dir + n_states) % n_states;
-    pending = true;
+    q_head = 0; q_count = 0;
+    enqueue(cur);
     refresh_title();
 }
 void sim_playback_jump(int idx) {
     if (idx < 0 || idx >= n_states) return;
     playing = false;
     cur = idx;
-    pending = true;
+    q_head = 0; q_count = 0;
+    enqueue(cur);
     refresh_title();
 }
 void sim_playback_toggle_link(void) {

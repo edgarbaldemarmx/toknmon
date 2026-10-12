@@ -12,3 +12,7 @@
 #define THEME_AMBER    lv_color_hex(0xd97757)
 #define THEME_RED      lv_color_hex(0xc0392b)
 #define THEME_BAR_BG   lv_color_hex(0x2a2a28)   // unfilled bar track
+// Provider accents — title / pill color per carousel slot (see data.h).
+#define THEME_CLAUDE   THEME_ACCENT                 // Anthropic terra-cotta
+#define THEME_CODEX    lv_color_hex(0x10a37f)   // OpenAI green-teal
+#define THEME_KIMI     lv_color_hex(0x3b6cf6)   // Moonshot blue

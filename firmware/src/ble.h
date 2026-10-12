@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stddef.h>
 
 // User-configurable BLE device name, persisted in NVS. Shared between ble.cpp
 // (reads it at init, advertises it) and main.cpp (the `name` serial command
@@ -24,8 +25,15 @@ const char* ble_get_device_name(void);
 const char* ble_get_mac_address(void);
 void ble_clear_bonds(void);
 bool ble_has_bonds(void);
+// RX queue. The daemon writes one payload per provider back-to-back (~350 ms
+// apart), so received packets are queued instead of overwriting one buffer.
+// ble_next_packet() copies the oldest pending packet into `out` (NUL
+// terminated, truncated to cap) and returns false when the queue is empty;
+// callers drain it in a loop once per main-loop iteration.
+#define BLE_RX_ITEM_SIZE   512
+#define BLE_RX_QUEUE_DEPTH 4
 bool ble_has_data(void);
-const char* ble_get_data(void);
+bool ble_next_packet(char* out, size_t cap);
 void ble_send_ack(void);
 void ble_send_nack(void);
 void ble_request_refresh(void);

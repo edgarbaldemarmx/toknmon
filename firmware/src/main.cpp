@@ -22,7 +22,9 @@
 #include "hal/imu_hal.h"
 #include "hal/sound_hal.h"
 
-static UsageData usage = {};
+// One usage slot per provider (see data.h). Slot 0 (Claude) is the only one
+// that drives the usage-rate tracker, chime, alerts, and splash picking.
+static UsageData slots[PROVIDER_COUNT] = {};
 
 // ---- LVGL draw buffers (partial render mode) ----
 // PSRAM-equipped boards (S3) can comfortably hold larger strips. PSRAM-free
@@ -98,19 +100,51 @@ static void my_touch_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     }
 }
 
-// Parse a JSON line into UsageData.
-static bool parse_json(const char* json, UsageData* out) {
+// Map the payload's "p" key to a provider slot. Missing/"claude" → 0 keeps
+// p-less upstream daemons working; unknown ids are reported as -1.
+static int provider_index(const char* p) {
+    if (!p || !p[0]) return PROVIDER_CLAUDE;
+    for (int i = 0; i < PROVIDER_COUNT; i++) {
+        if (strcmp(p, provider_short(i)) == 0) return i;
+    }
+    return -1;
+}
+
+enum parse_result_t {
+    PARSE_OK,       // *out_idx names the slot that was filled
+    PARSE_ERROR,    // malformed JSON → nack
+    PARSE_IGNORED,  // well-formed but for an unknown provider → ack and skip
+};
+
+// Parse a JSON line into the provider slot it names.
+static parse_result_t parse_json(const char* json, UsageData* slots_out, int* out_idx) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json);
     if (err) {
         Serial.printf("JSON parse error: %s\n", err.c_str());
-        return false;
+        return PARSE_ERROR;
     }
+
+    const char* p = doc["p"] | "";
+    int idx = provider_index(p);
+    if (idx < 0) {
+        Serial.printf("JSON: unknown provider \"%s\" — packet ignored\n", p);
+        return PARSE_IGNORED;
+    }
+    *out_idx = idx;
+    UsageData* out = &slots_out[idx];
+    out->provider = (uint8_t)idx;
 
     out->session_pct = doc["s"] | 0.0f;
     out->session_reset_mins = doc["sr"] | -1;
     out->weekly_pct = doc["w"] | 0.0f;
     out->weekly_reset_mins = doc["wr"] | -1;
+    // Optional third bar: a model-scoped weekly limit ("f"/"fr"), labelled by
+    // "fl" when the daemon sends one, "Fable" otherwise.
+    out->has_third = !doc["f"].isNull();
+    out->third_pct = doc["f"] | 0.0f;
+    out->third_reset_mins = doc["fr"] | -1;
+    strlcpy(out->third_label, doc["fl"] | "Fable", sizeof(out->third_label));
     strlcpy(out->status, doc["st"] | "unknown", sizeof(out->status));
     // as<bool>, not `| false`: daemons send 1, and `|` only accepts a JSON bool.
     out->chime = doc["c"].as<bool>();   // absent (old daemon / chime off) → stay silent
@@ -126,7 +160,40 @@ static bool parse_json(const char* json, UsageData* out) {
     out->clock_fmt = doc["tf"] | 24;
     out->ok = doc["ok"] | false;
     out->valid = true;
-    return true;
+    return PARSE_OK;
+}
+
+// Slot-0 (Claude) side effects: usage-rate sampling, the session-reset chime,
+// attention beep/alert, and the splash re-pick when the rate group changes.
+// Other providers only feed the carousel.
+static void handle_claude_packet(const UsageData& usage) {
+    int g_before = usage_rate_group();
+    bool session_reset = usage_rate_sample(usage.session_pct);
+    int g_after = usage_rate_group();
+    // 5-hour session limit refilled → chime so the user knows they can
+    // use Claude again (no-op on boards without a buzzer). Gated on the
+    // daemon's opt-in `chime` config; the `buzz` serial cmd ignores it.
+    if (session_reset && usage.chime) {
+        Serial.println("session reset detected — chime");
+        sound_hal_play_reset();
+    }
+    // Claude Code hook fired on the host. Not gated on `chime`: the daemon
+    // only sets `b` when that hook ran.
+    if (usage.beep) {
+        Serial.println("attention — chime");
+        sound_hal_play_reset();
+    }
+    if (usage.alert_msg[0]) {
+        Serial.println("attention — mascot");
+        idle_note_activity();
+        ui_show_alert(usage.alert_msg);
+    }
+    if (usage.alert_clear) ui_hide_alert();
+    if (g_after != g_before) {
+        Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
+            g_before, g_after, usage.session_pct);
+        if (splash_is_active()) splash_pick_for_current_rate();
+    }
 }
 
 // ---- Serial command buffer ----
@@ -421,40 +488,26 @@ void loop() {
 
     check_serial_cmd();
 
-    if (ble_has_data()) {
-        if (parse_json(ble_get_data(), &usage)) {
-            int g_before = usage_rate_group();
-            bool session_reset = usage_rate_sample(usage.session_pct);
-            int g_after = usage_rate_group();
-            // 5-hour session limit refilled → chime so the user knows they can
-            // use Claude again (no-op on boards without a buzzer). Gated on the
-            // daemon's opt-in `chime` config; the `buzz` serial cmd ignores it.
-            if (session_reset && usage.chime) {
-                Serial.println("session reset detected — chime");
-                sound_hal_play_reset();
-            }
-            // Claude Code hook fired on the host. Not gated on `chime`: the daemon
-            // only sets `b` when that hook ran.
-            if (usage.beep) {
-                Serial.println("attention — chime");
-                sound_hal_play_reset();
-            }
-            if (usage.alert_msg[0]) {
-                Serial.println("attention — mascot");
-                idle_note_activity();
-                ui_show_alert(usage.alert_msg);
-            }
-            if (usage.alert_clear) ui_hide_alert();
-            if (g_after != g_before) {
-                Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
-                    g_before, g_after, usage.session_pct);
-                if (splash_is_active()) splash_pick_for_current_rate();
-            }
-            ui_update(&usage);
-            ble_send_ack();
-        } else {
+    // Drain every queued BLE packet this pass: the daemon writes one payload
+    // per provider back-to-back, and each one lands in its own slot.
+    static char packet[BLE_RX_ITEM_SIZE];
+    while (ble_next_packet(packet, sizeof(packet))) {
+        int idx = PROVIDER_CLAUDE;
+        parse_result_t r = parse_json(packet, slots, &idx);
+        if (r == PARSE_ERROR) {
             ble_send_nack();
+            continue;
         }
+        if (r == PARSE_IGNORED) {
+            ble_send_ack();   // acknowledged so the daemon does not retry it
+            continue;
+        }
+        const UsageData& usage = slots[idx];
+        Serial.printf("BLE: packet p=%s ok=%d s=%.1f%%%s\n", provider_short(idx),
+            usage.ok ? 1 : 0, usage.session_pct, usage.has_third ? " +third" : "");
+        if (idx == PROVIDER_CLAUDE) handle_claude_packet(usage);
+        ui_update_slot(idx, &usage);
+        ble_send_ack();
     }
 
     delay(5);

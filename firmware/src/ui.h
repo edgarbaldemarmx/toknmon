@@ -9,6 +9,10 @@ enum screen_t {
 };
 
 void ui_init(void);
+// Store a provider's payload in its carousel slot and re-render when that
+// slot is the visible one. ui_update() is the legacy single-provider entry
+// point: it routes to the slot named by data->provider.
+void ui_update_slot(int idx, const UsageData* data);
 void ui_update(const UsageData* data);
 void ui_tick_anim(void);
 void ui_show_screen(screen_t screen);

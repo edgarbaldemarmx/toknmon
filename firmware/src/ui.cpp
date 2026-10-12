@@ -39,6 +39,22 @@ struct Layout {
     int16_t bar_h;
     int16_t panel_pad_x, panel_pad_y;
     int16_t pill_pad_x, pill_pad_y;
+    // Dense variant: three stacked panels (session, weekly, scoped weekly)
+    // in the same vertical budget as the two normal ones.
+    int16_t dense_panel_h;
+    int16_t dense_panel_gap;
+    int16_t dense_bar_y;
+    int16_t dense_reset_y;
+    int16_t dense_bar_h;
+    int16_t dense_pad_y;
+    int16_t dense_pill_pad_x, dense_pill_pad_y;
+    const lv_font_t* dense_pct_font;
+    const lv_font_t* dense_pill_font;
+    const lv_font_t* dense_reset_font;
+    // Provider pill shown right of the clock in the title area.
+    const lv_font_t* prov_font;
+    int16_t prov_pad_x, prov_pad_y;
+    int16_t prov_gap;                // gap between the clock and the pill
     const lv_font_t* title_font;     // screen title / clock
     const lv_font_t* pct_font;       // big percentage number
     const lv_font_t* ent_pct_font;   // enterprise spending number
@@ -110,6 +126,22 @@ static void compute_layout(const BoardCaps& c) {
         L.usage_panel_gap = 16;
         L.usage_bar_y = 56;
         L.usage_reset_y = 94;
+        // 3 × 100 + 2 × 8 = 316 → panels end at 416, same as the normal pair.
+        L.dense_panel_h = 100;
+        L.dense_panel_gap = 8;
+        L.dense_bar_y = 38;
+        L.dense_reset_y = 58;
+        L.dense_bar_h = 14;
+        L.dense_pad_y = 10;
+        L.dense_pill_pad_x = 12;
+        L.dense_pill_pad_y = 4;
+        L.dense_pct_font   = &font_styrene_28;
+        L.dense_pill_font  = &font_styrene_20;
+        L.dense_reset_font = &font_styrene_20;
+        L.prov_font  = &font_styrene_20;
+        L.prov_pad_x = 10;
+        L.prov_pad_y = 3;
+        L.prov_gap   = 10;
         L.bt_info_panel_h = 160;
         L.bt_reset_zone_h = 110;
         L.bt_title_font    = &font_tiempos_56;
@@ -124,6 +156,22 @@ static void compute_layout(const BoardCaps& c) {
         L.usage_panel_gap = 12;
         L.usage_bar_y = 48;
         L.usage_reset_y = 78;
+        // 3 × 94 + 2 × 8 = 298 → panels end at 383, clear of the status line.
+        L.dense_panel_h = 94;
+        L.dense_panel_gap = 8;
+        L.dense_bar_y = 36;
+        L.dense_reset_y = 54;
+        L.dense_bar_h = 12;
+        L.dense_pad_y = 8;
+        L.dense_pill_pad_x = 10;
+        L.dense_pill_pad_y = 3;
+        L.dense_pct_font   = &font_styrene_28;
+        L.dense_pill_font  = &font_styrene_20;
+        L.dense_reset_font = &font_styrene_20;
+        L.prov_font  = &font_styrene_16;
+        L.prov_pad_x = 8;
+        L.prov_pad_y = 2;
+        L.prov_gap   = 8;
         L.bt_info_panel_h = 140;
         L.bt_reset_zone_h = 90;
         L.bt_title_font    = &font_tiempos_34;
@@ -142,6 +190,22 @@ static void compute_layout(const BoardCaps& c) {
         L.usage_panel_gap = 6;
         L.usage_bar_y = 30;
         L.usage_reset_y = 46;
+        // 3 × 50 + 2 × 4 = 158 → panels end at 202, above the status line.
+        L.dense_panel_h = 50;
+        L.dense_panel_gap = 4;
+        L.dense_bar_y = 18;
+        L.dense_reset_y = 29;
+        L.dense_bar_h = 8;
+        L.dense_pad_y = 4;
+        L.dense_pill_pad_x = 6;
+        L.dense_pill_pad_y = 1;
+        L.dense_pct_font   = &font_styrene_14;
+        L.dense_pill_font  = &font_styrene_12;
+        L.dense_reset_font = &font_styrene_12;
+        L.prov_font  = &font_styrene_12;
+        L.prov_pad_x = 5;
+        L.prov_pad_y = 1;
+        L.prov_gap   = 4;
         L.bar_h = 12;
         L.panel_pad_x = 10;
         L.panel_pad_y = 6;
@@ -193,6 +257,7 @@ static void compute_layout(const BoardCaps& c) {
 // ---- Usage screen widgets (single non-splash view) ----
 static lv_obj_t* usage_container;
 static lv_obj_t* lbl_title;
+static lv_obj_t* lbl_provider_pill;   // provider name beside the clock (hidden while the clock is off)
 // Clock fed by the daemon: base epoch (local wall-clock seconds) + the lv_tick at
 // which it landed, so the title ticks forward locally between 60s payloads.
 static long     clock_base_epoch = 0;
@@ -209,8 +274,16 @@ static lv_obj_t* bar_weekly;
 static lv_obj_t* lbl_weekly_pct;
 static lv_obj_t* lbl_weekly_label;
 static lv_obj_t* lbl_weekly_reset;
+// Optional third panel: a model-scoped weekly limit (e.g. "Fable"). Shown
+// only while the visible slot carries one; the layout goes dense to fit.
+static lv_obj_t* bar_third;
+static lv_obj_t* lbl_third_pct;
+static lv_obj_t* lbl_third_label;
+static lv_obj_t* lbl_third_reset;
 static lv_obj_t* panel_session = nullptr;
 static lv_obj_t* panel_weekly = nullptr;
+static lv_obj_t* panel_third = nullptr;
+static bool      layout_dense = false;   // current panel layout; see apply_usage_layout
 // Enterprise-only widgets inside panel_session
 static lv_obj_t* lbl_session_pct_sym = nullptr;  // "%" in smaller font
 static lv_obj_t* lbl_spending_desc = nullptr;     // "of your monthly budget"
@@ -227,11 +300,53 @@ static lv_image_dsc_t battery_dscs[6];  // empty, low, medium, full, charging, p
 // connected but no usage update landed within DATA_FRESH_MS, the pairing hint
 // when BLE is down. Re-evaluated every loop in ui_tick_anim().
 static lv_obj_t* idle_group;            // the "Zzz" idle screen
-static uint32_t  last_data_ms = 0;      // lv_tick when the last valid usage update landed
-static bool      data_received = false; // any valid update since boot
-static bool      data_ok = true;        // last payload's ok flag; a {"ok":false} beat = "no fresh data"
 static int       view_state = -1;       // -1 unknown / 0 pair / 1 idle / 2 usage
 static const uint32_t DATA_FRESH_MS = 90000;  // usage counts as "live" within this window (daemon sends ~60s)
+
+// ---- Provider slots (carousel) ----
+// Freshness is tracked per provider: a {"ok":false} beat or a lapsed window on
+// one provider only drops that provider out of the rotation. The screen goes
+// idle only when no slot is fresh. The carousel shows one slot at a time and
+// advances every CAROUSEL_MS (or on tap) across the fresh slots.
+struct SlotState {
+    UsageData data;
+    uint32_t  last_ms;    // lv_tick when the last ok payload landed
+    bool      received;   // any ok payload since boot
+    bool      ok;         // last payload's ok flag
+};
+static SlotState  slots[PROVIDER_COUNT] = {};
+static int        visible_slot = PROVIDER_CLAUDE;
+static bool       data_received = false;     // any ok payload on any slot since boot
+static lv_timer_t* carousel_timer = nullptr;
+static const uint32_t CAROUSEL_MS = 8000;
+
+static bool slot_fresh(int i) {
+    return slots[i].received && slots[i].ok &&
+           (lv_tick_get() - slots[i].last_ms) < DATA_FRESH_MS;
+}
+
+static int fresh_count(void) {
+    int n = 0;
+    for (int i = 0; i < PROVIDER_COUNT; i++) if (slot_fresh(i)) n++;
+    return n;
+}
+
+// Next fresh slot after `from` in rotation order, or -1 when none is fresh.
+static int next_fresh_slot(int from) {
+    for (int k = 1; k <= PROVIDER_COUNT; k++) {
+        int i = (from + k) % PROVIDER_COUNT;
+        if (slot_fresh(i)) return i;
+    }
+    return -1;
+}
+
+static lv_color_t provider_color(int i) {
+    switch (i) {
+    case PROVIDER_CODEX: return THEME_CODEX;
+    case PROVIDER_KIMI:  return THEME_KIMI;
+    default:             return THEME_CLAUDE;
+    }
+}
 
 // ---- Shared ----
 static lv_image_dsc_t logo_dsc;
@@ -313,6 +428,10 @@ static void format_reset_time(int mins, char* buf, size_t len) {
 
 // Forward decls — callbacks defined near ui_show_screen below
 static void global_click_cb(lv_event_t* e);
+static void usage_tap_cb(lv_event_t* e);
+static void usage_long_press_cb(lv_event_t* e);
+static void apply_usage_layout(bool dense);
+static void carousel_timer_cb(lv_timer_t* t);
 
 static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_t* panel = lv_obj_create(parent);
@@ -479,7 +598,11 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_set_style_border_width(usage_container, 0, 0);
     lv_obj_set_style_pad_all(usage_container, 0, 0);
     lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(usage_container, global_click_cb, LV_EVENT_CLICKED, NULL);
+    // Tap = next provider (or splash when only one is live); long press =
+    // splash always. SHORT_CLICKED, not CLICKED: LVGL also fires CLICKED on
+    // the release after a long press, which would double-act.
+    lv_obj_add_event_cb(usage_container, usage_tap_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(usage_container, usage_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
 
     lbl_title = lv_label_create(usage_container);
     lv_label_set_text(lbl_title, "Usage");
@@ -488,6 +611,21 @@ static void init_usage_screen(lv_obj_t* scr) {
     // The nudge balances the corner logo on the left; smaller on small
     // screens where the logo is 40px and the battery icon sits closer.
     lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, L.title_nudge, L.title_y);
+
+    // Provider pill: sits right of the clock once the daemon drives the title
+    // clock; while the clock is off the title text itself names the provider.
+    lbl_provider_pill = lv_label_create(usage_container);
+    lv_label_set_text(lbl_provider_pill, provider_name(PROVIDER_CLAUDE));
+    lv_obj_set_style_text_font(lbl_provider_pill, L.prov_font, 0);
+    lv_obj_set_style_text_color(lbl_provider_pill, COL_TEXT, 0);
+    lv_obj_set_style_bg_color(lbl_provider_pill, provider_color(PROVIDER_CLAUDE), 0);
+    lv_obj_set_style_bg_opa(lbl_provider_pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(lbl_provider_pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_left(lbl_provider_pill, L.prov_pad_x, 0);
+    lv_obj_set_style_pad_right(lbl_provider_pill, L.prov_pad_x, 0);
+    lv_obj_set_style_pad_top(lbl_provider_pill, L.prov_pad_y, 0);
+    lv_obj_set_style_pad_bottom(lbl_provider_pill, L.prov_pad_y, 0);
+    lv_obj_add_flag(lbl_provider_pill, LV_OBJ_FLAG_HIDDEN);
 
     // Usage panels (shown when connected) live in a transparent full-size group
     // so they can be toggled against the pairing hint as one unit.
@@ -530,6 +668,14 @@ static void init_usage_screen(lv_obj_t* scr) {
                      &bar_weekly, &lbl_weekly_reset);
     // Recolor enabled so enterprise period box can color pace and reset separately
     lv_label_set_recolor(lbl_weekly_reset, true);
+
+    // Third panel (scoped weekly limit). Positioned by apply_usage_layout();
+    // hidden until a payload with has_third is visible.
+    panel_third = make_usage_panel(usage_group,
+                     L.content_y + 2 * (L.usage_panel_h + L.usage_panel_gap), "Fable",
+                     &lbl_third_pct, &lbl_third_label,
+                     &bar_third, &lbl_third_reset);
+    lv_obj_add_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
 
     build_pair_group(usage_container);
     build_idle_group(usage_container);
@@ -616,30 +762,174 @@ void ui_init(void) {
     }
 
     init_alert();
+    apply_usage_layout(false);
+    carousel_timer = lv_timer_create(carousel_timer_cb, CAROUSEL_MS, NULL);
+}
+
+// ---- Title area: clock + provider ----
+// With the clock off, the title text is the provider name in its accent color
+// ("Usage" until the first payload). With the clock on, the title is the time
+// and the provider rides in a small accent pill to its right; both are
+// re-centered as one unit so the pair stays balanced against the corner logo.
+static void layout_title(void) {
+    bool pill = (clock_base_epoch > 0) && data_received;
+    if (!pill) {
+        lv_obj_add_flag(lbl_provider_pill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, L.title_nudge, L.title_y);
+        return;
+    }
+    lv_obj_clear_flag(lbl_provider_pill, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_update_layout(lbl_provider_pill);
+    int32_t pw = lv_obj_get_width(lbl_provider_pill);
+    lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, L.title_nudge - (pw + L.prov_gap) / 2, L.title_y);
+    lv_obj_update_layout(lbl_title);
+    lv_obj_align_to(lbl_provider_pill, lbl_title, LV_ALIGN_OUT_RIGHT_MID, L.prov_gap, 0);
+}
+
+static void refresh_title(void) {
+    if (clock_base_epoch > 0) {
+        lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
+        lv_label_set_text(lbl_provider_pill, provider_name(visible_slot));
+        lv_obj_set_style_bg_color(lbl_provider_pill, provider_color(visible_slot), 0);
+        clock_last_min = -1;   // force the clock tick to rewrite + re-layout the title
+    } else if (data_received) {
+        lv_label_set_text(lbl_title, provider_name(visible_slot));
+        lv_obj_set_style_text_color(lbl_title, provider_color(visible_slot), 0);
+    } else {
+        lv_label_set_text(lbl_title, "Usage");
+        lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
+    }
+    layout_title();
+}
+
+// ---- Panel layout: normal (2 panels) vs dense (3 panels) ----
+static void style_pill_geometry(lv_obj_t* pill, const lv_font_t* font, int16_t px, int16_t py) {
+    lv_obj_set_style_text_font(pill, font, 0);
+    lv_obj_set_style_pad_left(pill, px, 0);
+    lv_obj_set_style_pad_right(pill, px, 0);
+    lv_obj_set_style_pad_top(pill, py, 0);
+    lv_obj_set_style_pad_bottom(pill, py, 0);
+}
+
+static void apply_usage_layout(bool dense) {
+    layout_dense = dense;
+    const int16_t ph      = dense ? L.dense_panel_h   : L.usage_panel_h;
+    const int16_t gap     = dense ? L.dense_panel_gap : L.usage_panel_gap;
+    const int16_t bar_y   = dense ? L.dense_bar_y     : L.usage_bar_y;
+    const int16_t reset_y = dense ? L.dense_reset_y   : L.usage_reset_y;
+    const int16_t bar_h   = dense ? L.dense_bar_h     : L.bar_h;
+    const int16_t pad_y   = dense ? L.dense_pad_y     : L.panel_pad_y;
+    const lv_font_t* pct_font   = dense ? L.dense_pct_font   : L.pct_font;
+    const lv_font_t* pill_font  = dense ? L.dense_pill_font  : L.pill_font;
+    const lv_font_t* reset_font = dense ? L.dense_reset_font : L.reset_font;
+    const int16_t pill_px = dense ? L.dense_pill_pad_x : L.pill_pad_x;
+    const int16_t pill_py = dense ? L.dense_pill_pad_y : L.pill_pad_y;
+
+    lv_obj_t* panels[3] = { panel_session, panel_weekly, panel_third };
+    lv_obj_t* pcts[3]   = { lbl_session_pct, lbl_weekly_pct, lbl_third_pct };
+    lv_obj_t* pills[3]  = { lbl_session_label, lbl_weekly_label, lbl_third_label };
+    lv_obj_t* bars[3]   = { bar_session, bar_weekly, bar_third };
+    lv_obj_t* resets[3] = { lbl_session_reset, lbl_weekly_reset, lbl_third_reset };
+    for (int i = 0; i < 3; i++) {
+        lv_obj_set_pos(panels[i], L.margin, L.content_y + i * (ph + gap));
+        lv_obj_set_height(panels[i], ph);
+        lv_obj_set_style_pad_top(panels[i], pad_y, 0);
+        lv_obj_set_style_pad_bottom(panels[i], pad_y, 0);
+        lv_obj_set_style_text_font(pcts[i], pct_font, 0);
+        style_pill_geometry(pills[i], pill_font, pill_px, pill_py);
+        lv_obj_align(pills[i], LV_ALIGN_TOP_RIGHT, 0, 1);
+        lv_obj_set_y(bars[i], bar_y);
+        lv_obj_set_height(bars[i], bar_h);
+        lv_obj_set_style_text_font(resets[i], reset_font, 0);
+        lv_obj_set_y(resets[i], reset_y);
+    }
+    // Enterprise overlays follow the session panel's reset line.
+    lv_obj_set_style_text_font(lbl_spending_desc, reset_font, 0);
+    lv_obj_set_y(lbl_spending_desc, reset_y);
+    lv_obj_set_y(lbl_spending_status, reset_y + (dense ? 16 : 20));
+
+    if (dense) lv_obj_clear_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
+    else       lv_obj_add_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
+}
+
+// ---- Carousel ----
+static void show_slot(int idx);
+
+// Move to the next fresh slot (if there is another one) and restart the dwell.
+static void carousel_advance(void) {
+    int nxt = next_fresh_slot(visible_slot);
+    if (nxt < 0 || nxt == visible_slot) return;
+    show_slot(nxt);
+    if (carousel_timer) lv_timer_reset(carousel_timer);
+}
+
+static void carousel_timer_cb(lv_timer_t* t) {
+    (void)t;
+    if (current_screen != SCREEN_USAGE || view_state != 2) return;
+    if (fresh_count() > 1) carousel_advance();
 }
 
 void ui_update(const UsageData* data) {
-    if (!data->valid) return;
-    data_ok = data->ok;
-    if (!data->ok) return;          // a {"ok":false} "no data" beat → fall through to idle, keep last numbers
-    last_data_ms = lv_tick_get();   // a real usage update just landed
+    if (!data) return;
+    ui_update_slot(data->provider < PROVIDER_COUNT ? data->provider : PROVIDER_CLAUDE, data);
+}
+
+void ui_update_slot(int idx, const UsageData* data) {
+    if (idx < 0 || idx >= PROVIDER_COUNT || !data || !data->valid) return;
+    SlotState& st = slots[idx];
+    st.data = *data;
+    st.ok = data->ok;
+    if (!data->ok) {
+        // {"ok":false} beat: this provider drops out of the rotation (keeps
+        // its last numbers). If it was on screen, move on to a fresh one.
+        if (idx == visible_slot) {
+            int nxt = next_fresh_slot(visible_slot);
+            if (nxt >= 0) show_slot(nxt);
+        }
+        return;
+    }
+    st.last_ms = lv_tick_get();   // a real usage update just landed
+    st.received = true;
+    bool first = !data_received;
     data_received = true;
 
     if (data->clock_epoch > 0) {    // daemon supplied wall-clock time → drive the title clock
+        bool was_off = (clock_base_epoch == 0);
         clock_base_epoch = data->clock_epoch;
-        clock_base_ms = last_data_ms;
+        clock_base_ms = st.last_ms;
         clock_fmt = data->clock_fmt;
-    } else if (clock_base_epoch != 0) {   // clock turned off daemon-side → revert title to "Usage"
+        if (was_off) refresh_title();
+    } else if (idx == PROVIDER_CLAUDE && clock_base_epoch != 0) {
+        // Clock turned off daemon-side (judged on the Claude payload, which
+        // carries the daemon's clock config) → title reverts to the provider name.
         clock_base_epoch = 0;
         clock_last_min = -1;
-        lv_label_set_text(lbl_title, "Usage");
+        refresh_title();
     }
+
+    // First live data, or the visible slot went stale while this one is fresh:
+    // bring this slot on screen. Otherwise only re-render if it is on screen.
+    if (first || !slot_fresh(visible_slot)) {
+        show_slot(idx);
+        if (carousel_timer) lv_timer_reset(carousel_timer);
+    } else if (idx == visible_slot) {
+        show_slot(idx);
+    }
+}
+
+// Render one slot's data into the panels and make it the visible slot.
+static void show_slot(int idx) {
+    visible_slot = idx;
+    const UsageData* data = &slots[idx].data;
+    refresh_title();
+
+    if (layout_dense != data->has_third) apply_usage_layout(data->has_third);
 
     int s_pct = (int)(data->session_pct + 0.5f);
 
     if (data->enterprise) {
         // Spending box: big number-only label + small "%" symbol + desc + pace
-        lv_obj_set_style_text_font(lbl_session_pct, L.ent_pct_font, 0);
+        lv_obj_set_style_text_font(lbl_session_pct, layout_dense ? L.dense_pct_font : L.ent_pct_font, 0);
         lv_label_set_text(lbl_session_label, "Spending");
         lv_obj_add_flag(lbl_session_reset, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
@@ -647,8 +937,9 @@ void ui_update(const UsageData* data) {
         lv_obj_add_flag(lbl_spending_status,   LV_OBJ_FLAG_HIDDEN);
         if (panel_weekly) lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_obj_set_style_text_font(lbl_session_pct, L.pct_font, 0);
+        lv_obj_set_style_text_font(lbl_session_pct, layout_dense ? L.dense_pct_font : L.pct_font, 0);
         lv_label_set_text(lbl_session_label, "Current");
+        lv_label_set_text(lbl_weekly_label, "Weekly");   // undo the enterprise "Period" pill
         lv_obj_clear_flag(lbl_session_reset, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_spending_desc,   LV_OBJ_FLAG_HIDDEN);
@@ -701,6 +992,17 @@ void ui_update(const UsageData* data) {
         format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
         lv_label_set_text(lbl_weekly_reset, buf);
     }
+
+    if (data->has_third) {
+        int t_pct = (int)(data->third_pct + 0.5f);
+        lv_label_set_text(lbl_third_label, data->third_label[0] ? data->third_label : "Fable");
+        lv_obj_align(lbl_third_label, LV_ALIGN_TOP_RIGHT, 0, 1);
+        lv_label_set_text_fmt(lbl_third_pct, "%d%%", t_pct);
+        lv_bar_set_value(bar_third, t_pct, LV_ANIM_ON);
+        lv_obj_set_style_bg_color(bar_third, pct_color(data->third_pct), LV_PART_INDICATOR);
+        format_reset_time(data->third_reset_mins, buf, sizeof(buf));
+        lv_label_set_text(lbl_third_reset, buf);
+    }
 }
 
 // Pick the usage-view sub-screen: pairing hint (BLE down), the idle "Zzz" screen
@@ -712,8 +1014,8 @@ static void update_view_state(void) {
     int v;
     if (!s_ble_connected) {
         v = 0;  // pairing hint
-    } else if (data_received && data_ok && (lv_tick_get() - last_data_ms) < DATA_FRESH_MS) {
-        v = 2;  // live usage
+    } else if (fresh_count() > 0) {
+        v = 2;  // live usage (at least one provider is fresh)
     } else {
         v = 1;  // idle / Zzz
     }
@@ -730,6 +1032,8 @@ void ui_tick_anim(void) {
     if (current_screen != SCREEN_USAGE) return;
     update_view_state();
     if (view_state == 1) splash_mini_tick();   // animate the sleeping creature on the idle screen
+    // The visible provider lapsed while another is still fresh → rotate to it.
+    if (view_state == 2 && !slot_fresh(visible_slot)) carousel_advance();
 
     uint32_t now = lv_tick_get();
 
@@ -751,6 +1055,7 @@ void ui_tick_anim(void) {
                 snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tmv.tm_hour, tmv.tm_min);
             }
             lv_label_set_text(lbl_title, tbuf);
+            layout_title();   // the clock width changed → re-center clock + provider pill
         }
     }
 
@@ -797,6 +1102,22 @@ static void global_click_cb(lv_event_t* e) {
     (void)e;
     if (current_screen == SCREEN_SPLASH) ui_show_screen(prev_non_splash_screen);
     else                                  ui_show_screen(SCREEN_SPLASH);
+}
+
+// Usage view tap: with more than one live provider it pages the carousel;
+// otherwise it keeps the historical behavior (toggle to the splash).
+static void usage_tap_cb(lv_event_t* e) {
+    (void)e;
+    if (current_screen == SCREEN_USAGE && view_state == 2 && fresh_count() > 1) {
+        carousel_advance();
+        return;
+    }
+    ui_show_screen(SCREEN_SPLASH);
+}
+
+static void usage_long_press_cb(lv_event_t* e) {
+    (void)e;
+    if (current_screen == SCREEN_USAGE) ui_show_screen(SCREEN_SPLASH);
 }
 
 void ui_show_screen(screen_t screen) {

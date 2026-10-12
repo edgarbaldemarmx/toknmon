@@ -34,8 +34,8 @@ New mascots (H3/H4); Linux/Windows daemons; Kimi monthly limits.
 `ask-on-risk`. Forecast ~900 authored changed lines across two work units (daemon, firmware). Exceeds 400 → chain strategy decision deferred to the user; both units land as separate commits on the same feature branch.
 
 ## Tasks
-- [ ] T1 — Daemon providers package + Claude via `/api/oauth/usage` + Codex + Kimi + config + loop + tests (RED→GREEN). Route: delegated writer A.
-- [ ] T2 — Firmware slots, RX queue, per-slot freshness, carousel, Fable bar, sim scenario. Route: delegated writer B (after T1 defines the payload contract; may run in parallel once contract is fixed in this document).
+- [x] T1 — Daemon providers package + Claude via `/api/oauth/usage` + Codex + Kimi + config + loop + tests (RED→GREEN). Route: delegated writer A. Done (uncommitted; see "Daemon evidence"). Commit pending.
+- [x] T2 — Firmware slots, RX queue, per-slot freshness, carousel, Fable bar, sim scenario. Route: delegated writer B (ran in parallel with T1 on the fixed payload contract). Done 2026-10-12: sim + 2.16 hardware verified, not yet committed (see Firmware evidence).
 - [ ] T3 — Integration: flash board, run the repo daemon manually (stop the upstream launchd daemon from `~/Downloads/Clawdmeter` during the test, restore after), observe all three providers on device via `screenshot.sh`. Route: verification worker.
 - [ ] T4 — Docs (README providers section) + commits.
 
@@ -54,7 +54,27 @@ New mascots (H3/H4); Linux/Windows daemons; Kimi monthly limits.
 - `pio run -d firmware -e waveshare_amoled_216`, flash, `screenshot.sh` for each carousel slot
 
 ## Verification evidence
-(pending)
+
+### Daemon evidence (T1, writer A, 2026-10-12)
+- RED: `daemon/.venv/bin/python -m pytest daemon/tests/test_providers_*.py -q` → 4 collection errors (`daemon.providers` missing) before implementation.
+- GREEN: `daemon/.venv/bin/python -m pytest daemon/tests -q` → `184 passed, 2 skipped` (baseline 137 passed, 2 skipped; +47 new across `test_providers_{claude,codex,kimi,payload}.py`). The 2 skips and 2 `Event.wait` warnings are pre-existing (Windows tests).
+- `bash -n install-mac.sh` → OK.
+- Script-mode import (launchd path, `daemon/` as cwd): `providers` resolves as a sibling package; `PROVIDERS = {claude, codex, kimi}`, `TokenExpired` is `providers.claude.TokenExpired`.
+- Live read-only smoke (no BLE, no launchd, real local sources):
+  - claude: `{"p":"claude","s":30,"sr":83,"w":76,"wr":833,"f":6,"fr":833,"st":"allowed","acct":"pro","ok":true}`; full `poll_api` adds `"c":1` from the real config. Fable bar present (f=6).
+  - codex: `{"p":"codex","s":0,"sr":0,"w":48,"wr":9454,"st":"allowed","ok":true}` — this plan (`plan_type: prolite`) reports only the 10080-minute window as `primary` with `secondary: null`, so the 5h bar is 0/0.
+  - kimi: `{"p":"kimi","ok":false}` — both `~/.kimi-code/credentials/*.json` have `expires_at` in the past (1790961004 and 1787961124 < now); no request is made without a live token. Re-login with the Kimi CLI to exercise the live path.
+- Files: `daemon/providers/{__init__,base,claude,codex,kimi}.py`, `daemon/claude_usage_daemon.py` (poll_api → usage endpoint with header-probe fallback as `poll_api_headers`; `read_providers`, `collect_payloads`, tagged `Sending[<id>]` writes, 0.35 s inter-write gap), `daemon/config.example`, `install-mac.sh` (`configure_providers`), `README.md` ("Providers" section), tests + fixtures.
+
+### Firmware evidence (T2, writer B, 2026-10-12)
+- Test-first exception: no runnable firmware unit-test runner exists (PlatformIO `sim` is a playback simulator, not a test env); verification is build + headless autoshots + hardware screenshot/serial.
+- `~/.platformio/penv/bin/pio run -d firmware -e sim 2>&1 | tail -3` → `sim SUCCESS`, no warnings.
+- Headless autoshots (`SDL_VIDEODRIVER=dummy SIM_AUTOSHOT_MS=<ms>`, boot temporarily switched to `SCREEN_USAGE`, reverted afterwards; `grep QA-TEMP firmware/src` → none): t=5000 legacy p-less Claude, 2 panels, title "Claude" in accent; t=29000 Claude with 3 bars (Current / Weekly / Fable, dense layout, status line clear); t=34000 Codex (green pill beside the clock); t=42000 Kimi (blue pill); t=50000 Kimi `ok:false` dropped out → Codex shown; t=62000 Claude without `f` → 2-panel layout restored. Sim log shows the three `hold_ms:0` lines drained in one pass (`BLE: packet p=claude … +third`, `p=codex`, `p=kimi`).
+- Found + fixed while QA'ing: the "Period" pill (enterprise) never reverted to "Weekly" on pro payloads (pre-existing upstream bug, visible across providers).
+- `~/.platformio/penv/bin/pio run -d firmware -e waveshare_amoled_216 2>&1 | tail -3` → SUCCESS, RAM 33.8%, Flash 65.1% (2174291 / 3342336 bytes).
+- Hardware (`./flash-mac.sh waveshare_amoled_216 /dev/cu.usbmodem214201 --name "ToknMon Desk One"`) → upload OK, `board> BLE: name=ToknMon Desk One`. With the upstream launchd daemon still sending p-less payloads: serial `BLE: packet p=claude ok=1 s=30.0%` (poll + heartbeat, twice in 70 s); `./screenshot.sh` → Claude screen, 30% / 76%, title "Claude" (no `t` from the upstream daemon → no clock, no pill). Final (splash-boot) binary reflashed; boot log: `BLE: name=ToknMon Desk One` → `owner loaded` → `advertising start=OK` → `connected from fc:b2:…` → `auth complete bonded=1 enc=1` → `req_char onSubscribe` → `BLE: packet p=claude ok=1 s=30.0%`.
+- `grep -rn "ifdef BOARD_" firmware/src/*.cpp firmware/src/*.h` → 3 hits, all `BOARD_HAS_PSRAM`, identical to HEAD (nothing new).
+- Not verified: 368×448 and 240×240 dense breakpoints (values derived arithmetically, no sim profile for them); 12-hour clock + pill width; real multi-provider BLE traffic on hardware (T3).
 
 ## Next step
 Wait for H1 commit, branch, launch writer A (daemon) and writer B (firmware) in parallel — disjoint edit surfaces.
