@@ -10,7 +10,7 @@ set -u
 cd "$(git rev-parse --show-toplevel)" || exit 2
 
 # Patterns that are always fine (documentation ranges, synthetic fixtures).
-ALLOW='AA:BB:CC:DD:EE:|aa-bb-cc-dd-ee-|AABBCCDDEE|00:00:00:00:00:00|<author email>|<upstream path>|noreply@|example\.com|sk-ant-test-|sk-ant-ort-test-|sk-ant-oat01-(CLAUDE|DESIGN)|SUPERSECRET|sk-ant-secret-token|sk-ant-\.\.\.|bbbbbbbbbbbb|0000000000(0|1|2|3|4)|4c41555a-|tokencount/Clawdmeter'
+ALLOW='11-22-33-44-55-66|aa:bb:cc:dd:ee:ff|00:51:4D:00:00:01|AA:BB:CC:DD:EE:|aa-bb-cc-dd-ee-|AABBCCDDEE|00:00:00:00:00:00|<author email>|<upstream path>|noreply@|example\.com|sk-ant-test-|sk-ant-ort-test-|sk-ant-oat01-(CLAUDE|DESIGN)|SUPERSECRET|sk-ant-secret-token|sk-ant-\.\.\.|bbbbbbbbbbbb|0000000000(0|1|2|3|4)|4c41555a-|tokencount/Clawdmeter'
 
 status=0
 scan() {
@@ -27,7 +27,7 @@ scan() {
 scan "home directory paths"      '(/Users/[A-Za-z0-9_.-]+|/home/[A-Za-z0-9_.-]+|C:\\\\Users\\\\)'
 scan "hostnames"                  '[A-Za-z0-9-]+\.local\b'
 scan "e-mail addresses"           '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
-scan "MAC addresses"              '\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b'
+scan "MAC addresses"              '(^|[^0-9A-Fa-f])([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}([^0-9A-Fa-f]|$)'
 scan "credential-looking strings" '(sk-ant-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|github_pat_|eyJ[A-Za-z0-9_-]{30,}|xox[bp]-|AIza[0-9A-Za-z_-]{20,})'
 scan "temporary scratch paths"    '(/private/tmp/|/tmp/claude-[0-9])'
 
