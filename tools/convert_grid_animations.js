@@ -3,6 +3,7 @@
 //
 //   node tools/convert_grid_animations.js                 # assets/animations/*.txt -> header
 //   node tools/convert_grid_animations.js --verify DIR    # + one PNG strip per animation (ImageMagick)
+//   node tools/convert_grid_animations.js --gif DIR       # + one animated GIF per animation (ImageMagick)
 //   node tools/convert_grid_animations.js --in DIR --out FILE
 //
 // Authoring format (one animation per assets/animations/<name>.txt):
@@ -296,14 +297,77 @@ function writeVerifyPng(anim, dir) {
   return ppm;
 }
 
+// ── Animated GIFs (gallery) ──────────────────────────────────────────────────
+
+const GIF_SCALE = 6;   // px per cell; the device shows 480/55 ≈ 8.7 px per stage cell
+
+// One frame as a binary PPM at `scale` px per cell. Index 0 is opaque black,
+// matching how the full splash renders the art on the device.
+function renderFramePpm(anim, frameIndex, scale) {
+  const { w, h, frames, palette } = anim;
+  const W = w * scale, H = h * scale;
+  const buf = Buffer.alloc(W * H * 3, 0x00);
+  const f = frames[frameIndex];
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const code = f[Math.floor(y / scale) * w + Math.floor(x / scale)];
+      if (!code) continue;
+      const c = palette[code];
+      const o = (y * W + x) * 3;
+      buf[o] = c[0]; buf[o + 1] = c[1]; buf[o + 2] = c[2];
+    }
+  return Buffer.concat([Buffer.from(`P6\n${W} ${H}\n255\n`), buf]);
+}
+
+// ImageMagick entry point, or null when neither `magick` nor `convert` runs.
+function findImageMagick() {
+  for (const tool of ['magick', 'convert']) {
+    try {
+      execFileSync(tool, ['-version'], { stdio: 'ignore' });
+      return tool;
+    } catch { /* try the next tool */ }
+  }
+  return null;
+}
+
+// Animated GIF of the whole clip: every frame in file order with its own hold
+// as the GIF delay (ImageMagick counts in 1/100 s), looping forever. The
+// in-file loop region is not unrolled; the clip itself loops. Frame files go
+// to a scratch directory that is removed afterwards, so the output depends
+// only on the animation data (no timestamps are written to the GIF).
+// Returns the GIF path, or null when ImageMagick is unavailable.
+function writeGif(anim, dir, scale = GIF_SCALE) {
+  const tool = findImageMagick();
+  if (!tool) {
+    console.warn(`  ImageMagick not found; skipping ${anim.name}.gif`);
+    return null;
+  }
+  const scratch = fs.mkdtempSync(path.join(dir, `.${anim.ident}-frames-`));
+  try {
+    const args = ['-loop', '0'];
+    anim.frames.forEach((_, i) => {
+      const ppm = path.join(scratch, `frame-${String(i).padStart(3, '0')}.ppm`);
+      fs.writeFileSync(ppm, renderFramePpm(anim, i, scale));
+      args.push('-delay', String(Math.max(1, Math.round(anim.holds[i] / 10))), ppm);
+    });
+    const gif = path.join(dir, `${anim.name}.gif`);
+    args.push(gif);
+    execFileSync(tool, args, { stdio: 'ignore' });
+    return gif;
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 function main(argv) {
-  let inDir = DEFAULT_IN, outFile = DEFAULT_OUT, verifyDir = null;
+  let inDir = DEFAULT_IN, outFile = DEFAULT_OUT, verifyDir = null, gifDir = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--in') inDir = path.resolve(argv[++i]);
     else if (argv[i] === '--out') outFile = path.resolve(argv[++i]);
     else if (argv[i] === '--verify') verifyDir = path.resolve(argv[++i]);
+    else if (argv[i] === '--gif') gifDir = path.resolve(argv[++i]);
     else { console.error(`unknown argument ${argv[i]}`); process.exit(2); }
   }
 
@@ -332,8 +396,16 @@ function main(argv) {
     fs.mkdirSync(verifyDir, { recursive: true });
     for (const a of anims) console.log(`  ${path.relative(process.cwd(), writeVerifyPng(a, verifyDir))}`);
   }
+
+  if (gifDir) {
+    fs.mkdirSync(gifDir, { recursive: true });
+    for (const a of anims) {
+      const gif = writeGif(a, gifDir);
+      if (gif) console.log(`  ${path.relative(process.cwd(), gif)} (${(fs.statSync(gif).size / 1024).toFixed(1)} KB)`);
+    }
+  }
 }
 
-module.exports = { parseGrid, buildAnimation, emitHeader, writeVerifyPng, safeIdent, rgb565 };
+module.exports = { parseGrid, buildAnimation, emitHeader, writeVerifyPng, writeGif, renderFramePpm, findImageMagick, safeIdent, rgb565 };
 
 if (require.main === module) main(process.argv.slice(2));
