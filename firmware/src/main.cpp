@@ -256,6 +256,7 @@ static bool device_name_valid(const char* s) {
     if (len == 0 || len > BLE_DEVICE_NAME_MAX_LEN) return false;
     for (size_t i = 0; i < len; i++) {
         if (s[i] < 0x20 || s[i] > 0x7E) return false;  // printable ASCII only
+        if (s[i] == '#') return false;                  // comment marker in the host config
     }
     return true;
 }
@@ -265,7 +266,7 @@ static void set_device_name(char* text) {
     size_t len = strlen(text);
     while (len > 0 && text[len - 1] == ' ') text[--len] = '\0';  // trim trailing
     if (!device_name_valid(text)) {
-        Serial.printf("BLE: name rejected (need 1-%d printable ASCII chars)\n",
+        Serial.printf("BLE: name rejected (need 1-%d printable ASCII chars, no '#')\n",
                       BLE_DEVICE_NAME_MAX_LEN);
         return;
     }
@@ -279,6 +280,29 @@ static void set_device_name(char* text) {
     ESP.restart();
 }
 
+// Hands-free QA: `screen usage|splash`, `next` (page the carousel like a
+// tap), `slot <0-2>` (show that provider slot if fresh). Reply `ok` / `err <why>`.
+static void qa_reply(bool ok, const char* why) {
+    if (ok) Serial.println("ok");
+    else    Serial.printf("err %s\n", why);
+}
+
+static void cmd_screen(const char* arg) {
+    if (strcmp(arg, "usage") == 0)       { ui_show_screen(SCREEN_USAGE);  qa_reply(true, NULL); }
+    else if (strcmp(arg, "splash") == 0) { ui_show_screen(SCREEN_SPLASH); qa_reply(true, NULL); }
+    else                                   qa_reply(false, "unknown screen (usage|splash)");
+}
+
+static void cmd_slot(const char* arg) {
+    char* end = NULL;
+    long idx = strtol(arg, &end, 10);
+    if (end == arg || *end != '\0' || idx < 0 || idx >= PROVIDER_COUNT) {
+        qa_reply(false, "slot must be 0-2");
+        return;
+    }
+    qa_reply(ui_show_slot((int)idx), "slot not fresh");
+}
+
 static void check_serial_cmd() {
     while (Serial.available()) {
         char c = Serial.read();
@@ -288,6 +312,9 @@ static void check_serial_cmd() {
             else if (strcmp(cmd_buf, "buzz") == 0)  sound_hal_play_reset();
             else if (strcmp(cmd_buf, "name") == 0)  print_device_name();
             else if (strncmp(cmd_buf, "name ", 5) == 0) set_device_name(cmd_buf + 5);
+            else if (strncmp(cmd_buf, "screen ", 7) == 0) cmd_screen(cmd_buf + 7);
+            else if (strcmp(cmd_buf, "next") == 0) qa_reply(ui_carousel_next(), "need usage view with 2+ fresh slots");
+            else if (strncmp(cmd_buf, "slot ", 5) == 0) cmd_slot(cmd_buf + 5);
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;

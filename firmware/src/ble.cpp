@@ -15,9 +15,10 @@ static char device_name[BLE_DEVICE_NAME_MAX_LEN + 1] = BLE_DEFAULT_DEVICE_NAME;
 #define TX_CHAR_UUID        "4c41555a-4465-7669-6365-000000000003"  // device ack/nack notifies
 #define REQ_CHAR_UUID       "4c41555a-4465-7669-6365-000000000004"  // device-initiated refresh request
 
-// RX queue: single producer (NimBLE host task, onWrite) / single consumer
-// (loop task, ble_next_packet). head/tail are only ever advanced by their
-// own side, so plain volatile indices are enough without a lock.
+// RX queue: single producer (NimBLE host task, core 0, onWrite) / single
+// consumer (loop task, core 1, ble_next_packet). head/tail are only ever
+// advanced by their own side, so no lock is needed; the release/acquire
+// pairs order each slot's bytes before the index that publishes it.
 #define BLE_BUF_SIZE BLE_RX_ITEM_SIZE
 
 // HID keyboard report descriptor (standard 6-KRO boot-protocol-compatible).
@@ -79,8 +80,8 @@ static volatile uint16_t param_fix_handle = CONN_HANDLE_NONE;  // pending retry
 static volatile uint32_t param_fix_at_ms  = 0;                 // when to send it
 static volatile uint16_t param_fix_spent  = CONN_HANDLE_NONE;  // one per connection
 static char rx_queue[BLE_RX_QUEUE_DEPTH][BLE_BUF_SIZE];
-static volatile uint8_t rx_head = 0;   // next slot the producer writes
-static volatile uint8_t rx_tail = 0;   // next slot the consumer reads
+static uint8_t rx_head = 0;   // next slot the producer writes (atomic release/acquire)
+static uint8_t rx_tail = 0;   // next slot the consumer reads  (atomic release/acquire)
 static volatile bool has_received_data = false;
 static char mac_str[18];
 
@@ -299,17 +300,18 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
             return;
         }
         std::string val = chr->getValue();
-        uint8_t next = (uint8_t)((rx_head + 1) % BLE_RX_QUEUE_DEPTH);
-        if (next == rx_tail) {
+        uint8_t head = __atomic_load_n(&rx_head, __ATOMIC_RELAXED);   // producer-owned
+        uint8_t next = (uint8_t)((head + 1) % BLE_RX_QUEUE_DEPTH);
+        if (next == __atomic_load_n(&rx_tail, __ATOMIC_ACQUIRE)) {
             // Queue full: the loop task has not drained in a while. Keep the
             // packets already queued (oldest first) and drop this one.
             Serial.println("BLE: RX queue full, dropping packet");
             return;
         }
         size_t len = std::min(val.length(), (size_t)(BLE_BUF_SIZE - 1));
-        memcpy(rx_queue[rx_head], val.c_str(), len);
-        rx_queue[rx_head][len] = '\0';
-        rx_head = next;
+        memcpy(rx_queue[head], val.c_str(), len);
+        rx_queue[head][len] = '\0';
+        __atomic_store_n(&rx_head, next, __ATOMIC_RELEASE);   // publish after the bytes
         has_received_data = true;
     }
 };
@@ -439,13 +441,17 @@ bool ble_has_bonds(void) {
 }
 
 bool ble_has_data(void) {
-    return rx_head != rx_tail;
+    return __atomic_load_n(&rx_head, __ATOMIC_ACQUIRE) !=
+           __atomic_load_n(&rx_tail, __ATOMIC_RELAXED);
 }
 
 bool ble_next_packet(char* out, size_t cap) {
-    if (!out || cap == 0 || rx_head == rx_tail) return false;
-    strlcpy(out, rx_queue[rx_tail], cap);
-    rx_tail = (uint8_t)((rx_tail + 1) % BLE_RX_QUEUE_DEPTH);
+    if (!out || cap == 0) return false;
+    uint8_t tail = __atomic_load_n(&rx_tail, __ATOMIC_RELAXED);   // consumer-owned
+    if (__atomic_load_n(&rx_head, __ATOMIC_ACQUIRE) == tail) return false;
+    strlcpy(out, rx_queue[tail], cap);
+    // Release: the producer may reuse this slot only after we are done reading it.
+    __atomic_store_n(&rx_tail, (uint8_t)((tail + 1) % BLE_RX_QUEUE_DEPTH), __ATOMIC_RELEASE);
     return true;
 }
 

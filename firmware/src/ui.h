@@ -15,6 +15,11 @@ void ui_init(void);
 void ui_update_slot(int idx, const UsageData* data);
 void ui_update(const UsageData* data);
 void ui_tick_anim(void);
+// Serial QA hooks. ui_carousel_next() pages like a tap (false unless the live
+// usage view is up with 2+ fresh slots); ui_show_slot() brings one provider
+// slot on screen (false when out of range or stale).
+bool ui_carousel_next(void);
+bool ui_show_slot(int idx);
 void ui_show_screen(screen_t screen);
 void ui_toggle_splash(void);
 screen_t ui_get_current_screen(void);

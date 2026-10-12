@@ -868,8 +868,22 @@ static void carousel_advance(void) {
 
 static void carousel_timer_cb(lv_timer_t* t) {
     (void)t;
+    if (alert_active) return;          // the alert holds the slot it landed on
     if (current_screen != SCREEN_USAGE || view_state != 2) return;
     if (fresh_count() > 1) carousel_advance();
+}
+
+bool ui_carousel_next(void) {
+    if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_count() < 2) return false;
+    carousel_advance();
+    return true;
+}
+
+bool ui_show_slot(int idx) {
+    if (idx < 0 || idx >= PROVIDER_COUNT || !slot_fresh(idx)) return false;
+    show_slot(idx);
+    if (carousel_timer) lv_timer_reset(carousel_timer);
+    return true;
 }
 
 void ui_update(const UsageData* data) {
@@ -883,8 +897,9 @@ void ui_update_slot(int idx, const UsageData* data) {
     st.data = *data;
     st.ok = data->ok;
     if (!data->ok) {
-        // {"ok":false} beat: this provider drops out of the rotation (keeps
-        // its last numbers). If it was on screen, move on to a fresh one.
+        // {"ok":false} beat: the slot stores the payload (numbers reset to
+        // the parse defaults, last_ms untouched) and drops out of the rotation
+        // until a good payload lands. If it was on screen, move on to a fresh one.
         if (idx == visible_slot) {
             int nxt = next_fresh_slot(visible_slot);
             if (nxt >= 0) show_slot(nxt);
@@ -1110,8 +1125,11 @@ static void global_click_cb(lv_event_t* e) {
 
 // Usage view tap: with more than one live provider it pages the carousel;
 // otherwise it keeps the historical behavior (toggle to the splash).
+// LVGL delivers the object's SHORT_CLICKED before the indev CLICKED that
+// alert_tap_cb vetoes, so a tap that dismisses an alert must do nothing here.
 static void usage_tap_cb(lv_event_t* e) {
     (void)e;
+    if (alert_active) return;
     if (current_screen == SCREEN_USAGE && view_state == 2 && fresh_count() > 1) {
         carousel_advance();
         return;
@@ -1121,6 +1139,7 @@ static void usage_tap_cb(lv_event_t* e) {
 
 static void usage_long_press_cb(lv_event_t* e) {
     (void)e;
+    if (alert_active) return;
     if (current_screen == SCREEN_USAGE) ui_show_screen(SCREEN_SPLASH);
 }
 

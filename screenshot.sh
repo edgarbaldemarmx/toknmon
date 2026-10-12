@@ -1,7 +1,23 @@
 #!/bin/bash
 # Take a screenshot from the Waveshare AMOLED display via LVGL snapshot.
-# Usage: ./screenshot.sh [output.png] [port]
+# Usage: ./screenshot.sh [output.png] [port] [--screen usage|splash]
 # Default port: /dev/cu.usbmodem101 on macOS, /dev/ttyACM0 on Linux.
+# --screen sends the firmware's `screen <name>` serial command first, waits
+# 300 ms for the redraw, then captures — no button press needed.
+
+SCREEN=""
+POSITIONAL=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --screen)
+            if [[ "$2" != "usage" && "$2" != "splash" ]]; then
+                echo "Usage: --screen usage|splash" >&2; exit 2
+            fi
+            SCREEN="$2"; shift 2 ;;
+        *) POSITIONAL+=("$1"); shift ;;
+    esac
+done
+set -- "${POSITIONAL[@]}"
 
 OUTPUT="${1:-screenshot.png}"
 if [ -z "$2" ]; then
@@ -27,13 +43,18 @@ trap "rm -f '$TMPRAW' '$TMPDIMS'" EXIT
 
 echo "Taking screenshot from $PORT..."
 
-"$PY" - "$PORT" "$TMPRAW" "$TMPDIMS" << 'PYEOF'
-import serial, sys
+"$PY" - "$PORT" "$TMPRAW" "$TMPDIMS" "$SCREEN" << 'PYEOF'
+import serial, sys, time
 
-port_path, raw_path, dims_path = sys.argv[1], sys.argv[2], sys.argv[3]
+port_path, raw_path, dims_path, screen = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 port = serial.Serial(port_path, 115200, timeout=10)
 port.reset_input_buffer()
+if screen:
+    port.write(f"screen {screen}\n".encode())
+    port.flush()
+    time.sleep(0.3)
+    port.reset_input_buffer()
 port.write(b"screenshot\n")
 port.flush()
 
