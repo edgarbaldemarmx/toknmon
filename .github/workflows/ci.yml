@@ -125,7 +125,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  firmware-2.16:
+  firmware-amoled-216:
     name: Firmware waveshare_amoled_216
     runs-on: ubuntu-latest
     timeout-minutes: 30
