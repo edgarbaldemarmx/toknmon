@@ -1,0 +1,8 @@
+{
+  "usages": {
+    "limit_5h": {"used_ratio": "0.03", "reset_time": "2026-10-12T08:29:59Z"},
+    "limit_7d": {"used_ratio": 0.09, "reset_time": "2026-10-16T00:00:00Z"},
+    "limit_month_total": {"used_ratio": 0.12, "reset_time": "2026-11-01T00:00:00Z"},
+    "limit_month_code": {"used_ratio": 0.05, "reset_time": "2026-11-01T00:00:00Z"}
+  }
+}

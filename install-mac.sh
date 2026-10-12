@@ -159,6 +159,41 @@ configure_device_name() {
     echo "  Set: device_name = $ans"
 }
 
+# Pick which providers the daemon polls (`providers` key). Detects Codex and
+# Kimi Code installs to suggest a default; Claude is always suggested.
+configure_providers() {
+    [ -t 0 ] || return 0
+    local ans cur suggested="claude" detected=""
+    cur=$(current_config_value providers)
+    [ -d "$HOME/.codex/sessions" ] && { suggested="$suggested,codex"; detected="$detected Codex"; }
+    [ -d "$HOME/.kimi-code/credentials" ] && { suggested="$suggested,kimi"; detected="$detected Kimi"; }
+    [ -n "$cur" ] && suggested=$(echo "$cur" | tr -d ' ')
+    echo "  The device can cycle through several providers (claude, codex, kimi)."
+    [ -n "$detected" ] && echo "  Detected on this Mac:$detected"
+    read -r -p "  Providers to monitor [claude,codex,kimi] (default $suggested): " ans || ans=""
+    ans=$(echo "${ans:-$suggested}" | tr 'A-Z' 'a-z' | tr -d ' ')
+    local p valid=""
+    IFS=',' read -r -a parts <<< "$ans"
+    for p in "${parts[@]}"; do
+        case "$p" in
+            claude|codex|kimi) valid="${valid:+$valid, }$p" ;;
+            "") ;;
+            *) echo "  Unknown provider '$p' — ignoring." ;;
+        esac
+    done
+    if [ -z "$valid" ] || [ "$valid" = "claude" ]; then
+        if [ -n "$cur" ]; then
+            upsert_config_key providers claude
+            echo "  Set: providers = claude"
+        else
+            echo "  Claude only (default) — no config change needed."
+        fi
+        return 0
+    fi
+    upsert_config_key providers "$valid"
+    echo "  Set: providers = $valid"
+}
+
 # Offer the optional attention beep (Claude Code hooks, see the README).
 configure_beep() {
     [ -t 0 ] || return 0
@@ -251,12 +286,13 @@ sed \
 echo "  Installed: $PLIST_DST"
 echo ""
 
-# Interactive daemon configuration: the board's Bluetooth name, which plans to
-# poll, plus the optional clock display, session-reset chime and attention
-# beep. All re-read by the daemon each poll.
+# Interactive daemon configuration: the board's Bluetooth name, which plans and
+# providers to poll, plus the optional clock display, session-reset chime and
+# attention beep. All re-read by the daemon each poll.
 echo "[4/6] Configuring the daemon..."
 configure_device_name
 configure_config_dirs
+configure_providers
 configure_clock
 configure_chime
 configure_beep

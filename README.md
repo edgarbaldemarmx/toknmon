@@ -208,6 +208,29 @@ reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v Clawdmeter /f
 | `Warning: running under Linux/WSL`     | Run from a native PowerShell window, not a WSL shell.    |
 
 
+## Providers (optional, macOS daemon)
+
+The daemon can monitor more than one coding assistant. The device keeps one
+usage slot per provider and shows them as a carousel (tap to advance, or wait
+for the auto-rotate). Enable providers in `~/.config/claude-usage-monitor/config`
+(the installer offers this and detects local Codex / Kimi installs):
+
+```ini
+providers = claude, codex, kimi
+```
+
+| Provider | Data source | Bars |
+| --- | --- | --- |
+| `claude` | `GET /api/oauth/usage` with the Claude Code OAuth token (keychain or `.credentials.json`); falls back to the rate-limit header probe on accounts without the endpoint | 5h session, weekly, plus the model-scoped weekly window (e.g. Fable) when the subscription exposes one |
+| `codex` | Newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` from the last 7 days — no network, no auth | 5h, weekly |
+| `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest non-expired token in `~/.kimi-code/credentials/*.json` | 5h, weekly |
+
+Default (key unset) is `claude` only, which sends exactly the same payload as
+before, so older firmware keeps working. With several providers each payload
+carries `"p": "<provider>"`; a provider that has no data this cycle sends
+`{"p": "<provider>", "ok": false}` and never affects the others. The daemon
+never refreshes any token: each CLI owns its own login.
+
 ## Attention alerts (optional)
 
 When a Claude Code session is waiting on you (a permission prompt, a question, or the idle prompt after a reply), the corner Clawd walks off, a full-size Clawd walks on and waves and points, and the message scrolls on the status line. Add these hooks to `~/.claude/settings.json` (merge them into any hook arrays you already have) and point the path at your checkout. The script needs `jq`: recent macOS ships it as `/usr/bin/jq`, otherwise install it with `brew install jq` or `sudo apt install jq`.

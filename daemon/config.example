@@ -25,6 +25,17 @@
 #   - install.sh can detect your ~/.claude* dirs and fill this in for you.
 # config_dirs = ~/.claude, ~/.claude-work
 
+# Providers to monitor (macOS daemon). The device keeps one usage slot per
+# provider and cycles through them (tap to advance). Comma-separated, any order:
+#   claude = Claude Code (OAuth usage endpoint; shows 5h, weekly and, when the
+#            subscription exposes it, the model-scoped weekly window)
+#   codex  = OpenAI Codex CLI (reads ${CODEX_HOME:-~/.codex}/sessions logs; no
+#            network, needs a Codex session in the last 7 days)
+#   kimi   = Kimi Code (uses the token in ~/.kimi-code/credentials; override the
+#            API with KIMI_CODE_BASE_URL)
+#   Unset (default) = claude only, identical payload to older daemons.
+# providers = claude, codex, kimi
+
 # Seconds between Anthropic API polls (Linux daemon). Default 60. Minimum 10.
 # The firmware marks data older than 90s as stale and only updates its "resets
 # in" countdown when a payload lands, so anything above ~80 relies on the

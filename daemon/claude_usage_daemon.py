@@ -25,6 +25,17 @@ import httpx
 from bleak import BleakClient
 from bleak.exc import BleakError
 
+# The providers package lives next to this file. Tests import this module as
+# `daemon.claude_usage_daemon`; launchd runs it as a script (sys.path[0] is
+# daemon/), so try the package-qualified import first and fall back to the
+# sibling package.
+try:
+    from daemon.providers import PROVIDERS, parse_providers_setting, to_payload
+    from daemon.providers import claude as claude_provider
+except ImportError:  # running as a script from daemon/
+    from providers import PROVIDERS, parse_providers_setting, to_payload
+    from providers import claude as claude_provider
+
 # BLE device name. The firmware default is "TokenMon"; users can rename their
 # board (`name <text>` over USB serial, or via flash-mac.sh) and record the same
 # name in the config as `device_name`. The daemon finds the device primarily by
@@ -60,7 +71,7 @@ API_HEADERS_TEMPLATE = {
     "anthropic-version": "2023-06-01",
     "anthropic-beta": "oauth-2025-04-20",
     "Content-Type": "application/json",
-    "User-Agent": "claude-code/2.1.5",
+    "User-Agent": claude_provider.USER_AGENT,
 }
 API_BODY = {
     "model": "claude-haiku-4-5-20251001",
@@ -69,10 +80,11 @@ API_BODY = {
 }
 
 
-class TokenExpired(Exception):
-    """Raised by poll_api on a 401/403 — the access token is dead. The daemon never
-    refreshes (pure free-ride: Claude Code owns refreshing), so the caller just
-    signals "No data" to the device until the CLI re-seeds the token."""
+# Raised by poll_api on a 401/403 — the access token is dead. The daemon never
+# refreshes (pure free-ride: Claude Code owns refreshing), so the caller just
+# signals "No data" to the device until the CLI re-seeds the token. Defined in
+# the Claude provider so both the usage endpoint and the header probe share it.
+TokenExpired = claude_provider.TokenExpired
 
 
 def log(msg: str) -> None:
@@ -466,7 +478,37 @@ def add_clock_fields(payload: dict) -> None:
     payload["tf"] = tf
 
 
+def read_providers() -> list[str]:
+    """Providers to poll this cycle (`providers = claude, codex, kimi`).
+
+    Default (unset) is `["claude"]`, which keeps the single-provider payload
+    byte-for-byte compatible with older firmware (no `p` field).
+    """
+    return parse_providers_setting(read_config_value("providers"), log=log)
+
+
 async def poll_api(token: str) -> dict | None:
+    """Claude usage payload for one access token.
+
+    Resolves through the OAuth usage endpoint first (sees the model-scoped
+    weekly window the header probe cannot) and falls back to the legacy
+    rate-limit header probe when that endpoint is unavailable for the account
+    (Enterprise) or transiently failing. Raises TokenExpired on 401/403.
+    """
+    try:
+        result = await claude_provider.poll(token)
+    except claude_provider.UsageUnavailable as e:
+        log(f"Usage endpoint unavailable ({e}); falling back to header probe")
+        return await poll_api_headers(token)
+    payload = to_payload(result)
+    add_chime_field(payload)   # adds "c":1 iff the config opts in
+    add_clock_fields(payload)   # adds "t" + "tf" iff the config opts in
+    return payload
+
+
+async def poll_api_headers(token: str) -> dict | None:
+    """Legacy probe: a 1-token Haiku call whose rate-limit headers carry the
+    5h/7d utilization (Pro/Max) or the spending-limit model (Enterprise)."""
     headers = dict(API_HEADERS_TEMPLATE)
     headers["Authorization"] = f"Bearer {token}"
     try:
@@ -525,6 +567,7 @@ async def poll_api(token: str) -> dict | None:
             **_billing_period_info(now, reset_ts),
             "ok": True,
         }
+    payload["p"] = "claude"
     add_chime_field(payload)   # adds "c":1 iff the config opts in
     add_clock_fields(payload)   # adds "t" + "tf" iff the config opts in
     return payload
@@ -653,6 +696,48 @@ async def poll_active_payload(selector: PlanSelector = _SELECTOR) -> dict | None
     return payload
 
 
+async def collect_payloads(providers: list[str], claude_payload: dict | None,
+                           claude_dead: bool, extra: dict) -> list[dict]:
+    """Build the ordered list of payloads to write this cycle, one per provider.
+
+    ``claude_payload``/``claude_dead`` come from :func:`poll_active` (polled by
+    the caller so the token/plan logic stays in one place). Alert extras
+    (``b``/``m``/``x``) ride only on the Claude payload. With the default
+    ``providers = claude`` the payload has no ``p`` field, matching older
+    firmware byte-for-byte; otherwise every payload is tagged.
+
+    Other providers are polled here; a provider that raises or reports
+    ``ok=False`` yields ``{"p": id, "ok": false}`` and never affects the rest.
+    """
+    claude_only = providers == ["claude"]
+    payloads: list[dict] = []
+    for pid in providers:
+        if pid == "claude":
+            if claude_payload is not None:
+                payload = {**claude_payload, **extra}
+            elif claude_dead:
+                payload = {"p": "claude", "ok": False, **extra}
+            else:
+                continue  # transient failure: stay silent for Claude this cycle
+            if claude_only:
+                payload.pop("p", None)
+            payloads.append(payload)
+            continue
+        try:
+            result = await PROVIDERS[pid]()
+            payload = to_payload(result)
+            if not result.ok:
+                reason = result.extra.get("reason")
+                log(f"Provider {pid}: no data" + (f" ({reason})" if reason else ""))
+        except Exception as e:  # one provider must never break the others
+            log(f"Provider {pid} failed: {e!r}")
+            payload = {"p": pid, "ok": False}
+        if payload.get("ok"):
+            add_clock_fields(payload)
+        payloads.append(payload)
+    return payloads
+
+
 def to_ascii(text: str, limit: int) -> str:
     """The device fonts are ASCII only: drop accents, collapse whitespace, cap."""
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
@@ -742,9 +827,9 @@ class Session:
         except asyncio.TimeoutError:
             log("Refresh subscription timed out; polling without it")
 
-    async def write_payload(self, payload: dict) -> bool:
+    async def write_payload(self, payload: dict, tag: str | None = None) -> bool:
         data = encode_payload(payload, self.max_write)
-        log(f"Sending: {data.decode()}")
+        log(f"Sending[{tag}]: {data.decode()}" if tag else f"Sending: {data.decode()}")
         try:
             await self.client.write_gatt_char(RX_CHAR_UUID, data, response=False)
             return True
@@ -920,7 +1005,19 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
                 # OAuth endpoint's rate limit (429). When no dir has a usable token
                 # we signal "No data" so the device idles instead of holding stale
                 # numbers until the CLI re-seeds it.
-                payload, dead = await poll_active()
+                providers = read_providers()
+                payload, dead = (None, False)
+                if "claude" in providers:
+                    payload, dead = await poll_active()
+                    if payload is None and dead:
+                        # No live token in any config dir (missing, or a 401/expired
+                        # token) -> show "No data" now instead of stale numbers.
+                        log("No usable token; signalling no-data to device — run "
+                            "`claude login` or use the CLI to let Claude Code renew it")
+                    elif payload is None:
+                        # Transient poll failure (a live token that didn't answer this
+                        # cycle) -> stay silent for Claude and retry next tick.
+                        log("No usable config dir this cycle")
                 extra = {}
                 if alert_unsent:
                     if read_onoff_setting("beep") == "on":
@@ -929,26 +1026,27 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
                         extra["m"] = alert["m"]
                 if clear_unsent:
                     extra["x"] = 1
-                if payload is not None:
-                    if await session.write_payload({**payload, **extra}):
-                        last_poll = time.time()
+                # One payload per enabled provider, written back-to-back with a
+                # short gap so the firmware's RX queue never drops one. Guard
+                # last_poll on the write result (like before) so a failed beat
+                # retries next tick instead of throttling a healthy link for a
+                # full POLL_INTERVAL.
+                payloads = await collect_payloads(providers, payload, dead, extra)
+                for i, item in enumerate(payloads):
+                    if i:
+                        await asyncio.sleep(0.35)
+                    pid = item.get("p", "claude")
+                    if not await session.write_payload(item, tag=pid):
+                        continue
+                    last_poll = time.time()
+                    if pid == "claude":
+                        # Alert extras ride on the Claude payload; only a
+                        # successful Claude write counts them as delivered.
+                        alert_unsent = clear_unsent = False
+                        if item.get("ok"):
+                            used_successfully = True
+                    elif item.get("ok"):
                         used_successfully = True
-                        alert_unsent = clear_unsent = False
-                elif dead:
-                    # No live token in any config dir (missing, or a 401/expired
-                    # token) -> show "No data" now instead of stale numbers. Guard
-                    # last_poll on the write result (like the data path) so a
-                    # failed beat retries next tick instead of throttling what may
-                    # be a healthy link for a full POLL_INTERVAL.
-                    log("No usable token; signalling no-data to device — run "
-                        "`claude login` or use the CLI to let Claude Code renew it")
-                    if await session.write_payload({"ok": False, **extra}):
-                        last_poll = time.time()
-                        alert_unsent = clear_unsent = False
-                else:
-                    # Transient poll failure (a live token that didn't answer this
-                    # cycle) -> stay silent and retry next tick.
-                    log("No usable config dir this cycle")
 
             try:
                 await asyncio.wait_for(session.refresh_requested.wait(), timeout=TICK)
