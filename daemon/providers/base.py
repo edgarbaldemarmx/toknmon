@@ -6,9 +6,13 @@ the fixed JSON contract the firmware parses::
     {"p":"claude","s":17,"sr":110,"w":73,"wr":860,"f":1,"fr":860,"st":"allowed","ok":true, ...extra}
     {"p":"kimi","ok":false}
 
-Bars are positional: ``bars[0]`` -> ``s/sr`` (current window), ``bars[1]`` ->
-``w/wr`` (weekly), optional ``bars[2]`` -> ``f/fr`` (model-scoped weekly, e.g.
-Fable). Labels stay in the result for logging; the firmware owns display text.
+Bars are keyed by label, not position: ``"5h"``/``"Current"`` -> ``s/sr``
+(current window), ``"Weekly"`` -> ``w/wr``, any other label -> ``f/fr``
+(model-scoped weekly, e.g. Fable). A provider that has no such window simply
+omits the bar and the keys are absent from the payload (a weekly-only Codex
+plan sends ``w/wr`` and no ``s/sr``); the firmware treats a missing key as
+"no window". Labels stay in the result for logging; the firmware owns display
+text.
 """
 
 import datetime
@@ -27,16 +31,28 @@ class ProviderResult:
     extra: dict = field(default_factory=dict)
 
 
-_BAR_KEYS = (("s", "sr"), ("w", "wr"), ("f", "fr"))
+SESSION_KEYS = ("s", "sr")
+WEEKLY_KEYS = ("w", "wr")
+MODEL_KEYS = ("f", "fr")
+_KEYS_BY_LABEL = {"5h": SESSION_KEYS, "Current": SESSION_KEYS, "Weekly": WEEKLY_KEYS}
+
+
+def bar_keys(label: str) -> tuple[str, str]:
+    """Payload keys for a bar label (see the module docstring)."""
+    return _KEYS_BY_LABEL.get(label, MODEL_KEYS)
 
 
 def to_payload(res: ProviderResult) -> dict:
     """Map a result to the BLE payload. A failed result is the minimal
-    ``{"p": id, "ok": false}`` so the device can mark that provider stale."""
+    ``{"p": id, "ok": false}`` so the device can mark that provider stale.
+    Only present bars emit keys; the first bar claiming a key pair wins."""
     if not res.ok:
         return {"p": res.id, "ok": False}
     payload: dict = {"p": res.id}
-    for (pct_key, reset_key), (_label, pct, reset_mins) in zip(_BAR_KEYS, res.bars):
+    for label, pct, reset_mins in res.bars:
+        pct_key, reset_key = bar_keys(label)
+        if pct_key in payload:
+            continue
         payload[pct_key] = pct
         payload[reset_key] = reset_mins
     payload["st"] = res.status

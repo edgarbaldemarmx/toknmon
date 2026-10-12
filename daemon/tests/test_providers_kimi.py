@@ -109,17 +109,19 @@ def test_poll_expired_reset_reports_zero(tmp_path, monkeypatch):
     assert res.bars[1][1] == 9
 
 
-def test_poll_without_valid_token_is_not_ok_and_makes_no_request(tmp_path, monkeypatch):
+def test_poll_without_valid_token_is_not_ok_and_never_calls_usages(tmp_path, monkeypatch):
+    """An expired token triggers exactly one refresh POST (see the refresh
+    tests below); when that does not yield a token, /usages is never called."""
     _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _cred("tok-expired", NOW - 1)})
     calls = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        return httpx.Response(200, json=FIXTURE)
+        return httpx.Response(200, json=FIXTURE)   # not a token response
 
     res = _run(kimi.poll(client=_client(handler), now=NOW))
     assert res.ok is False
-    assert calls == []
+    assert [(r.method, r.url.path) for r in calls] == [("POST", "/api/oauth/token")]
     assert to_payload(res) == {"p": "kimi", "ok": False}
 
 
@@ -145,3 +147,163 @@ def test_poll_network_error_is_not_ok(tmp_path, monkeypatch):
         raise httpx.ConnectError("boom")
 
     assert _run(kimi.poll(client=_client(handler), now=NOW)).ok is False
+
+
+# --- token refresh ---------------------------------------------------------
+#
+# The Kimi CLI refreshes through ``POST ${oauthHost}/api/oauth/token`` with a
+# form body ``client_id``/``grant_type=refresh_token``/``refresh_token`` and
+# writes the wire token back to the same credential file (see kimi.py).
+
+TOKEN_URL = "https://auth.kimi.com/api/oauth/token"
+REFRESHED = {"access_token": "tok-new", "refresh_token": "r-new", "expires_in": 900,
+             "scope": "kimi-code", "token_type": "Bearer"}
+
+
+def _refresh_cred(token: str, expires_at: float, refresh: str = "r-old") -> dict:
+    blob = _cred(token, expires_at)
+    blob["refresh_token"] = refresh
+    blob["custom_key"] = {"kept": True}   # unknown keys must survive a rewrite
+    return blob
+
+
+def _router(seen: dict, refresh_status: int = 200, refresh_body: dict | None = None):
+    """MockTransport handler serving both the refresh POST and the usages GET."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            seen.setdefault("posts", []).append({
+                "url": str(request.url),
+                "content_type": request.headers.get("content-type"),
+                "body": dict(httpx.QueryParams(request.content.decode())),
+            })
+            return httpx.Response(refresh_status, json=REFRESHED if refresh_body is None else refresh_body)
+        seen.setdefault("gets", []).append(request.headers.get("authorization"))
+        return httpx.Response(200, json=FIXTURE)
+    return handler
+
+
+def test_poll_refreshes_expired_token_and_rewrites_file_atomically(tmp_path, monkeypatch):
+    home = _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _refresh_cred("tok-old", NOW - 5)})
+    path = home / "credentials" / "kimi-code.json"
+    path.chmod(0o600)
+    seen: dict = {}
+
+    res = _run(kimi.poll(client=_client(_router(seen)), now=NOW))
+
+    assert res.ok is True
+    assert seen["posts"] == [{
+        "url": TOKEN_URL,
+        "content_type": "application/x-www-form-urlencoded",
+        "body": {"client_id": kimi.CLIENT_ID, "grant_type": "refresh_token", "refresh_token": "r-old"},
+    }]
+    assert seen["gets"] == ["Bearer tok-new"]
+    blob = json.loads(path.read_text())
+    assert blob["access_token"] == "tok-new"
+    assert blob["refresh_token"] == "r-new"
+    assert blob["expires_at"] == int(NOW) + 900
+    assert blob["expires_in"] == 900
+    assert blob["scope"] == "kimi-code" and blob["token_type"] == "Bearer"
+    assert blob["custom_key"] == {"kept": True}
+    assert (path.stat().st_mode & 0o777) == 0o600
+    assert sorted(p.name for p in (home / "credentials").iterdir()) == ["kimi-code.json"]  # no .tmp left
+
+
+def test_poll_refreshes_token_expiring_within_60s(tmp_path, monkeypatch):
+    _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _refresh_cred("tok-old", NOW + 59)})
+    seen: dict = {}
+    _run(kimi.poll(client=_client(_router(seen)), now=NOW))
+    assert len(seen["posts"]) == 1
+    assert seen["gets"] == ["Bearer tok-new"]
+
+
+def test_poll_skips_refresh_when_token_is_valid(tmp_path, monkeypatch):
+    home = _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _refresh_cred("tok-live", NOW + 61)})
+    before = (home / "credentials" / "kimi-code.json").read_bytes()
+    seen: dict = {}
+    res = _run(kimi.poll(client=_client(_router(seen)), now=NOW))
+    assert res.ok is True
+    assert "posts" not in seen
+    assert seen["gets"] == ["Bearer tok-live"]
+    assert (home / "credentials" / "kimi-code.json").read_bytes() == before
+
+
+def test_poll_refreshes_freshest_file_when_all_expired(tmp_path, monkeypatch):
+    _kimi_home(tmp_path, monkeypatch, {
+        "kimi-code.json": _refresh_cred("tok-stale", NOW - 10 ** 6, refresh="r-stale"),
+        "kimi-code-env-aaaa.json": _refresh_cred("tok-recent", NOW - 10, refresh="r-recent"),
+    })
+    seen: dict = {}
+    _run(kimi.poll(client=_client(_router(seen)), now=NOW))
+    assert [p["body"]["refresh_token"] for p in seen["posts"]] == ["r-recent"]
+
+
+def test_poll_refresh_http_error_is_not_ok_and_leaves_file_untouched(tmp_path, monkeypatch):
+    home = _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _refresh_cred("tok-old", NOW - 5)})
+    path = home / "credentials" / "kimi-code.json"
+    before = path.read_bytes()
+    seen: dict = {}
+
+    res = _run(kimi.poll(client=_client(_router(seen, 401, {"error": "invalid_grant"})), now=NOW))
+
+    assert res.ok is False
+    assert "401" in res.extra["reason"]
+    assert len(seen["posts"]) == 1          # exactly one attempt, no retry loop
+    assert "gets" not in seen
+    assert path.read_bytes() == before
+    assert to_payload(res) == {"p": "kimi", "ok": False}
+
+
+def test_poll_refresh_network_error_is_not_ok(tmp_path, monkeypatch):
+    _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _refresh_cred("tok-old", NOW - 5)})
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom")
+
+    res = _run(kimi.poll(client=_client(handler), now=NOW))
+    assert res.ok is False
+    assert "refresh" in res.extra["reason"]
+
+
+def test_poll_refresh_malformed_response_is_not_ok_and_leaves_file_untouched(tmp_path, monkeypatch):
+    home = _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _refresh_cred("tok-old", NOW - 5)})
+    path = home / "credentials" / "kimi-code.json"
+    before = path.read_bytes()
+    res = _run(kimi.poll(client=_client(_router({}, 200, {"token_type": "Bearer"})), now=NOW))
+    assert res.ok is False
+    assert path.read_bytes() == before
+
+
+def test_poll_without_refresh_token_is_not_ok_and_makes_no_request(tmp_path, monkeypatch):
+    blob = _cred("tok-old", NOW - 5)
+    del blob["refresh_token"]
+    _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": blob})
+    seen: dict = {}
+    res = _run(kimi.poll(client=_client(_router(seen)), now=NOW))
+    assert res.ok is False
+    assert seen == {}
+
+
+def test_poll_refresh_honors_kimi_token_url_config(tmp_path, monkeypatch):
+    _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _refresh_cred("tok-old", NOW - 5)})
+    monkeypatch.setattr(kimi, "read_config", lambda key: "https://auth.example.test/oauth/token/"
+                        if key == "kimi_token_url" else None)
+    seen: dict = {}
+    _run(kimi.poll(client=_client(_router(seen)), now=NOW))
+    assert seen["posts"][0]["url"] == "https://auth.example.test/oauth/token/"
+
+
+def test_poll_refresh_honors_oauth_host_env(tmp_path, monkeypatch):
+    _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _refresh_cred("tok-old", NOW - 5)})
+    monkeypatch.setenv("KIMI_CODE_OAUTH_HOST", "https://auth.kimi.ai/")
+    seen: dict = {}
+    _run(kimi.poll(client=_client(_router(seen)), now=NOW))
+    assert seen["posts"][0]["url"] == "https://auth.kimi.ai/api/oauth/token"
+
+
+def test_poll_refresh_refuses_plain_http_token_url(tmp_path, monkeypatch):
+    _kimi_home(tmp_path, monkeypatch, {"kimi-code.json": _refresh_cred("tok-old", NOW - 5)})
+    monkeypatch.setattr(kimi, "read_config", lambda key: "http://auth.example.test/token")
+    seen: dict = {}
+    res = _run(kimi.poll(client=_client(_router(seen)), now=NOW))
+    assert res.ok is False
+    assert seen == {}

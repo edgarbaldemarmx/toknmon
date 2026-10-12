@@ -8,6 +8,11 @@ only relative imports are used inside the package for that reason.
 callable for the providers that need no per-call input. Claude is polled
 through :func:`claude.poll` with the token the main module already resolves,
 so its registry entry is a token-less stub that the main module replaces.
+
+Payload contract (see :mod:`.base`): bars map to ``s/sr``, ``w/wr``, ``f/fr``
+by label, and a bar a provider does not have is simply absent from the payload.
+Providers that need daemon config (Kimi's ``kimi_token_url``) read it through
+``kimi.read_config``, which the main module points at ``read_config_value``.
 """
 
 from collections.abc import Callable

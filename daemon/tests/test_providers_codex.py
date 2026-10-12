@@ -78,9 +78,10 @@ def test_poll_expired_reset_reports_zero(tmp_path, monkeypatch):
     assert res.bars[1][1] == 40
 
 
-def test_poll_weekly_only_account_fills_missing_5h_with_zero(tmp_path, monkeypatch):
+def test_poll_weekly_only_account_omits_5h_bar(tmp_path, monkeypatch):
     """Live shape seen on a weekly-only plan: primary is the 10080 window and
-    secondary is null. Bars are keyed by window, not by primary/secondary slot."""
+    secondary is null. Bars are keyed by window, not by primary/secondary slot,
+    and a window the plan does not report is omitted rather than sent as 0."""
     home = _codex_home(tmp_path, monkeypatch)
     line = {
         "timestamp": "2026-10-11T22:40:17.951Z",
@@ -95,7 +96,10 @@ def test_poll_weekly_only_account_fills_missing_5h_with_zero(tmp_path, monkeypat
 
     res = _run(codex.poll(now=NOW))
     assert res.ok is True
-    assert res.bars == [("5h", 0, 0), ("Weekly", 18, WEEKLY_MINS)]
+    assert res.bars == [("Weekly", 18, WEEKLY_MINS)]
+    payload = to_payload(res)
+    assert (payload["w"], payload["wr"]) == (18, WEEKLY_MINS)
+    assert "s" not in payload and "sr" not in payload
 
 
 def test_poll_no_sessions_dir_is_not_ok(tmp_path, monkeypatch):
@@ -156,9 +160,9 @@ def test_poll_two_windows_same_bucket_keep_shorter_5h_and_longer_weekly(tmp_path
     _write_limits(home,
                   {"used_percent": 50.0, "window_minutes": 600, "resets_at": 1792000000},
                   {"used_percent": 20.0, "window_minutes": 60, "resets_at": 1792000000})
-    assert _run(codex.poll(now=NOW)).bars == [("5h", 20, 240), ("Weekly", 0, 0)]
+    assert _run(codex.poll(now=NOW)).bars == [("5h", 20, 240)]
 
     _write_limits(home,
                   {"used_percent": 70.0, "window_minutes": 1440, "resets_at": 1792356040},
                   {"used_percent": 40.0, "window_minutes": 10080, "resets_at": 1792356040})
-    assert _run(codex.poll(now=NOW)).bars == [("5h", 0, 0), ("Weekly", 40, WEEKLY_MINS)]
+    assert _run(codex.poll(now=NOW)).bars == [("Weekly", 40, WEEKLY_MINS)]

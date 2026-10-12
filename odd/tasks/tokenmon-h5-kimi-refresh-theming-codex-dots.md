@@ -32,7 +32,7 @@ New art; Linux/Windows daemons; Kimi monthly limits.
 `ask-on-risk`. Forecast ~700 authored changed lines (daemon ~250 incl. tests, firmware ~450).
 
 ## Tasks
-- [ ] T1 — Daemon: Kimi refresh (evidence-based endpoint) + Codex key omission + tests. Route: delegated writer A.
+- [x] T1 — Daemon: Kimi refresh (evidence-based endpoint) + Codex key omission + tests. Route: delegated writer A (mapping + writer triggers: >5 lookups in the Kimi bundle, 10 files). Evidence below; commit pending (parent).
 - [ ] T2 — Firmware: provider palettes + dot-grid Codex screen + has_* flags + sim scenario; autoshots. Route: delegated writer B.
 - [ ] T3 — Hardware: flash, restart daemon, screenshots of Codex dot screen and Kimi screen with a refreshed token; commit. Route: parent + verification.
 
@@ -42,7 +42,28 @@ New art; Linux/Windows daemons; Kimi monthly limits.
 - Live: `launchctl kickstart -k gui/$(id -u)/com.user.claude-usage-daemon` → log shows `Sending[kimi]` with `ok:true` after a refresh; `screenshot.sh --screen usage` + `slot 1`/`slot 2`.
 
 ## Verification evidence
-(pending)
+
+### Daemon evidence (T1)
+Kimi refresh endpoint, read out of the CLI bundle (`~/.kimi-code/bin/kimi` v2.1.1 is a
+Mach-O arm64 Bun bundle; `strings -n 6` dump line numbers, source region
+`packages/oauth/src/oauth.ts`):
+- `DEFAULT_KIMI_CODE_OAUTH_HOST = "https://auth.kimi.com"`, env overrides `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST`, `clientId: "17e5f671-d194-4dfb-9706-5516cb48c098"` — strings:337096 (`KIMI_CODE_FLOW_CONFIG`).
+- `refreshAccessToken`: `POST ${oauthHost}/api/oauth/token`, form body `client_id`, `grant_type: "refresh_token"`, `refresh_token` — strings:335686-335698.
+- `postForm`: `Content-Type: application/x-www-form-urlencoded`, `Accept: application/json`, plus `X-Msh-*` device headers (not required by us; see open question) — strings:335610-335625.
+- Response -> `tokenFromResponse`: `access_token`, `refresh_token` (required), `expires_in` (s), `scope`, `token_type`; `expires_at = floor(now) + expires_in` — strings:335595-335608.
+- Storage: `~/.kimi-code/credentials/<name>.json`, write `<name>.json.tmp.<pid>.<rand>` + fsync + rename, mode 0600 — strings:335477-335530.
+- Live credential files: `kimi-code.json` (expired since Aug) and `kimi-code-env-<hash>.json` (scoped key, live); keys `access_token, expires_at, expires_in, refresh_token, scope, token_type`, mode 0600.
+
+Implementation: `daemon/providers/kimi.py` (`read_credentials`, `refresh_access_token`, `token_url`, `read_config` hook; refresh when expired or within 60 s, one request, atomic 0600 write-back), `base.py` label-keyed `to_payload`, `codex.py` omits unreported windows, `claude_usage_daemon.py` wires `kimi_provider.read_config = read_config_value`, `config.example` + README document `kimi_token_url`.
+
+Checks:
+- RED: 11 failed (new/updated tests) before implementation.
+- `daemon/.venv/bin/python -m pytest daemon/tests -q`: 212 passed, 2 skipped, 2 warnings (same 2 pre-existing mock warnings as the 200/2 baseline).
+- `daemon/.venv/bin/python -c "import sys; sys.path.insert(0,'daemon'); import claude_usage_daemon"`: ok.
+- Live poll 1 (token still valid, +225 s): `ok:true`, payload `{"p":"kimi","s":2,"sr":64,"w":0,"wr":2284,...}`, file untouched (correct: outside the 60 s margin).
+- Live poll 2 (token at +48 s, inside the margin): one `POST https://auth.kimi.com/api/oauth/token` -> 200; `ok:true`, payload `{"p":"kimi","s":2,"sr":61,"w":0,"wr":2281,...}`; `kimi-code-env-<hash>.json` rewritten (access and refresh token rotated, `expires_at` +898 s, `expires_in` 900, mode 0600, no `.tmp` left behind).
+
+Deviation: pre-existing `test_poll_without_valid_token_is_not_ok_and_makes_no_request` asserted "expired token -> zero requests", which the refresh contract replaces; renamed to `..._never_calls_usages` and it now asserts exactly one refresh POST and no `/usages` call.
 
 ## Next step
 Launch writers A and B.

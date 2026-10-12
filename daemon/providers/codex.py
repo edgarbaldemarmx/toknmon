@@ -6,7 +6,8 @@ the newest ``timestamp`` across files modified in the last 7 days. No network,
 no auth. Bars are keyed by ``window_minutes`` (<= 10 h -> "5h", longer ->
 "Weekly"), not by the primary/secondary slot, because weekly-only plans report
 the weekly window as ``primary`` with ``secondary: null``. The mapping is
-tolerant because Codex does not always report exactly 300/10080.
+tolerant because Codex does not always report exactly 300/10080. A window the
+plan does not report yields no bar at all (so no ``s/sr`` on weekly-only plans).
 """
 
 import json
@@ -82,9 +83,7 @@ def parse_rate_limits(limits: dict, now: float) -> ProviderResult:
     short = [x for x in windows if x[0] <= SHORT_WINDOW_MAX_MINUTES]
     long = [x for x in windows if x[0] > SHORT_WINDOW_MAX_MINUTES]
 
-    def bar(label: str, w: dict | None):
-        if w is None:
-            return (label, 0, 0)
+    def bar(label: str, w: dict):
         reset = w.get("resets_at")
         try:
             reset_epoch = float(reset) if reset is not None else None
@@ -92,8 +91,13 @@ def parse_rate_limits(limits: dict, now: float) -> ProviderResult:
             reset_epoch = None
         return window_bar(label, w.get("used_percent", 0), reset_epoch, now)
 
-    bars = [bar("5h", min(short, key=lambda x: x[0])[1] if short else None),
-            bar("Weekly", max(long, key=lambda x: x[0])[1] if long else None)]
+    # A window the plan does not report is omitted (no bar, no payload keys)
+    # rather than sent as 0%, so the device can hide it.
+    bars = []
+    if short:
+        bars.append(bar("5h", min(short, key=lambda x: x[0])[1]))
+    if long:
+        bars.append(bar("Weekly", max(long, key=lambda x: x[0])[1]))
     status = "allowed"
     if limits.get("rate_limit_reached_type"):
         status = str(limits["rate_limit_reached_type"])

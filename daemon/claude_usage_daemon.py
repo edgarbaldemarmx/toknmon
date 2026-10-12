@@ -32,9 +32,11 @@ from bleak.exc import BleakError
 try:
     from daemon.providers import PROVIDERS, parse_providers_setting, to_payload
     from daemon.providers import claude as claude_provider
+    from daemon.providers import kimi as kimi_provider
 except ImportError:  # running as a script from daemon/
     from providers import PROVIDERS, parse_providers_setting, to_payload
     from providers import claude as claude_provider
+    from providers import kimi as kimi_provider
 
 # BLE device name. The firmware default is "TokenMon"; users can rename their
 # board (`name <text>` over USB serial, or via flash-mac.sh) and record the same
@@ -238,6 +240,11 @@ def read_config_value(key: str) -> str | None:
     except OSError:
         pass
     return found
+
+
+# Providers read daemon config through this hook (re-read on every poll, like
+# every other key); the package cannot import this module itself.
+kimi_provider.read_config = read_config_value
 
 
 def is_valid_device_name(name) -> bool:

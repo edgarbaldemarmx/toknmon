@@ -222,14 +222,17 @@ providers = claude, codex, kimi
 | Provider | Data source | Bars |
 | --- | --- | --- |
 | `claude` | `GET /api/oauth/usage` with the Claude Code OAuth token (keychain or `.credentials.json`); falls back to the rate-limit header probe on accounts without the endpoint | 5h session, weekly, plus the model-scoped weekly window (e.g. Fable) when the subscription exposes one |
-| `codex` | Newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` from the last 7 days — no network, no auth | 5h, weekly |
-| `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest non-expired token in `~/.kimi-code/credentials/*.json` | 5h, weekly |
+| `codex` | Newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` from the last 7 days — no network, no auth | weekly, plus 5h when the plan reports it |
+| `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest token in `~/.kimi-code/credentials/*.json`; an expired token is refreshed through the Kimi OAuth endpoint (`kimi_token_url`, default `https://auth.kimi.com/api/oauth/token`) and written back to the same file | 5h, weekly |
 
 Default (key unset) is `claude` only, which sends exactly the same payload as
 before, so older firmware keeps working. With several providers each payload
 carries `"p": "<provider>"`; a provider that has no data this cycle sends
-`{"p": "<provider>", "ok": false}` and never affects the others. The daemon
-never refreshes any token: each CLI owns its own login.
+`{"p": "<provider>", "ok": false}` and never affects the others. A window a
+plan does not have is omitted from the payload (no `s`/`sr` on a weekly-only
+Codex plan) and the device hides it. Only the Kimi token is refreshed by the
+daemon (its access tokens live ~15 minutes); Claude and Codex logins stay with
+their CLIs.
 
 ## Attention alerts (optional)
 

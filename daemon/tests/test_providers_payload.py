@@ -31,6 +31,16 @@ def test_to_payload_two_bars_has_no_f():
     assert payload == {"p": "codex", "s": 12, "sr": 240, "w": 40, "wr": 5000, "st": "allowed", "ok": True}
 
 
+def test_to_payload_maps_bars_by_label_not_position():
+    """A weekly-only result must land on w/wr even though it is bars[0]."""
+    payload = to_payload(ProviderResult(id="codex", bars=[("Weekly", 18, 5000)]))
+    assert payload == {"p": "codex", "w": 18, "wr": 5000, "st": "allowed", "ok": True}
+    payload = to_payload(ProviderResult(id="claude", bars=[("Fable", 1, 860)]))
+    assert payload == {"p": "claude", "f": 1, "fr": 860, "st": "allowed", "ok": True}
+    payload = to_payload(ProviderResult(id="kimi", bars=[("5h", 3, 200)]))
+    assert payload == {"p": "kimi", "s": 3, "sr": 200, "st": "allowed", "ok": True}
+
+
 def test_to_payload_failure_is_minimal():
     assert to_payload(ProviderResult(id="kimi", bars=[], ok=False)) == {"p": "kimi", "ok": False}
 
