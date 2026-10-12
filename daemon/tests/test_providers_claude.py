@@ -168,3 +168,37 @@ def test_main_module_poll_api_uses_usage_endpoint_and_keeps_fallback(monkeypatch
     monkeypatch.setattr(mod, "CONFIG_FILE", Path("/nonexistent/config"))
     payload = _run(mod.poll_api("tok"))
     assert payload["acct"] == "ent"
+
+
+@pytest.mark.parametrize("limits", [[], [FIXTURE["limits"][2]]])
+def test_poll_without_session_or_weekly_raises_usage_unavailable(limits):
+    """A 200 whose ``limits[]`` has neither ``session`` nor ``weekly_all`` (seen
+    on Enterprise accounts) is not usable: it must not become 0/0 bars tagged
+    ``acct: pro`` but let the caller fall back to the header probe."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"limits": limits})
+
+    with pytest.raises(claude.UsageUnavailable):
+        _run(claude.poll("tok", client=_client(handler), now=NOW))
+
+
+def test_main_module_poll_api_falls_back_on_empty_limits(monkeypatch):
+    """End to end through the real provider: ``limits: []`` -> header probe."""
+    import daemon.claude_usage_daemon as mod
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"limits": []})
+
+    async def fake_headers(token):
+        return {"s": 1, "sr": 2, "w": 0, "wr": 0, "st": "allowed", "acct": "ent", "ok": True}
+
+    # `claude.httpx` is the same module as `httpx` here: build the mock client
+    # from the real class before patching it.
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(claude.httpx, "AsyncClient",
+                        lambda **kw: real_client(transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(mod, "poll_api_headers", fake_headers)
+    monkeypatch.setattr(mod, "CONFIG_FILE", Path("/nonexistent/config"))
+    payload = _run(mod.poll_api("tok"))
+    assert payload["acct"] == "ent"

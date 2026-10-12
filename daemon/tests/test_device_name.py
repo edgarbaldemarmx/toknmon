@@ -139,3 +139,52 @@ def test_unpair_ignores_unrelated_devices(tmp_path, monkeypatch):
         'address: 11-22-33-44-55-66, connected, name: "Magic Keyboard", paired\n')
     assert mod.unpair_macos() is False
     assert all(c[0] != "--unpair" for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# read_config_value: quotes, and is_valid_device_name
+# ---------------------------------------------------------------------------
+
+def test_config_value_strips_one_pair_of_matching_quotes(tmp_path, monkeypatch):
+    cfg = tmp_path / "config"
+    monkeypatch.setattr(mod, "CONFIG_FILE", cfg)
+    cfg.write_text('device_name = "ToknMon Desk One"   # office board\n')
+    assert mod.read_config_value("device_name") == "ToknMon Desk One"
+    cfg.write_text("device_name = 'Desk-2'\n")
+    assert mod.read_config_value("device_name") == "Desk-2"
+    cfg.write_text("device_name = \"'Desk-2'\"\n")   # only one pair is removed
+    assert mod.read_config_value("device_name") == "'Desk-2'"
+    cfg.write_text("device_name = \"Desk-2\n")        # unmatched quote is kept verbatim
+    assert mod.read_config_value("device_name") == '"Desk-2'
+
+
+def test_config_value_quoted_hash_is_not_a_comment(tmp_path, monkeypatch):
+    cfg = tmp_path / "config"
+    cfg.write_text('device_name = "Desk #2"  # comment\n')
+    monkeypatch.setattr(mod, "CONFIG_FILE", cfg)
+    assert mod.read_config_value("device_name") == "Desk #2"
+
+
+def test_is_valid_device_name_rules():
+    valid = mod.is_valid_device_name
+    assert valid("TokenMon")
+    assert valid("ToknMon Desk One")
+    assert valid("X" * 18)
+    assert not valid("X" * 19)
+    assert not valid("")
+    assert not valid("Desk #2")          # '#' is a comment marker in every config reader
+    assert not valid(" Desk")
+    assert not valid("Desk ")
+    assert not valid("Desk\t2")          # control char
+    assert not valid("Café")        # non-ASCII
+    assert not valid(None)
+
+
+def test_device_name_with_hash_falls_back_to_default_and_logs(tmp_path, monkeypatch):
+    cfg = tmp_path / "config"
+    cfg.write_text('device_name = "Desk #2"\n')
+    monkeypatch.setattr(mod, "CONFIG_FILE", cfg)
+    lines: list[str] = []
+    monkeypatch.setattr(mod, "log", lines.append)
+    assert read_device_name() == DEFAULT_DEVICE_NAME
+    assert len(lines) == 1 and "device_name" in lines[0]

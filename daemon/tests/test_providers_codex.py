@@ -127,3 +127,38 @@ def test_poll_skips_malformed_lines(tmp_path, monkeypatch):
     f = home / "sessions" / "2026" / "10" / "11" / "rollout-a.jsonl"
     f.write_text('{"rate_limits": not json\n' + FIXTURE.read_text())
     assert _run(codex.poll(now=NOW)).bars[0] == ("5h", 12, 240)
+
+
+def _write_limits(home: Path, primary: dict | None, secondary: dict | None) -> None:
+    line = {
+        "timestamp": "2026-10-11T22:40:17.951Z",
+        "type": "event_msg",
+        "payload": {"type": "token_count", "rate_limits": {"primary": primary, "secondary": secondary}},
+    }
+    (home / "sessions" / "2026" / "10" / "11" / "rollout-a.jsonl").write_text(json.dumps(line) + "\n")
+
+
+def test_poll_maps_non_canonical_windows_tolerantly(tmp_path, monkeypatch):
+    """Codex does not always report exactly 300/10080: anything up to 10 h is
+    the short bar, anything longer the weekly bar."""
+    home = _codex_home(tmp_path, monkeypatch)
+    _write_limits(home,
+                  {"used_percent": 9.0, "window_minutes": 299, "resets_at": 1792000000},
+                  {"used_percent": 33.0, "window_minutes": 1440, "resets_at": 1792356040})
+
+    res = _run(codex.poll(now=NOW))
+    assert res.ok is True
+    assert res.bars == [("5h", 9, 240), ("Weekly", 33, WEEKLY_MINS)]
+
+
+def test_poll_two_windows_same_bucket_keep_shorter_5h_and_longer_weekly(tmp_path, monkeypatch):
+    home = _codex_home(tmp_path, monkeypatch)
+    _write_limits(home,
+                  {"used_percent": 50.0, "window_minutes": 600, "resets_at": 1792000000},
+                  {"used_percent": 20.0, "window_minutes": 60, "resets_at": 1792000000})
+    assert _run(codex.poll(now=NOW)).bars == [("5h", 20, 240), ("Weekly", 0, 0)]
+
+    _write_limits(home,
+                  {"used_percent": 70.0, "window_minutes": 1440, "resets_at": 1792356040},
+                  {"used_percent": 40.0, "window_minutes": 10080, "resets_at": 1792356040})
+    assert _run(codex.poll(now=NOW)).bars == [("5h", 0, 0), ("Weekly", 40, WEEKLY_MINS)]

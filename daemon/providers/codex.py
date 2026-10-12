@@ -3,9 +3,10 @@
 Codex writes ``rate_limits`` into ``token_count`` events in
 ``${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl``. We take the line with
 the newest ``timestamp`` across files modified in the last 7 days. No network,
-no auth. Bars are keyed by ``window_minutes`` (300 -> "5h", 10080 -> "Weekly"),
-not by the primary/secondary slot, because weekly-only plans report the
-weekly window as ``primary`` with ``secondary: null``.
+no auth. Bars are keyed by ``window_minutes`` (<= 10 h -> "5h", longer ->
+"Weekly"), not by the primary/secondary slot, because weekly-only plans report
+the weekly window as ``primary`` with ``secondary: null``. The mapping is
+tolerant because Codex does not always report exactly 300/10080.
 """
 
 import json
@@ -16,8 +17,9 @@ from pathlib import Path
 from .base import ProviderResult, window_bar
 
 MAX_AGE_DAYS = 7
-WINDOW_5H = 300
-WINDOW_WEEKLY = 10080
+# Windows up to this many minutes land on the short ("5h") bar, longer ones on
+# the weekly bar. Nominal values are 300 and 10080.
+SHORT_WINDOW_MAX_MINUTES = 600
 
 
 def codex_home() -> Path:
@@ -67,17 +69,20 @@ def latest_rate_limits(root: Path, now: float) -> dict | None:
 
 
 def parse_rate_limits(limits: dict, now: float) -> ProviderResult:
-    windows: dict[int, dict] = {}
+    windows: list[tuple[int, dict]] = []
     for slot in ("primary", "secondary"):
         w = limits.get(slot)
         if isinstance(w, dict) and w.get("window_minutes") is not None:
             try:
-                windows.setdefault(int(w["window_minutes"]), w)
+                windows.append((int(w["window_minutes"]), w))
             except (TypeError, ValueError):
                 continue
+    # Two windows in the same bucket: the shorter one is the "5h" bar, the
+    # longer one the weekly bar.
+    short = [x for x in windows if x[0] <= SHORT_WINDOW_MAX_MINUTES]
+    long = [x for x in windows if x[0] > SHORT_WINDOW_MAX_MINUTES]
 
-    def bar(label: str, minutes: int):
-        w = windows.get(minutes)
+    def bar(label: str, w: dict | None):
         if w is None:
             return (label, 0, 0)
         reset = w.get("resets_at")
@@ -87,7 +92,8 @@ def parse_rate_limits(limits: dict, now: float) -> ProviderResult:
             reset_epoch = None
         return window_bar(label, w.get("used_percent", 0), reset_epoch, now)
 
-    bars = [bar("5h", WINDOW_5H), bar("Weekly", WINDOW_WEEKLY)]
+    bars = [bar("5h", min(short, key=lambda x: x[0])[1] if short else None),
+            bar("Weekly", max(long, key=lambda x: x[0])[1] if long else None)]
     status = "allowed"
     if limits.get("rate_limit_reached_type"):
         status = str(limits["rate_limit_reached_type"])

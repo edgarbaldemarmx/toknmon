@@ -36,8 +36,13 @@ New mascots (H3/H4); Linux/Windows daemons; Kimi monthly limits.
 ## Tasks
 - [x] T1 — Daemon providers package + Claude via `/api/oauth/usage` + Codex + Kimi + config + loop + tests (RED→GREEN). Route: delegated writer A. Done (uncommitted; see "Daemon evidence"). Commit pending.
 - [x] T2 — Firmware slots, RX queue, per-slot freshness, carousel, Fable bar, sim scenario. Route: delegated writer B (ran in parallel with T1 on the fixed payload contract). Done 2026-10-12: sim + 2.16 hardware verified, not yet committed (see Firmware evidence).
-- [ ] T3 — Integration: flash board, run the repo daemon manually (stop the upstream launchd daemon from `~/Downloads/Clawdmeter` during the test, restore after), observe all three providers on device via `screenshot.sh`. Route: verification worker.
-- [ ] T4 — Docs (README providers section) + commits.
+- [x] T3 — Integration on hardware. Route: verification worker. Evidence: upstream launchd daemon stopped; repo daemon (worktree at `083659b`, `providers = claude, codex, kimi`) run via a temporary launchd agent (a python spawned from the agent shell hangs forever in CoreBluetooth authorization — TCC is per responsible process); log `Sending[claude]: {"p":"claude","s":36,"sr":67,"w":78,"wr":817,"f":8,"fr":817,...}` / `Sending[codex]: {...,"w":50,"wr":9437,...}` / `Sending[kimi]: {"p":"kimi","ok":false}` every 60 s; serial (no reset): `BLE: packet p=claude ok=1 s=37.0% +third`, `p=codex ok=1`, `p=kimi ok=0`. Screenshots show the splash only: the device stays on the splash until a physical tap (no serial command switches screens) → follow-up: add a `screen usage|splash` serial command for hands-free QA. Upstream daemon, user config and worktree restored.
+- [x] T4 — Docs (README "Providers", `config.example`) landed in `569b501`; commits `569b501` (daemon) + `083659b` (firmware).
+
+## Independent verification (high tier) — findings routed to fix commits
+- Daemon (fix writer): alert flags cause a 5 s poll storm when Claude is not an enabled provider or is failing; empty `limits[]` must raise `UsageUnavailable` so the Enterprise header fallback is reachable; Codex `window_minutes` mapping must be tolerant; `#`/quotes in `device_name` config.
+- Firmware (pending, after H3 releases the files): alert-dismiss tap also pages the carousel (`SHORT_CLICKED` fires before the indev `CLICKED` veto) → gate on `alert_active`; carousel timer should pause under alerts; RX ring needs release/acquire atomics across cores; `device_name_valid` must reject `#`; add `screen` serial command.
+- Shell (pending): `flash-mac.sh` must accept `BLE: name set to "<x>", restarting` as success and trim/reject control chars and `#` in names; same validator in `install-mac.sh`.
 
 ## Payload contract (fixed)
 ```

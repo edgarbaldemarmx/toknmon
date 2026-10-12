@@ -47,7 +47,13 @@ def _status_of(items: list[dict]) -> str:
 
 def parse_usage(body: dict, now: float | None = None) -> ProviderResult:
     """Map the ``limits[]`` array to bars: session -> 0, weekly_all -> 1, and
-    the first model-scoped weekly limit -> 2 (label = model display name)."""
+    the first model-scoped weekly limit -> 2 (label = model display name).
+
+    Raises :class:`UsageUnavailable` when neither ``session`` nor
+    ``weekly_all`` is present (e.g. an Enterprise account answering 200 with
+    ``limits: []``) so the caller falls back to the header probe instead of
+    showing 0/0 bars tagged as a Pro account.
+    """
     now = time.time() if now is None else now
     limits = body.get("limits") or []
     by_kind: dict[str, dict] = {}
@@ -62,6 +68,8 @@ def parse_usage(body: dict, now: float | None = None) -> ProviderResult:
                 scoped = item
         elif kind in ("session", "weekly_all") and kind not in by_kind:
             by_kind[kind] = item
+    if not by_kind:
+        raise UsageUnavailable("limits[] has no session or weekly_all window")
 
     def bar(label: str, item: dict | None):
         item = item or {}

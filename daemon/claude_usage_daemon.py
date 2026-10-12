@@ -198,8 +198,29 @@ def read_config_dirs() -> list[Path]:
     return dirs or [DEFAULT_CONFIG_DIR]
 
 
+def _strip_comment(line: str) -> str:
+    """Drop a trailing ``# comment``; a ``#`` inside a quoted value is kept."""
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#":
+            return line[:i]
+    return line
+
+
+def _unquote(val: str) -> str:
+    """Strip one pair of matching surrounding quotes (``"..."`` or ``'...'``)."""
+    if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+        return val[1:-1]
+    return val
+
+
 def read_config_value(key: str) -> str | None:
-    """Return the raw (comment-stripped, trimmed) value of one config key.
+    """Return the raw (comment-stripped, trimmed, unquoted) value of one config key.
 
     Keys are matched case-insensitively; the last occurrence wins. Returns
     None when the file or the key is absent.
@@ -208,25 +229,42 @@ def read_config_value(key: str) -> str | None:
     try:
         if CONFIG_FILE.exists():
             for line in CONFIG_FILE.read_text().splitlines():
-                line = line.split("#", 1)[0].strip()
+                line = _strip_comment(line).strip()
                 if "=" not in line:
                     continue
                 k, val = line.split("=", 1)
                 if k.strip().lower() == key:
-                    found = val.strip()
+                    found = _unquote(val.strip())
     except OSError:
         pass
     return found
 
 
+def is_valid_device_name(name) -> bool:
+    """Firmware constraint for `device_name`: 1..DEVICE_NAME_MAX_LEN printable
+    ASCII characters, no leading/trailing whitespace, no control characters and
+    no ``#`` (every config reader treats it as a comment marker). Scripts that
+    parse the config mirror these rules.
+    """
+    if not isinstance(name, str) or not 1 <= len(name) <= DEVICE_NAME_MAX_LEN:
+        return False
+    if not name.isascii() or not name.isprintable() or "#" in name:
+        return False
+    return name == name.strip()
+
+
 def read_device_name() -> str:
     """Return the configured BLE device name (`device_name`), else the default.
 
-    Mirrors the firmware's constraint: 1..DEVICE_NAME_MAX_LEN printable ASCII
-    bytes. Anything else falls back to DEFAULT_DEVICE_NAME.
+    An invalid value (see :func:`is_valid_device_name`) falls back to
+    DEFAULT_DEVICE_NAME with one log line.
     """
     val = read_config_value("device_name")
-    if not val or len(val) > DEVICE_NAME_MAX_LEN or not val.isascii() or not val.isprintable():
+    if val is None:
+        return DEFAULT_DEVICE_NAME
+    if not is_valid_device_name(val):
+        log(f"Invalid device_name {val!r} in config (1-{DEVICE_NAME_MAX_LEN} printable "
+            f"ASCII, no '#'); using {DEFAULT_DEVICE_NAME!r}")
         return DEFAULT_DEVICE_NAME
     return val
 
@@ -485,6 +523,32 @@ def read_providers() -> list[str]:
     byte-for-byte compatible with older firmware (no `p` field).
     """
     return parse_providers_setting(read_config_value("providers"), log=log)
+
+
+def should_poll_now(elapsed: float, *, alert_pending: bool, refresh_requested: bool,
+                    claude_enabled: bool, alert_poll_used: bool) -> bool:
+    """Main-loop decision: poll the providers this tick?
+
+    The poll interval and a device refresh request always win. A pending
+    alert/clear may shortcut the interval once — the flags are cleared only by
+    a successful Claude write, so without the ``alert_poll_used`` guard a
+    transiently failing Claude would force a full provider poll every TICK.
+    With Claude disabled the alert can never be delivered (see
+    :func:`drop_undeliverable_alert`), so it never shortcuts the interval.
+    """
+    if refresh_requested or elapsed >= POLL_INTERVAL:
+        return True
+    return alert_pending and claude_enabled and not alert_poll_used
+
+
+def drop_undeliverable_alert(providers: list[str], alert_pending: bool) -> bool:
+    """True when a pending alert/clear must be dropped because Claude is not an
+    enabled provider (alert extras ride only on the Claude payload). Logs once
+    per dropped alert."""
+    if not alert_pending or "claude" in providers:
+        return False
+    log("Alert dropped: Claude is not an enabled provider (alerts ride on the Claude payload)")
+    return True
 
 
 async def poll_api(token: str) -> dict | None:
@@ -976,6 +1040,7 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
     alert = None            # latest alert, kept to match its session's clear
     alert_unsent = False
     clear_unsent = False
+    alert_poll_used = False  # the pending alert already got its early poll
     try:
         while client.is_connected and not stop_event.is_set():
             now = time.time()
@@ -991,13 +1056,21 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
             repeat = new_alert and alert and alert["s"] and new_alert["s"] == alert["s"]
             if new_alert is not None and not repeat:
                 alert, alert_unsent, clear_unsent = new_alert, True, False
+                alert_poll_used = False
             clears = take_clears()
             if alert and clears.get(alert["s"], 0) > alert["t"]:
                 clear_unsent = not alert_unsent   # never shown, nothing to clear
                 alert, alert_unsent = None, False
-            if (alert_unsent or clear_unsent or session.refresh_requested.is_set()
-                    or elapsed >= POLL_INTERVAL):
+                alert_poll_used = False
+            providers = read_providers()
+            if drop_undeliverable_alert(providers, alert_unsent or clear_unsent):
+                alert, alert_unsent, clear_unsent = None, False, False
+            if should_poll_now(elapsed, alert_pending=alert_unsent or clear_unsent,
+                               refresh_requested=session.refresh_requested.is_set(),
+                               claude_enabled="claude" in providers,
+                               alert_poll_used=alert_poll_used):
                 session.refresh_requested.clear()
+                alert_poll_used = alert_unsent or clear_unsent
                 # Pure free-ride: read whatever access token(s) Claude Code
                 # currently holds across the configured config dirs and NEVER
                 # refresh them ourselves. Claude Code (the token's owner) does all
@@ -1005,7 +1078,6 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
                 # OAuth endpoint's rate limit (429). When no dir has a usable token
                 # we signal "No data" so the device idles instead of holding stale
                 # numbers until the CLI re-seeds it.
-                providers = read_providers()
                 payload, dead = (None, False)
                 if "claude" in providers:
                     payload, dead = await poll_active()
@@ -1042,7 +1114,7 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
                     if pid == "claude":
                         # Alert extras ride on the Claude payload; only a
                         # successful Claude write counts them as delivered.
-                        alert_unsent = clear_unsent = False
+                        alert_unsent = clear_unsent = alert_poll_used = False
                         if item.get("ok"):
                             used_successfully = True
                     elif item.get("ok"):
