@@ -1,361 +1,356 @@
-# Clawdmeter
+# ToknMon
 
-> Also check out [Beam](https://github.com/notaharness/beam)! A CLI that lets you pair your machines using a passkey and [@Tailscale's tailcat](https://tailscale.com/blog/tailcat).
+[![CI](https://github.com/edgarbaldemarmx/toknmon/actions/workflows/ci.yml/badge.svg)](https://github.com/edgarbaldemarmx/toknmon/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Host: macOS 13+](https://img.shields.io/badge/host-macOS%2013%2B-lightgrey)
+![Target: ESP32-S3](https://img.shields.io/badge/target-ESP32--S3-E7352C)
+![Built with PlatformIO](https://img.shields.io/badge/built%20with-PlatformIO-orange)
 
-<img src="assets/readme/waving.gif" width="120" align="right" alt="">
+<p align="center">
+  <img src="docs/media/screens/hw-claude.png" width="360" alt="ToknMon showing Claude Code usage: Current, Weekly and Fable bars on the Waveshare 2.16 AMOLED">
+</p>
 
-A small ESP32 dashboard I made for my desk to keep an eye on Claude Code usage.
+**ToknMon** is a desk-side usage meter for AI coding assistants. A pocket-size
+ESP32-S3 board with a round-cornered AMOLED shows the rate-limit windows of
+**Claude Code**, **OpenAI Codex CLI** and **Kimi Code** side by side, each
+with its own colors and pixel-art mascot, fed over Bluetooth by a small daemon
+on your Mac. When nothing needs your attention it plays animations; leave it
+alone for a while and the mascots parade.
 
-It runs on a [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=149786) as well as a few other alternative boards and pairs over Bluetooth, the splash screen plays pixel-art Clawd animations that get
-busier when your usage rate climbs. The two side buttons send Space and
-Shift+Tab over BLE HID for Claude Code's voice mode and mode-toggle shortcuts.
+It is a fork of [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) by
+Hermann Bjorgvin, which monitors Claude Code only. ToknMon adds the
+multi-provider daemon, the per-provider screens and mascots, mascot mode, the
+parade, gesture navigation, a configurable Bluetooth name and the tooling to
+draw your own animations as text. It is a personal project: issues and pull
+requests are welcome, support is best-effort.
 
-<img width="1179" height="994" alt="Usage meter" src="https://github.com/user-attachments/assets/83e54aea-0932-428f-94aa-b3ede3a360aa" />
+## Contents
 
-## Screens
+- [Features](#features)
+- [Animation gallery](#animation-gallery)
+- [Supported hardware](#supported-hardware)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Using the device](#using-the-device)
+- [Providers](#providers)
+- [Configuration](#configuration)
+- [Customizing animations](#customizing-animations)
+- [Serial QA commands](#serial-qa-commands)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [Credits](#credits)
+- [License](#license)
 
-The device boots into the splash. Swipe up or down anywhere to move between the splash and the Usage view; on the splash a tap steps to the next animation.
+## Features
 
-|              Splash               |              Usage              |
-| :-------------------------------: | :-----------------------------: |
-| ![Splash](screenshots/splash.gif) | ![Usage](screenshots/usage.png) |
-|   Splash; swipe to the meter      | Session and weekly utilization  |
+| | |
+| --- | --- |
+| <img src="docs/media/screens/claude-usage.png" width="240" alt="Claude usage view with Current, Weekly and Fable bars"> | **Three providers, one carousel.** Claude Code (5-hour session, weekly and the model-scoped **Fable** weekly window when your plan has one), Codex CLI and Kimi Code each get a slot. Tap or swipe to page, or let it rotate every 8 s. Slots without fresh data are skipped. |
+| <img src="docs/media/screens/hw-codex.png" width="240" alt="Codex dot grid at 91 percent on the real panel"> | **A screen per provider.** Codex shows a 10×10 dot grid filling to the weekly percentage (plus a compact 5h bar when the plan has one); Kimi shows 5h and weekly bars in blue; Claude keeps its bars in clay. Palettes, bar tiers and status lines never bleed between providers. |
+| <img src="docs/media/screens/mascot-codex.png" width="240" alt="Mascot mode pinned to Codex"> | **Mascots and mascot mode.** Clawd for Claude (Anthropic's official set), original three-dots and crescent-moon characters for Codex and Kimi, each with idle, acts, a mountain-bike ride and two full-screen scenes. Long-press the meter to watch a provider's set full-size. |
+| <img src="docs/media/screens/parade.png" width="240" alt="Idle parade with the Codex mascot on stage"> | **The parade.** Five minutes without input and the device rotates every live provider's full-size mascot every 20 s, until you swipe back. |
+| <img src="docs/media/screens/scene-kimi-night.png" width="240" alt="Kimi night scene"> | **Draw your own.** Animations are plain text grids compiled by a small Node tool. The Codex and Kimi scenes were authored by an AI agent from a two-sentence brief. |
+| <img src="docs/media/screens/splash-claude.png" width="240" alt="Default Clawd splash"> | **Quiet by design.** No cloud, no accounts of its own: the daemon reads the tokens your CLIs already have (Claude Code, Kimi) or local logs (Codex), polls once a minute with no token spend, and pushes ~150 bytes per provider over BLE. The side buttons double as Bluetooth keyboard keys for Claude Code (Space, Shift+Tab). |
 
-| Input            | On the splash                         | On the Usage view                                 |
-| ---------------- | ------------------------------------- | ------------------------------------------------- |
-| Tap              | Next animation                        | Next provider (one provider: back to the splash)  |
-| Swipe up / down  | Usage view                            | Splash                                            |
-| Swipe left       | Next animation                        | Next provider                                     |
-| Swipe right      | Previous animation                    | Previous provider                                 |
-| Long-press       | —                                     | Mascot mode for the provider on screen            |
-| PWR button       | Next animation                        | Cycle brightness                                  |
+Also: configurable Bluetooth name per board (several on one desk), optional
+clock and session-reset chime, Claude Code attention alerts (the mascot waves
+when a session waits for you), a desktop simulator for development, and a
+serial command set for hands-free QA.
 
-While the splash is up, the middle (PWR) button cycles animations. **Hold the power button for 3 seconds, then release, to put the device into pairing mode** — this clears the saved Bluetooth bond and re-advertises. The firmware also auto-rotates animations every 20 s within the current usage-rate group, so a long stretch on the splash isn't just one Clawd on loop.
+## Animation gallery
 
-**Mascot mode and the parade.** Long-press the Usage view to open the full-size mascot of the provider on screen — Codex's thinking dots or Kimi's moon cycle through their own idle, acts, and mountain-bike ride (Claude keeps the official splash), with the provider name on top; a tap, a horizontal swipe, or the PWR button steps through the acts and the full-screen scenes, and a vertical swipe returns to Usage. Leave the device untouched on the Usage view for 5 minutes and it starts a parade: every provider with live data gets 20 s of full-size mascot in turn (taps step the animation, the rotation keeps going) until you swipe back to Usage. All of it is also reachable over serial for hands-free checks: `screen splash codex` (or `kimi`, `claude`), `splash next` / `splash prev`, `swipe up|down|left|right`, and `parade on` / `parade off`.
+Every custom animation, exported straight from the text grids at six pixels
+per cell ([`docs/media/README.md`](docs/media/README.md)).
 
-## Hardware
+| Provider | Idle | Act | Think / sleep | Bike | Scene 1 | Scene 2 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Claude** | <img src="docs/media/screens/splash-claude.png" width="96" alt="Clawd on the splash"><br>official Clawd set (17 animations: core poses and persona scenes, not redistributed here) | — | — | <img src="docs/media/animations/claude.bike.gif" width="150" alt="Clawd on a mountain bike"> | — | — |
+| **Codex** | <img src="docs/media/animations/codex.idle.gif" width="150" alt="Codex idle"> | <img src="docs/media/animations/codex.dots.gif" width="150" alt="Codex dots bouncing"> | <img src="docs/media/animations/codex.think.gif" width="150" alt="Codex thinking"> | <img src="docs/media/animations/codex.bike.gif" width="150" alt="Codex on a mountain bike"> | <img src="docs/media/animations/codex.scene.wave.gif" width="150" alt="Codex wave scene"> | <img src="docs/media/animations/codex.scene.rain.gif" width="150" alt="Codex rain scene"> |
+| **Kimi** | <img src="docs/media/animations/kimi.idle.gif" width="150" alt="Kimi idle"> | <img src="docs/media/animations/kimi.glow.gif" width="150" alt="Kimi glow"> | <img src="docs/media/animations/kimi.sleep.gif" width="150" alt="Kimi sleeping"> | <img src="docs/media/animations/kimi.bike.gif" width="150" alt="Kimi on a mountain bike"> | <img src="docs/media/animations/kimi.scene.night.gif" width="150" alt="Kimi night scene"> | <img src="docs/media/animations/kimi.scene.orbit.gif" width="150" alt="Kimi orbit scene"> |
 
-Boards supported out of the box:
+On the device the scenes fill the 480×480 panel:
 
-- [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=149786)
-- [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm?&aff_id=149786)
-- [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=149786)
-- [Waveshare ESP32-C6-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm?&aff_id=149786)
-- [Waveshare ESP32-S3-Touch-AMOLED-2.06](https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm?&aff_id=149786)
-- [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33869&aff_id=149786)
-- [Waveshare ESP32-S3-Touch-LCD-4](https://www.waveshare.com/esp32-s3-touch-lcd-4.htm)
+| | |
+| :---: | :---: |
+| <img src="docs/media/screens/scene-codex-rain.png" width="220" alt="Codex rain scene on the device"> | <img src="docs/media/screens/hw-kimi-night.png" width="220" alt="Kimi night scene on the real panel"> |
+| `codex.scene.rain` (simulator) | `kimi.scene.night` (hardware) |
 
-> Please check if a pull request exists for your alternative hardware port before opening a new one, providing QA feedback and testing on the same hardware is more valuable than duplicate pull requests.
+## Supported hardware
 
-**Porting to another board:** the firmware is a thin HAL with per-board folders under `firmware/src/boards/`. Drop in a new folder and a new PlatformIO env — `main.cpp`, `ui.cpp`, and `splash.cpp` never need to change. See [`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md) for the walk-through and [`docs/porting/hal-contract.md`](docs/porting/hal-contract.md) for the interfaces a port must implement.
+| Board | PlatformIO env | Status |
+| --- | --- | --- |
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) — 480×480 CO5300 AMOLED, CST9220 touch, AXP2101 PMU, QMI8658 IMU, ES8311 codec | `waveshare_amoled_216` | ✅ **verified** — the board ToknMon is developed and tested on |
+| Waveshare ESP32-S3-Touch-AMOLED-1.8, ESP32-S3-Touch-AMOLED-2.06, ESP32-C6-Touch-AMOLED-2.16 / 1.8, ESP32-S3-Touch-LCD-1.54, ESP32-S3-Touch-LCD-4 | `waveshare_amoled_18`, `waveshare_amoled_206`, `waveshare_amoled_216_c6`, `waveshare_amoled_18_c6`, `waveshare_lcd_154`, `waveshare_lcd_4` | ⚠️ **inherited from Clawdmeter, untested with ToknMon.** They compile in CI, but nobody has run the multi-provider UI, mascots or gestures on them since the fork. The C6 boards have no PSRAM: no corner mascots, no dot grid, no `screenshot` command. Reports welcome. |
 
-## Prerequisites
+**Host**: macOS only. The Linux and Windows daemons in `daemon/` are inherited,
+Claude-only and untested with ToknMon.
 
-- Linux (tested on Ubuntu), macOS, or Windows 10/11
+Porting to another board means a new folder under `firmware/src/boards/` and a
+PlatformIO env; shared code never changes. See
+[`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md).
+
+## Requirements
+
+**Host (macOS)**
+
+- macOS 13 (Ventura) or newer with Bluetooth.
+- Python 3.10 or newer (3.13 is what the project runs on). The installer
+  creates its own virtual environment.
 - [PlatformIO CLI](https://docs.platformio.org/en/latest/core/installation/index.html)
-- Linux: `curl`, `bluetoothctl`, `busctl`, `dbus-monitor` (BlueZ Bluetooth stack), `python3`, `setsid`, `stdbuf` (util-linux / coreutils), `systemctl` (systemd user services)
-- macOS: `python3` (the installer sets up a venv with `bleak` and `httpx`)
-- Windows: `python3` 3.11+ (the installer sets up a venv with `bleak`, `httpx`, and `pystray`)
-- Claude Code with an active subscription
+  to build and flash: `brew install platformio` or `pip install platformio`.
+- A USB-C **data** cable.
+- Optional: `blueutil` (`brew install blueutil`) for automatic stale-bond
+  repair; Node 18+ and ImageMagick (`brew install node imagemagick`) only if
+  you want to draw animations or regenerate previews; SDL2 (`brew install sdl2`)
+  for the desktop simulator.
 
-## macOS installation
+**Accounts and CLIs** (enable any subset; the daemon detects what is present)
 
-The macOS host pieces — Python daemon, LaunchAgent, and flash helper — were ported by [Chris Davidson (@lorddavidson)](https://github.com/lorddavidson). Thanks Chris!
+| Provider | What must exist on the Mac |
+| --- | --- |
+| Claude Code | logged in (`claude` → `/login`): the OAuth token lives in the Keychain (service `Claude Code-credentials`) |
+| Codex CLI | at least one session so `~/.codex/sessions/` has a `rollout-*.jsonl` from the last 7 days; no credentials are read |
+| Kimi Code CLI | logged in once so `~/.kimi-code/credentials/` has a token file; the daemon refreshes the token itself afterwards |
 
-### Flash the firmware
+> **Clone location.** launchd runs the daemon from the Python inside
+> `daemon/.venv`. If the clone lives under `~/Documents`, `~/Desktop` or
+> `~/Downloads`, macOS privacy controls can hang the agent at startup until you
+> grant that Python access under **System Settings → Privacy & Security →
+> Files and Folders**. Cloning to `~/toknmon` avoids the question.
+
+## Quick start
+
+1. **Clone**
+
+   ```bash
+   git clone https://github.com/edgarbaldemarmx/toknmon.git ~/toknmon
+   cd ~/toknmon
+   ```
+
+2. **Connect the board by USB and flash it**, giving it a Bluetooth name
+   (1–18 printable ASCII characters, no `#`). The first build downloads the
+   toolchain and takes a few minutes.
+
+   ```bash
+   ./flash-mac.sh waveshare_amoled_216 --name "<Your name>"
+   # ./flash-mac.sh waveshare_amoled_216 /dev/cu.usbmodem1101 --name "<Your name>"   # explicit port
+   ```
+
+   The script builds, uploads, sets the name over serial and saves it as
+   `device_name` for the daemon. Rename later without reflashing:
+   `./flash-mac.sh --rename "<New name>"`. Details: [`docs/flashing.md`](docs/flashing.md).
+
+3. **Pair** the board: **System Settings → Bluetooth → Connect** next to the
+   name you chose. (After a rename, unpair and pair again: macOS caches the
+   name with the bond.)
+
+4. **Install the daemon**
+
+   ```bash
+   ./install-mac.sh                                                              # interactive
+   # ./install-mac.sh --yes --providers auto --device-name "<Your name>" --no-prime  # non-interactive
+   ```
+
+   It creates `daemon/.venv`, writes `~/.config/toknmon/config`, installs the
+   launchd agent `com.toknmon.daemon` and runs the daemon once so macOS asks
+   for Bluetooth permission (accept it). Logs go to
+   `~/Library/Logs/toknmon.{out,err}.log`. Upgrading from Clawdmeter is
+   automatic: the legacy agent is retired and the old config copied.
+   Details: [`docs/install-macos.md`](docs/install-macos.md).
+
+5. **Choose providers.** The installer prints which providers it detected and
+   how to enable the missing ones. The default `providers = auto` re-detects
+   on every poll, so logging in to a new tool is picked up within a minute;
+   set an explicit list in `~/.config/toknmon/config` to pin it.
+
+Within a minute the board leaves the splash and shows your first provider.
+Swipe up or down to move between the splash and the meter.
+
+## Using the device
+
+The board boots on the **splash** (animations) and swipes to the **meter**
+(usage). Full reference: [`docs/controls.md`](docs/controls.md).
+
+| Input | On the splash | On the meter |
+| --- | --- | --- |
+| **Tap** | next animation | next provider |
+| **Swipe up / down** | go to the meter | go to the splash |
+| **Swipe left / right** | next / previous animation | next / previous provider |
+| **Long-press** | — | **mascot mode** for the provider on screen |
+| **PWR button** (middle) | next animation | cycle brightness |
+| **PWR held ~3 s, then released** | pairing mode (clears the bond, advertises again) | same |
+| **BOOT button** (left) | hold: **Space** over Bluetooth HID (Claude Code push-to-talk) | same |
+| **Secondary button** (right) | **Shift+Tab** over Bluetooth HID (Claude Code mode toggle) | same |
+
+- **Carousel**: with two or more providers live the meter rotates every 8 s;
+  a slot is live for 90 s after its last payload and skipped otherwise.
+- **Mascot mode**: the provider's full-size set plays in order (Codex: idle,
+  dots, think, bike, wave, rain; Kimi: idle, glow, sleep, bike, night, orbit;
+  Claude: the official set) with the provider's name on top; tap, swipe
+  sideways or PWR to step; swipe vertically to return.
+- **Parade**: after 5 minutes without input on the meter, every live
+  provider's mascot gets 20 s on stage in turn; a vertical swipe ends it.
+- **Attention alerts**: with the Claude Code hooks installed
+  ([how](docs/install-macos.md#attention-alerts-from-claude-code-optional)),
+  Clawd walks on and waves when a session waits for you.
+
+## Providers
+
+| Provider | Source | Screen |
+| --- | --- | --- |
+| **Claude Code** | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token — one request per poll, no token spend | Current (5h), Weekly, and the **Fable** weekly bar when the subscription reports a model-scoped window |
+| **Codex CLI** | the newest `rate_limits` entry in `~/.codex/sessions/**/rollout-*.jsonl` (last 7 days) — local files, no network | 10×10 dot grid for the weekly window, large percentage and reset time; compact 5h bar only when the plan has one |
+| **Kimi Code** | `GET https://api.kimi.com/coding/v1/usages` with the token from `~/.kimi-code/credentials`; expired tokens are refreshed through `https://auth.kimi.com/api/oauth/token` and written back like the CLI does | 5h and weekly bars |
+
+**Detection.** With `providers = auto` (the default) the daemon checks on every
+poll which providers are usable, locally and without network: a Claude Code
+OAuth token in the Keychain or `.credentials.json`, a `rollout-*.jsonl` under
+`~/.codex/sessions`, a credential file under `~/.kimi-code/credentials`. It
+sends only those and logs the set whenever it changes (`Providers (auto):
+claude, codex — kimi skipped: …`). The installer prints the same report with
+instructions for anything missing, and
+`daemon/.venv/bin/python daemon/claude_usage_daemon.py --detect` prints it on
+demand. A provider that has no data this cycle sends
+`{"p": "<id>", "ok": false}` and its slot drops out of the carousel after 90 s
+without affecting the others.
+
+**Adding or removing.** Log in to (or run once) the tool and keep `auto`, or
+write an explicit list such as `providers = claude, codex`. Payload keys
+(`p, s, sr, w, wr, f, fr, st, ok, …`) and the per-provider details are in
+[`docs/providers.md`](docs/providers.md).
+
+## Configuration
+
+`~/.config/toknmon/config` is a flat `key = value` file (`#` starts a comment),
+re-read on every poll, so edits take effect within about a minute. All keys
+are documented in [`daemon/config.example`](daemon/config.example).
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `providers` | `auto` | `auto`, or a comma-separated subset of `claude, codex, kimi` |
+| `device_name` | `ToknMon` | the board's Bluetooth name as set when flashing; used by the HID fallback and stale-bond repair (the legacy names `TokenMon` and `Clawdmeter` are also accepted) |
+| `chime` | `off` | `on` plays a chime on the board when the Claude 5-hour session resets |
+| `beep` | `off` | `on` beeps when a Claude Code attention alert arrives |
+| `clock` | `off` | `auto`, `12` or `24` shows a clock in place of the "Usage" title |
+| `config_dirs` | `~/.claude` | comma-separated Claude config dirs (`CLAUDE_CONFIG_DIR` setups); the plan whose usage rose most recently is shown |
+| `kimi_token_url` | `https://auth.kimi.com/api/oauth/token` | OAuth endpoint for the Kimi token refresh (HTTPS only) |
+| `poll_interval`, `heartbeat_interval` | `60`, `60` | polling and heartbeat periods — **read by the inherited Linux daemon only**; the macOS daemon polls every 60 s |
+
+## Customizing animations
+
+Every Codex and Kimi animation is a text file under `assets/animations/`: a
+palette legend, a few header keys and one character per cell, with `---`
+between frames. A Node script compiles them into the firmware and can export
+PNG strips and GIFs:
 
 ```bash
-./flash-mac.sh waveshare_amoled_216                       # ESP32-S3 2.16" (auto-detects /dev/cu.usbmodem*)
-./flash-mac.sh waveshare_amoled_216_c6                    # ESP32-C6 2.16" variant
-./flash-mac.sh waveshare_amoled_18  /dev/cu.usbmodem1101  # ESP32-S3 1.8" (or pass an explicit USB serial port)
+node tools/convert_grid_animations.js                 # → firmware/src/custom_animations.h
+node tools/convert_grid_animations.js --verify DIR    # PNG frame strips to check your art
+node tools/convert_grid_animations.js --gif DIR       # looping GIFs like the gallery above
+pio run -d firmware -e waveshare_amoled_216 -t upload # flash
 ```
 
-The board env name is required. Run `./flash-mac.sh` with no args to see the available envs (scraped from `firmware/platformio.ini`).
+Rules: feet on the stage's bottom row, at most 15 colors plus transparent,
+corner mascots inside 28×21 cells, scenes up to 55×37. Wire a new animation
+into a provider's play-list by name in `firmware/src/splash.cpp`. The
+format, the rules the converter enforces and the workflow for having an AI
+agent draw a scene from a short brief (how the four scenes above were made)
+are in [`docs/animations.md`](docs/animations.md).
 
-### Naming your device
+## Serial QA commands
 
-Several boards in one office would all show up as the same Bluetooth device, so each board carries its own name (default `TokenMon`, max 18 ASCII characters). After a successful upload, `flash-mac.sh` asks:
+The firmware answers commands on the USB serial console (115200 baud), so
+every screen can be reached without touching the board:
 
 ```text
-Device Bluetooth name [TokenMon]: ToknMon Desk One
-  board> BLE: name set to "ToknMon Desk One", restarting
-  board> BLE: name=ToknMon Desk One
-  Saved: device_name = ToknMon Desk One  -> ~/.config/claude-usage-monitor/config
+screen usage | screen splash [claude|codex|kimi]   slot 0-2   next
+splash next|prev   swipe up|down|left|right   parade on|off
+name [text]   screenshot   buzz
 ```
 
-Pass `--name "..."` or set `DEVICE_NAME=...` to skip the prompt (useful in scripts). The name is stored in the board's flash (NVS), so it survives re-flashing. To change it later without re-flashing, open a serial monitor (`pio device monitor -p /dev/cu.usbmodem* -b 115200`) and type `name <new name>`; `name` alone prints the current one. The board reboots to apply it.
-
-The daemon finds the board by its BLE service UUID, so the name is cosmetic for everyday use; it is only consulted by the HID fallback and the stale-bond repair, which read `device_name` from the config (`install-mac.sh` asks for it too) and always accept the legacy name `Clawdmeter` as well.
-
-### Pair the device
-
-After flashing, open **System Settings → Bluetooth** and click _Connect_ next to your device's name (`TokenMon` unless you renamed it). The daemon only ever connects to the peripheral this Mac is paired/connected to — it never scans for a nearby device — so once it's connected here the daemon picks it up on its next poll (~60 s).
-
-### Install the daemon
-
-The daemon reads your Claude OAuth token from the macOS Keychain (service `Claude Code-credentials`), polls usage every 60 s, and pushes it to the display over BLE.
-
-```bash
-./install-mac.sh
-```
-
-The installer creates a Python venv in `daemon/.venv/`, installs `bleak` and `httpx`, renders a LaunchAgent into `~/Library/LaunchAgents/com.user.claude-usage-daemon.plist`, and loads it. The first run is launched interactively so macOS prompts for Bluetooth permission.
-
-Useful commands:
-
-```bash
-launchctl list | grep claude-usage                                          # check it's running
-tail -F ~/Library/Logs/claude-usage-daemon.out.log                          # live logs
-launchctl unload ~/Library/LaunchAgents/com.user.claude-usage-daemon.plist  # stop
-launchctl load -w ~/Library/LaunchAgents/com.user.claude-usage-daemon.plist # start
-```
-
-
-## Linux installation
-
-### Flash the firmware
-
-```bash
-./flash.sh waveshare_amoled_216                  # ESP32-S3 2.16" (defaults to /dev/ttyACM0)
-./flash.sh waveshare_amoled_216_c6               # ESP32-C6 2.16" variant
-./flash.sh waveshare_amoled_18  /dev/ttyACM1     # ESP32-S3 1.8" (or pass an explicit USB serial port)
-```
-
-The board env name is required. Run `./flash.sh` with no args to see the available envs (scraped from `firmware/platformio.ini`).
-
-### Pair the device
-
-After flashing, the device advertises as "Clawdmeter". Pair it once:
-
-```bash
-# Scan for the device
-bluetoothctl scan le
-
-# When "Clawdmeter" appears, pair and trust it
-bluetoothctl pair F4:12:FA:C0:8F:E5    # use your device's MAC
-bluetoothctl trust F4:12:FA:C0:8F:E5
-```
-
-To re-pair later, hold the power button for 3 seconds then release — the device clears its saved bond and re-advertises.
-
-### Install the daemon
-
-The daemon polls your Claude usage every 60 seconds and sends it to the display over BLE.
-
-```bash
-./install.sh
-systemctl --user start claude-usage-daemon
-```
-
-Check status: `systemctl --user status claude-usage-daemon`
-
-View logs: `journalctl --user -u claude-usage-daemon -f`
-
-To change the poll interval, set `poll_interval = <seconds>` in `~/.config/claude-usage-monitor/config` (see `daemon/config.example`). The daemon picks it up without a restart. Polling slower than ~80s is fine: between polls the daemon replays the last payload every `heartbeat_interval` seconds (default 60) with the reset countdowns aged, so the firmware's 90s freshness window never lapses and no reflash is needed.
-
-## Windows installation
-
-Runs natively on Windows — no WSL required. A system-tray app polls your usage and pushes it over BLE, and starts automatically at login.
-
-### Prerequisites
-
-- **Native Windows** (not WSL).
-- **Python 3.11+** from [python.org](https://www.python.org/downloads/) — check _"Add python.exe to PATH"_ during install.
-- **Claude Code** installed, with `claude login` completed. The token is read from `%USERPROFILE%\.claude\.credentials.json` (falling back to `%LOCALAPPDATA%\Claude\` then `%APPDATA%\Claude\`).
-- The repo on a **native Windows path** (e.g. `%USERPROFILE%\Clawdmeter`), **not** a `\\wsl$` share — the installer refuses a WSL path.
-
-### Flash the firmware
-
-```powershell
-pio run -d firmware -e waveshare_amoled_216 -t upload --upload-port COM5   # use your device's COM port
-```
-
-Run `pio run -d firmware` with no env to see the available board envs.
-
-### Pair the device
-
-The device is a bonded BLE HID keyboard, so pair it once: **Settings → Bluetooth & devices → Add device → Bluetooth**, then select "Clawdmeter". Pairing is **required** — it enables the physical buttons and keeps a persistent connection (the device keeps showing your last-synced usage even after the daemon quits). To undo, use **Remove device** (this disables the buttons).
-
-### Install the daemon (recommended)
-
-From the repo root in PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install-windows.ps1
-```
-
-This creates a venv, installs `bleak`/`httpx`/`pystray`/`Pillow` from the in-repo requirements (no internet downloads), registers a per-user login-autostart entry (`HKCU\…\Run`, no admin needed), and launches the tray app headlessly (no console window).
-
-### Run manually instead (optional)
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1        # if blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned, then retry
-pip install -r daemon\requirements-windows.txt
-python daemon\claude_usage_daemon_windows.py        # runs in the foreground; Ctrl+C to stop
-```
-
-### Tray icon and menu
-
-The icon's corner bubble shows state — **green** Connected, **amber** Scanning, **red** Error — and hovering shows the status (`Connected · last update HH:MM`). A notification fires once when it enters Error (e.g. an expired token). Right-click for the menu:
-
-- **Status header** — live state + last sync time.
-- **Start at login** — toggle autostart on/off.
-- **Quit** — stops the daemon cleanly; leaves the Windows pairing intact (device keeps its last reading).
-
-### Logs and troubleshooting
-
-```powershell
-Get-Content $env:LOCALAPPDATA\Clawdmeter\daemon.log -Tail 30        # view logs
-reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v Clawdmeter /f   # remove autostart
-```
-
-| Symptom                                | Fix                                                      |
-| -------------------------------------- | -------------------------------------------------------- |
-| `Device not found`                     | Power on the device; make sure it's in range and paired. |
-| `token expired` toast / `API HTTP 401` | Re-run `claude login`, then restart the daemon.          |
-| `Connection failed`                    | Toggle Windows Bluetooth off/on in Settings.             |
-| `Warning: running under Linux/WSL`     | Run from a native PowerShell window, not a WSL shell.    |
-
-
-## Providers (optional, macOS daemon)
-
-The daemon can monitor more than one coding assistant. The device keeps one
-usage slot per provider and shows them as a carousel (tap to advance, or wait
-for the auto-rotate). Enable providers in `~/.config/claude-usage-monitor/config`
-(the installer offers this and detects local Codex / Kimi installs):
-
-```ini
-providers = claude, codex, kimi
-```
-
-| Provider | Data source | Bars |
-| --- | --- | --- |
-| `claude` | `GET /api/oauth/usage` with the Claude Code OAuth token (keychain or `.credentials.json`); falls back to the rate-limit header probe on accounts without the endpoint | 5h session, weekly, plus the model-scoped weekly window (e.g. Fable) when the subscription exposes one |
-| `codex` | Newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` from the last 7 days — no network, no auth | weekly, plus 5h when the plan reports it |
-| `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest token in `~/.kimi-code/credentials/*.json`; an expired token is refreshed through the Kimi OAuth endpoint (`kimi_token_url`, default `https://auth.kimi.com/api/oauth/token`) and written back to the same file | 5h, weekly |
-
-Default (key unset) is `claude` only, which sends exactly the same payload as
-before, so older firmware keeps working. With several providers each payload
-carries `"p": "<provider>"`; a provider that has no data this cycle sends
-`{"p": "<provider>", "ok": false}` and never affects the others. A window a
-plan does not have is omitted from the payload (no `s`/`sr` on a weekly-only
-Codex plan) and the device hides it. Only the Kimi token is refreshed by the
-daemon (its access tokens live ~15 minutes); Claude and Codex logins stay with
-their CLIs.
-
-## Attention alerts (optional)
-
-When a Claude Code session is waiting on you (a permission prompt, a question, or the idle prompt after a reply), the corner Clawd walks off, a full-size Clawd walks on and waves and points, and the message scrolls on the status line. Add these hooks to `~/.claude/settings.json` (merge them into any hook arrays you already have) and point the path at your checkout. The script needs `jq`: recent macOS ships it as `/usr/bin/jq`, otherwise install it with `brew install jq` or `sudo apt install jq`.
-
-```json
-{
-  "hooks": {
-    "Notification": [
-      { "matcher": "permission_prompt|idle_prompt|elicitation_dialog",
-        "hooks": [{ "type": "command", "command": "/path/to/Clawdmeter/daemon/attention-hook.sh alert" }] }
-    ],
-    "PreToolUse": [
-      { "matcher": "AskUserQuestion",
-        "hooks": [{ "type": "command", "command": "/path/to/Clawdmeter/daemon/attention-hook.sh alert" }] }
-    ],
-    "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "/path/to/Clawdmeter/daemon/attention-hook.sh clear" }] }
-    ],
-    "PostToolUse": [
-      { "matcher": "*",
-        "hooks": [{ "type": "command", "command": "/path/to/Clawdmeter/daemon/attention-hook.sh clear" }] }
-    ]
-  }
-}
-```
-
-Clawd walks back to his corner when you tap the screen, after 2 minutes, or when that session moves on (you answer, approve a tool, or send a prompt). He shows up about 5 seconds after Claude Code raises the notification, because the daemon checks once per tick. To hear a beep as well, set `beep = on` in `~/.config/claude-usage-monitor/config` (the installers ask). The macOS and Linux daemons handle these alerts; the Windows daemon doesn't yet.
-
-## How it works
-
-<img src="assets/readme/magnifier.gif" width="150" align="right" alt="">
-
-1. The daemon reads your Claude Code OAuth token — from the macOS Keychain (service `Claude Code-credentials`) on macOS, or from `~/.claude/.credentials.json` on Linux (`%USERPROFILE%\.claude\.credentials.json` on Windows).
-2. It makes a minimal API call to `api.anthropic.com/v1/messages` — one token of Haiku, basically free.
-3. The usage numbers come straight out of the response headers (`anthropic-ratelimit-unified-5h-utilization` and friends).
-4. The daemon connects to the ESP32 over BLE and writes a JSON payload to the GATT RX characteristic.
-5. The firmware parses it and updates the LVGL dashboard.
-6. The firmware also tracks the rate of change of session % over a 5-minute window and picks splash animations from the matching mood group.
-7. The two side buttons are independent of all of this — they send Space and Shift+Tab as BLE HID keyboard input to the paired host directly.
-
-## Physical buttons
-
-The board has three side buttons. Left and right send HID keys; the middle (PWR) button cycles splash animations and, held for 3 seconds, triggers pairing mode.
-
-| Button           | GPIO         | Function                                                     |
-| ---------------- | ------------ | ------------------------------------------------------------ |
-| **Left**         | GPIO 0       | Hold to send Space (Claude Code voice-mode push-to-talk)     |
-| **Middle** (PWR) | AXP2101 PKEY | On splash: cycle animations. Hold 3s + release: pairing mode |
-| **Right**        | GPIO 18      | Press to send Shift+Tab (Claude Code mode toggle)            |
-
-Space and Shift+Tab go out as standard BLE HID keyboard reports, so they trigger in whatever window has focus on the paired host — not just Claude Code.
-
-## BLE protocol
-
-The device advertises a custom GATT service alongside the standard HID keyboard service:
-
-|                            | UUID                                   |
-| -------------------------- | -------------------------------------- |
-| **Data Service**           | `4c41555a-4465-7669-6365-000000000001` |
-| RX Characteristic (write)  | `4c41555a-4465-7669-6365-000000000002` |
-| TX Characteristic (notify) | `4c41555a-4465-7669-6365-000000000003` |
-| **HID Service**            | `00001812-0000-1000-8000-00805f9b34fb` |
-
-JSON payload format (written to RX):
-
-```json
-{ "s": 45, "sr": 120, "w": 28, "wr": 7200, "st": "allowed", "ok": true }
-```
-
-Fields: `s` = session %, `sr` = session reset (minutes), `w` = weekly %, `wr` = weekly reset (minutes), `st` = status, `ok` = success flag.
-
-Optional attention fields are only sent as part of a full payload, because the firmware treats every write as a complete update: `b` = beep once, `m` = attention message (ASCII), `x` = end the alert.
+`./screenshot.sh out.png [port] [--screen usage|splash:codex]` captures a
+480×480 PNG, switching screens first if asked. Full table in
+[`docs/controls.md`](docs/controls.md#serial-qa-commands).
+
+## Troubleshooting
+
+The most common ones; the full list is in
+[`docs/troubleshooting.md`](docs/troubleshooting.md).
+
+| Symptom | Fix |
+| --- | --- |
+| Daemon never gets past startup | The clone is under `~/Documents` (or similar): grant the venv's Python access under Privacy & Security → Files and Folders, or move the clone to `~/toknmon` |
+| Board missing or wrongly named in Bluetooth after a rename | Unpair and pair again; macOS caches the name with the bond |
+| Two daemons fighting over the board | A Clawdmeter-era agent is still loaded: `./install-mac.sh` retires it, or `launchctl bootout gui/$(id -u)/com.user.claude-usage-daemon` |
+| Kimi slot stays empty | Log in once with the Kimi Code CLI; the daemon refreshes the token from then on |
+| Codex slot stays empty | Run Codex once; logs older than 7 days are ignored |
+| `No /dev/cu.usbmodem* found` when flashing | Data cable, other USB-C port, or pass the port explicitly |
 
 ## Development
 
-<img src="assets/readme/crab.gif" width="120" align="right" alt="">
+```bash
+pio run -d firmware -e sim && (cd firmware && .pio/build/sim/program)   # desktop simulator (SDL2)
+daemon/.venv/bin/python -m pytest daemon/tests -q                       # daemon tests
+node --test tools/test/ && bash tools/test/shell/test_device_name_validator.sh
+pio run -d firmware -e waveshare_amoled_216                             # firmware
+```
 
-- **Desktop simulator** — iterate on the UI without hardware: an SDL2 window
-  runs the full firmware loop with scenario playback (`pio run -d firmware -e
-sim`, then `cd firmware && .pio/build/sim/program`). See
-  [`SIM-USAGE.md`](SIM-USAGE.md) for controls, scenarios, and headless
-  screenshots.
-- **Splash animations** — Anthropic's official Clawd sprites, archived with
-  provenance notes in [`research/clawd-official/`](research/clawd-official/);
-  `node tools/convert_official_clawd.js` regenerates
-  `firmware/src/splash_animations.h`. See [`tools/README.md`](tools/README.md).
-- **Custom animations** — the Codex and Kimi corner mascots are hand-drawn
-  text grids in `assets/animations/` (one character per cell, a palette
-  legend, `---` between frames). `node tools/convert_grid_animations.js`
-  compiles them into `firmware/src/custom_animations.h` in the same format as
-  the official set, and `--verify DIR` writes a PNG strip per animation to
-  eyeball. The usage screen swaps the corner mascot to match the provider on
-  screen. Gallery: `codex.dots` (bouncing dots), `codex.think` (slow
-  brightness wave), `kimi.glow` (moon glow and twinkle), `kimi.sleep` (eyes
-  closed, rising "z"), and `claude.bike` / `codex.bike` / `kimi.bike` — each
-  mascot riding a mountain bike with turning spoked wheels, playable both as
-  a corner act and full-size on the splash. See the "Custom animations"
-  section of [`CLAUDE.md`](CLAUDE.md).
-- **Icons** — Lucide PNGs convert to LVGL C arrays with
-  `tools/png_to_lvgl.js`. See [`tools/README.md`](tools/README.md).
-- **Fonts** — the pre-compiled LVGL fonts and the LVGL-9 patching they need:
-  [`docs/fonts.md`](docs/fonts.md).
-- **Porting** — [`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md)
-  and [`docs/porting/hal-contract.md`](docs/porting/hal-contract.md).
+The simulator runs the full firmware loop in an SDL2 window with scenario
+playback and headless captures ([`docs/simulator.md`](docs/simulator.md)).
+CI builds the simulator and the 2.16 firmware and runs every test on each
+push. Project layout, release flow and conventions:
+[`docs/development.md`](docs/development.md); contributions:
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+```text
+firmware/   PlatformIO project: src/ (main, ui, splash, ble, theme, hal/, boards/<name>/), sim/ scenarios
+daemon/     macOS daemon (claude_usage_daemon.py, providers/, launchd template, tests/)
+assets/     animation text grids, font and icon sources
+tools/      converters (grid → header, official Clawd → header, PNG → LVGL), gallery script, tests
+docs/       guides (install, flashing, providers, controls, animations, troubleshooting, simulator, development),
+            porting/, media/ (screenshots, GIFs), odd/ (design log H0–H8)
+```
+
+## Roadmap
+
+- Verify the inherited boards (AMOLED 1.8 / 2.06, C6 variants, LCD 1.54 / 4)
+  with the multi-provider UI, or drop the ones nobody tests.
+- Linux and Windows daemons with the provider model (today they are
+  Clawdmeter's Claude-only versions).
+- More providers (Gemini CLI, Cursor, local models) and a provider-aware
+  attention alert.
+- Reactive animations: mascots that react to usage pace and resets for Codex
+  and Kimi the way Clawd does for Claude.
+- Releases with prebuilt firmware images.
 
 ## Credits
 
-- Pixel-art Clawd animations are Anthropic's official mascot art (claude.ai/code, Claude Code desktop), archived and converted by the tooling in `tools/` and `research/clawd-official/`.
-- Lucide icon set ([lucide.dev](https://lucide.dev), MIT) for bluetooth and battery UI glyphs.
-- Anthropic brand fonts (Tiempos Text, Styrene B) — see licensing warning below.
+- [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) by
+  [Hermann Bjorgvin](https://github.com/HermannBjorgvin): the firmware
+  architecture, board ports, splash engine, simulator, converters and the
+  original daemons. The macOS host pieces were contributed upstream by
+  [Chris Davidson](https://github.com/lorddavidson).
+- **Clawd** pixel art and the Tiempos Text / Styrene B fonts are Anthropic's
+  (see [License](#license)).
+- Firmware libraries: [LVGL](https://lvgl.io), [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino),
+  [ArduinoJson](https://arduinojson.org), [GFX Library for Arduino](https://github.com/moononournation/Arduino_GFX),
+  [XPowersLib](https://github.com/lewisxhe/XPowersLib), [SensorLib](https://github.com/lewisxhe/SensorLib),
+  [pioarduino](https://github.com/pioarduino/platform-espressif32); [Lucide](https://lucide.dev) icons.
+- Host libraries: [bleak](https://github.com/hbldh/bleak), [httpx](https://www.python-httpx.org).
+- [Waveshare](https://www.waveshare.com) for the ESP32-S3 Touch AMOLED boards.
+- The Codex and Kimi scenes were drawn by Kimi K3 through the grid pipeline.
 
-## Licensing gray area warning
+## License
 
-The software in this repository uses and adheres to the Anthropic brand guidelines and uses the same proprietary fonts that Anthropic has a license for but this software uses without permission as well as using assets from Anthropic such as the copyrighted Clawd mascot so even though the code in this repo is non-proprietary I will not license it myself under a copyleft license since this repo includes proprietary fonts and copyrighted assets. Please be aware of this if you fork or copy the code from this repo. **You have been warned!**
+ToknMon's code, scripts, documentation and original pixel art are released
+under the **MIT License** ([`LICENSE`](LICENSE), © 2026 Edgar Ramos).
+
+**Read [`NOTICE.md`](NOTICE.md) before redistributing.** The repository bundles
+assets that are **not** covered by that license and are used without one, in
+the same posture as upstream Clawdmeter (which publishes no license): the
+official Clawd mascot animations, the Claude Code logo, and the generated
+Tiempos Text and Styrene B font data, all Anthropic's property. The Codex and
+Kimi mascots are original art, not official brand assets; "Codex" and "Kimi"
+are trademarks of their respective owners and are used only to name the
+monitored services. Fork and flash for personal use with that in mind.

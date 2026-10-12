@@ -1,0 +1,81 @@
+# Troubleshooting
+
+Start with the logs: `tail -F ~/Library/Logs/toknmon.out.log` (activity) and
+`~/Library/Logs/toknmon.err.log` (errors). `launchctl list | grep toknmon`
+shows whether the agent is loaded and its last exit code. The board's serial
+console (115200 baud) prints every BLE event and payload.
+
+## Daemon
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| The agent is loaded but the log never gets past startup; `ps` shows the Python process stuck | The clone lives under `~/Documents`, `~/Desktop`, `~/Downloads` or another TCC-protected folder and launchd's Python has no permission to read it | Grant the venv's Python access in **System Settings → Privacy & Security → Files and Folders** (or Full Disk Access), or move the clone to `~/toknmon` and run `./install-mac.sh` again |
+| `Bluetooth permission` dialog never appeared; `CBManager` errors in the log | The daemon was first started by launchd, not from a terminal | Run `./install-mac.sh` again without `--no-prime`, or `daemon/.venv/bin/python daemon/claude_usage_daemon.py` once from a terminal and accept the prompt |
+| Two daemons fight for the board; alternating connects/disconnects | The Clawdmeter-era `com.user.claude-usage-daemon` agent is still loaded, or a second checkout runs its own agent | `launchctl bootout gui/$(id -u)/com.user.claude-usage-daemon`; `./install-mac.sh` retires it automatically and parks the plist under `~/.config/toknmon/legacy/` |
+| `Device not found` / `Not paired` for minutes | The board is not paired with this Mac, or macOS holds a stale bond | Pair in System Settings → Bluetooth (hold PWR 3 s on the board for pairing mode). With `blueutil` installed the daemon drops a stale bond itself; otherwise forget the device and pair again |
+| Connected, but one provider never shows | `providers` lists it and it has no data | `daemon/.venv/bin/python daemon/claude_usage_daemon.py --detect` tells you what is detected and why not; see the provider rows below |
+| `Alert dropped: Claude is not an enabled provider` | Claude Code hooks are installed but Claude is not polled | Alerts ride on the Claude payload: add `claude` to `providers` (or use `auto`) |
+| Config edits do nothing | Typo in the key, or a `#` in a value | Keys are documented in `daemon/config.example`; `#` starts a comment, so device names cannot contain it |
+
+### Claude
+
+| Symptom | Fix |
+| --- | --- |
+| `token expired`, `HTTP 401` | Run `claude` and log in again; the daemon re-reads the Keychain on the next poll |
+| `Warning: Claude Code OAuth token not found in Keychain` at install | Log in to Claude Code first (service `Claude Code-credentials`), or make sure `~/.claude/.credentials.json` exists |
+| No Fable bar | The subscription has no model-scoped weekly window; the bar appears only when `/api/oauth/usage` reports one |
+| Wrong plan shown with several Claude accounts | Set `config_dirs = ~/.claude, ~/.claude-work`; the daemon shows the plan whose usage rose most recently |
+
+### Codex
+
+| Symptom | Fix |
+| --- | --- |
+| `codex: no data` / slot stale | The Codex provider reads `~/.codex/sessions/**/rollout-*.jsonl` from the last 7 days; run Codex once. A custom `CODEX_HOME` must be visible to the launchd agent (set it in the plist or symlink `~/.codex`) |
+| Only the dot grid, no 5h bar | The plan reports a weekly window only; the bar appears when `rate_limits` carries a short window |
+
+### Kimi
+
+| Symptom | Fix |
+| --- | --- |
+| `kimi: no data (no valid token)` | Log in once with the Kimi Code CLI so `~/.kimi-code/credentials/*.json` exists. Afterwards the daemon refreshes the token itself |
+| `Kimi token refresh failed` | The refresh token was revoked or the endpoint changed. Log in again with the CLI; if Kimi moved its OAuth host, set `kimi_token_url` (HTTPS only) |
+| Credential file permissions error | The daemon rewrites the file atomically with mode 0600; make sure the directory is writable by your user |
+
+## Board
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Board shows a different name than you set, or does not appear after a rename | macOS caches the advertised name with the bond | Forget the device in System Settings → Bluetooth and pair again |
+| `BLE: name rejected (need 1-18 printable ASCII chars, no '#')` | The name breaks the rules | Shorten it, ASCII only, no `#` |
+| Stays on the splash, meter never appears | No payload has arrived yet (the meter needs fresh data), or the daemon is not connected | Check the daemon log for `Connected` and `Sending[...]`; swipe up to see the meter's status line |
+| Carousel skips a provider | Its slot is older than 90 s | That provider failed its last polls; see the daemon section |
+| Meter shows "Resets in 0m" around a reset | Known: aged countdowns clamp at 0 until the next poll | Wait for the next poll (60 s) |
+| Splash shows idle animations only | The mood group follows the Claude usage rate; a quiet session stays calm | Expected; mascot mode and the parade play the full sets regardless |
+| Side buttons type nothing | HID keys go to the paired host only, and only after pairing | Pair the board; the keys land in the focused window |
+| `./screenshot.sh` hangs waiting for `SCREENSHOT_START` or returns a short dump | The board is busy logging BLE traffic, or an orphaned reader holds the port | Retry; `lsof /dev/cu.usbmodem*` and kill the stale Python holding the port |
+| `screenshot` → nothing on a C6 board | `LV_USE_SNAPSHOT` is off without PSRAM | Use the simulator or eyeball on hardware |
+
+## Flashing
+
+| Symptom | Fix |
+| --- | --- |
+| `No /dev/cu.usbmodem* found` | Data cable, other USB-C port on the board, or pass the port explicitly (`ls /dev/cu.*`) |
+| `This chip is ESP32-C6, not ESP32-S3` | Use the env that matches the board (`*_c6` for C6 hardware) |
+| Upload OK but naming timed out | The port number changed after reset: `./flash-mac.sh --rename "<name>" <new port>` |
+| Black screen after flashing an inherited board | Those ports are untested with ToknMon; check the env, power-cycle, and open an issue with the serial boot log |
+
+More detail in [`flashing.md`](flashing.md).
+
+## Simulator
+
+| Symptom | Fix |
+| --- | --- |
+| `sdl2-config: not found` when building `-e sim` | `brew install sdl2` (Linux: `apt install libsdl2-dev`) |
+| Default scenario not found | Run the binary from the `firmware/` directory, or pass `SIM_SCENARIO=<path>` |
+| Window opens but the meter never shows | The sim boots on the splash like hardware; the scenario needs a payload line, then swipe (drag) or wait for an alert line |
+
+## Still stuck
+
+Open an issue with the board, macOS version, the installer output and the
+relevant log lines (remove tokens and your device name). See
+[CONTRIBUTING](../CONTRIBUTING.md).

@@ -39,13 +39,32 @@ running.
 ```bash
 node convert_grid_animations.js              # assets/animations/*.txt → firmware/src/custom_animations.h
 node convert_grid_animations.js --verify DIR # + one PNG frame strip per animation
+node convert_grid_animations.js --gif DIR    # + one looping GIF per animation (×6 scale, per-frame holds; ImageMagick)
 node --test test/                            # converter unit tests
 bash test/shell/test_device_name_validator.sh   # install-mac.sh / flash-mac.sh name validator
 ```
 
 Hand-authored provider mascots (Codex, Kimi) live as text grids under
-`assets/animations/`; the format and rules are documented in `CLAUDE.md`
-("Custom animations").
+`assets/animations/`; the format and rules are documented in
+`docs/animations.md` and `CLAUDE.md` ("Custom animations"). `--gif` writes
+`<name>.gif` per animation, byte-deterministic between runs; the committed
+previews are under `docs/media/animations/`.
+
+## Gallery (docs/media)
+
+```bash
+bash make_gallery.sh                         # build the sim, capture docs/media/screens/*.png, export docs/media/animations/*.gif
+SKIP_BUILD=1 bash make_gallery.sh            # reuse the existing sim binary
+```
+
+`make_gallery.sh` plays `firmware/sim/gallery.jsonl` headless
+(`SDL_VIDEODRIVER=dummy`, one `SIM_AUTOSHOT_MS` capture per screen, PNGs
+stripped of date chunks) and then runs the GIF export. Needs PlatformIO,
+SDL2, ImageMagick and Node 18+. Hardware shots (`docs/media/screens/hw-*.png`)
+are taken manually with `./screenshot.sh`. See `docs/media/README.md`.
+
+`fetch_official_clawd.sh [DEST_DIR]` (above) takes an optional destination
+directory; the default `research/clawd-official/` is git-ignored.
 
 ## Icons
 

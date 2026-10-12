@@ -7,6 +7,13 @@ unmodified. Only `ble.cpp`/`chime.cpp` are swapped for stubs. Sources live in
 `firmware/src/boards/sim/` (HAL against SDL2 + Arduino shims in `shim/`), with
 scenario data in `firmware/sim/`.
 
+This is the fastest way to work on ToknMon's UI without a board: the meter,
+the carousel, mascot mode, the parade and the gestures all behave as on
+hardware ([`controls.md`](controls.md)). `tools/make_gallery.sh` uses the
+headless hooks below to produce the screenshots in
+[`media/README.md`](media/README.md); the rest of the developer workflow is in
+[`development.md`](development.md).
+
 ## Build & run
 
 ```bash
