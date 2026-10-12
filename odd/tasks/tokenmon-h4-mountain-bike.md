@@ -23,7 +23,7 @@ The user wants a shared visual identity across the three providers ("each one on
 ## Tasks
 - [x] T1 — Author `claude.bike`, `codex.bike`, `kimi.bike`; `--verify` PNGs read clearly as a rider on a bike with turning wheels. Route: delegated writer (done; see evidence).
 - [x] T2 — Wire as mascot acts + splash rotation; sim autoshots of each provider mid-pedal and of the splash bike scene. Route: same writer (done; see evidence).
-- [ ] T3 — Hardware: flash, screenshot splash bike + a provider screen mid-act; commit. Route: verification worker.
+- [x] T3 — Hardware: flash, screenshot splash bike + a provider screen mid-act; commit. Route: verification worker (done on `1513865`, 2026-10-12; see "T3 hardware evidence"). Commit is the parent's; the splash bike could not be reached from serial (PWR-only, see below).
 
 ## Verification
 - `node --test tools/test/`, `node tools/convert_grid_animations.js` (idempotent)
@@ -44,5 +44,16 @@ T1/T2 (writer, worktree `feat/tokenmon-h4-mountain-bike` on c3c3260, uncommitted
 - Scenario: "claude only again" dwell 6 s → 12 s; the rest already ≥ 12 s.
 - Note: in the sim the rate group is always 0 (`MIN_WINDOW_MS` 240 s), so Claude's corner bike only shows on hardware once the pace is at least "normal".
 
+### T3 hardware evidence (verification worker on `1513865`, 2026-10-12; PNGs in `<scratchpad>/final/`)
+- Full checks: `daemon/.venv/bin/python -m pytest daemon/tests -q` → `200 passed, 2 skipped`; `node --test tools/test/` → `pass 8, fail 0`; `bash tools/test/shell/test_device_name_validator.sh` → `All device-name validator tests passed.`; `node tools/convert_grid_animations.js && git status --short firmware/src/custom_animations.h` → 7 animations written, status empty (idempotent with the committed header).
+- `PATH=~/.platformio/penv/bin:$PATH ./flash-mac.sh waveshare_amoled_216 /dev/cu.usbmodem214201 --name "ToknMon Desk One"` → `waveshare_amoled_216 SUCCESS 00:00:26.972`, RAM 33.9%, Flash 65.6% (2191171 / 3342336), `board> BLE: name set to "ToknMon Desk One", restarting`. Serial `name` → `BLE: name=ToknMon Desk One`.
+- Multi-provider on hardware: upstream launchd daemon stopped, config temporarily extended with `providers = claude, codex, kimi`, repo daemon run through a temporary launchd agent. Log: `Sending[claude]: {"p":"claude","s":48,"sr":31,"w":81,"wr":781,"f":13,"fr":781,"st":"allowed","acct":"pro","ok":true,"c":1}`, `Sending[codex]: {"p":"codex","s":0,"sr":0,"w":54,"wr":9401,"st":"allowed","ok":true}`, `Provider kimi: no data (no valid token)` → `Sending[kimi]: {"p":"kimi","ok":false}` (expected: Kimi tokens expired on this machine).
+- Serial QA replies: `screen usage` → `ok`; `slot 0` → `ok`; `slot 1` → `ok`; `slot 2` → `err slot not fresh` (Kimi ok:false); `next` (on Codex, 2 fresh slots) → `ok` and paged to Claude; `screen splash` → `ok`.
+- `claude.png`: Claude usage screen, three bars (48% Current / 81% Weekly / 13% Fable), orange Clawd idle in the corner, "Elucidating…" status line; no overlap or clipping. `next.png`: same screen after `next` from Codex ("Actioning…"). `codex.png`: Codex screen, green "Codex" title, two panels (0% Current "Resets in 0m", 54% Weekly "Resets in 6d 12h"), three green dots idle in the corner, "Perusing…".
+- `codex-act.png` (+ `codex-act-corners-sheet.png`): `codex.dots` act caught mid-play on hardware — the three dots bouncing in a wave (frames at 10.8 s, 25.3 s, 27.5 s, 53.9 s of a 60 s capture loop that re-pinned `slot 1` every ~2 s). Caught via a scratch pyserial loop (`burst.py`) because the 8 s carousel dwell is shorter than the 10 s rate-group-0 still; the mascot idle timer survives slot swaps, so acts fire on whichever slot is visible. The bike act did not come up in the window (rate group 0 alternates `codex.dots` / `codex.bike`; four act frames were all dots).
+- `splash.png`: splash after `screen splash` shows the official idle Clawd. The bike splash scenes live in busy groups 2–3 (`GROUP_NAMES`) and the PWR button cannot be pressed from serial, so the full-size splash bike is verified by the T2 sim autoshots only, not on hardware.
+- Environment restored: test agent removed, config restored (`diff` identical), `com.user.claude-usage-daemon` re-bootstrapped and `Connected` / `Sending` within 5 s; board left on the splash.
+- Not verified on hardware: full-size splash bike (PWR-only), `claude.bike` / `codex.bike` corner acts (need a busy rate group or luck in the act rotation).
+
 ## Next step
-T3 (parent): flash `waveshare_amoled_216`, `screenshot.sh` the splash bike (PWR-cycle to it) and a provider screen mid-act, then commit the work unit.
+Parent: review the T3 evidence; no further hardware step. Delivery (push / PR) stays the user's decision.
