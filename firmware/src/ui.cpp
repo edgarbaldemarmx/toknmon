@@ -348,6 +348,13 @@ static bool       data_received = false;     // any ok payload on any slot since
 static lv_timer_t* carousel_timer = nullptr;
 static const uint32_t CAROUSEL_MS = 8000;
 
+// ---- Ambient parade ----
+// After IDLE_PARADE_MS without a touch or button press on the usage view, the
+// splash parades the full-size mascots of every fresh provider. Any input
+// resets the timer (ui_note_activity); a touch on the splash ends the parade.
+static lv_timer_t* parade_timer = nullptr;
+static const uint32_t IDLE_PARADE_MS = 5UL * 60UL * 1000UL;
+
 static bool slot_fresh(int i) {
     return slots[i].received && slots[i].ok &&
            (lv_tick_get() - slots[i].last_ms) < DATA_FRESH_MS;
@@ -461,6 +468,7 @@ static void layout_dots(bool with_session);
 static void dots_geometry(bool with_session, int* pitch, int* dia, int* grid);
 static void style_pill_geometry(lv_obj_t* pill, const lv_font_t* font, int16_t px, int16_t py);
 static void carousel_timer_cb(lv_timer_t* t);
+static void parade_timer_cb(lv_timer_t* t);
 
 static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_t* panel = lv_obj_create(parent);
@@ -888,11 +896,19 @@ static void alert_tap_cb(lv_event_t* e) {
     lv_indev_stop_processing((lv_indev_t*)lv_event_get_user_data(e));
 }
 
+// Every touch, on any screen (usage panels, alert dismissals, the splash),
+// counts as activity for the parade timer.
+static void activity_press_cb(lv_event_t* e) {
+    (void)e;
+    ui_note_activity();
+}
+
 static void init_alert(void) {
     alert_timer = lv_timer_create(alert_timer_cb, ALERT_TIMEOUT_MS, NULL);
     lv_timer_pause(alert_timer);
     lv_indev_t* indev = lv_indev_get_next(NULL);
     if (indev) lv_indev_add_event_cb(indev, alert_tap_cb, LV_EVENT_CLICKED, indev);
+    if (indev) lv_indev_add_event_cb(indev, activity_press_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
 }
 
@@ -948,6 +964,7 @@ void ui_init(void) {
     init_alert();
     apply_usage_layout(LAYOUT_BARS);
     carousel_timer = lv_timer_create(carousel_timer_cb, CAROUSEL_MS, NULL);
+    parade_timer = lv_timer_create(parade_timer_cb, IDLE_PARADE_MS, NULL);
 }
 
 // ---- Title area: clock + provider ----
@@ -1380,15 +1397,23 @@ static void usage_tap_cb(lv_event_t* e) {
     ui_show_screen(SCREEN_SPLASH);
 }
 
+// Long press on the usage view: mascot mode for the provider on screen.
 static void usage_long_press_cb(lv_event_t* e) {
     (void)e;
     if (alert_active) return;
-    if (current_screen == SCREEN_USAGE) ui_show_screen(SCREEN_SPLASH);
+    if (current_screen == SCREEN_USAGE) ui_show_mascot(visible_slot);
 }
 
 void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
     splash_hide();
+    if (screen != SCREEN_SPLASH) {
+        // Leaving the splash ends mascot mode and the parade: the next plain
+        // splash is Claude's default again, and the idle clock restarts.
+        splash_parade_stop();
+        splash_set_provider(-1);
+        ui_note_activity();
+    }
 
     switch (screen) {
     case SCREEN_SPLASH:  splash_show(); break;
@@ -1410,6 +1435,37 @@ void ui_show_screen(screen_t screen) {
 void ui_toggle_splash(void) {
     if (current_screen == SCREEN_SPLASH) ui_show_screen(prev_non_splash_screen);
     else                                  ui_show_screen(SCREEN_SPLASH);
+}
+
+void ui_show_mascot(int slot) {
+    splash_parade_stop();
+    splash_set_provider(slot);
+    ui_show_screen(SCREEN_SPLASH);
+}
+
+bool ui_parade_start(void) {
+    bool fresh[PROVIDER_COUNT];
+    bool any = false;
+    for (int i = 0; i < PROVIDER_COUNT; i++) {
+        fresh[i] = slot_fresh(i);
+        any = any || fresh[i];
+    }
+    if (!any) return false;
+    splash_parade_start(fresh);
+    ui_show_screen(SCREEN_SPLASH);
+    return true;
+}
+
+void ui_note_activity(void) {
+    if (parade_timer) lv_timer_reset(parade_timer);
+}
+
+// The idle clock ran out on the usage view: parade the fresh mascots. An
+// alert holds the screen; with nothing fresh there is nothing to parade.
+static void parade_timer_cb(lv_timer_t* t) {
+    (void)t;
+    if (current_screen != SCREEN_USAGE || alert_active) return;
+    ui_parade_start();
 }
 
 screen_t ui_get_current_screen(void) {

@@ -23,6 +23,8 @@ The device boots into the splash. Tap the screen anywhere to switch to the Usage
 
 While the splash is up, the middle (PWR) button cycles animations. **Hold the power button for 3 seconds, then release, to put the device into pairing mode** — this clears the saved Bluetooth bond and re-advertises. The firmware also auto-rotates animations every 20 s within the current usage-rate group, so a long stretch on the splash isn't just one Clawd on loop.
 
+**Mascot mode and the parade.** Long-press the Usage view to open the full-size mascot of the provider on screen — Codex's thinking dots or Kimi's moon cycle through their own idle, acts, and mountain-bike ride (Claude keeps the official splash), with the provider name on top; the PWR button skips to the next act and a tap returns to Usage. Leave the device untouched on the Usage view for 5 minutes and it starts a parade: every provider with live data gets 20 s of full-size mascot in turn, until you touch the screen. Both are also reachable over serial for hands-free checks: `screen splash codex` (or `kimi`, `claude`) and `parade on` / `parade off`.
+
 ## Hardware
 
 Boards supported out of the box:
@@ -326,11 +328,12 @@ sim`, then `cd firmware && .pio/build/sim/program`). See
   compiles them into `firmware/src/custom_animations.h` in the same format as
   the official set, and `--verify DIR` writes a PNG strip per animation to
   eyeball. The usage screen swaps the corner mascot to match the provider on
-  screen. Gallery: `codex.dots` (bouncing dots), `kimi.glow` (moon glow and
-  twinkle), and `claude.bike` / `codex.bike` / `kimi.bike` — each mascot riding
-  a mountain bike with turning spoked wheels, playable both as a corner act and
-  full-size on the splash. See the "Custom animations" section of
-  [`CLAUDE.md`](CLAUDE.md).
+  screen. Gallery: `codex.dots` (bouncing dots), `codex.think` (slow
+  brightness wave), `kimi.glow` (moon glow and twinkle), `kimi.sleep` (eyes
+  closed, rising "z"), and `claude.bike` / `codex.bike` / `kimi.bike` — each
+  mascot riding a mountain bike with turning spoked wheels, playable both as
+  a corner act and full-size on the splash. See the "Custom animations"
+  section of [`CLAUDE.md`](CLAUDE.md).
 - **Icons** — Lucide PNGs convert to LVGL C arrays with
   `tools/png_to_lvgl.js`. See [`tools/README.md`](tools/README.md).
 - **Fonts** — the pre-compiled LVGL fonts and the LVGL-9 patching they need:

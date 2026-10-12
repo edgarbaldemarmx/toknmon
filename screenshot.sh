@@ -1,19 +1,23 @@
 #!/bin/bash
 # Take a screenshot from the Waveshare AMOLED display via LVGL snapshot.
-# Usage: ./screenshot.sh [output.png] [port] [--screen usage|splash]
+# Usage: ./screenshot.sh [output.png] [port] [--screen usage|splash|splash:<provider>]
 # Default port: /dev/cu.usbmodem101 on macOS, /dev/ttyACM0 on Linux.
 # --screen sends the firmware's `screen <name>` serial command first, waits
 # 300 ms for the redraw, then captures — no button press needed.
+# `splash:codex` / `splash:kimi` / `splash:claude` open mascot mode for that
+# provider (the colon stands in for the space in the serial command, so no
+# quoting is needed); bare `splash` is the default Claude splash.
 
 SCREEN=""
 POSITIONAL=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --screen)
-            if [[ "$2" != "usage" && "$2" != "splash" ]]; then
-                echo "Usage: --screen usage|splash" >&2; exit 2
-            fi
-            SCREEN="$2"; shift 2 ;;
+            case "$2" in
+                usage|splash|splash:claude|splash:codex|splash:kimi) ;;
+                *) echo "Usage: --screen usage|splash|splash:claude|splash:codex|splash:kimi" >&2; exit 2 ;;
+            esac
+            SCREEN="${2/:/ }"; shift 2 ;;
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done

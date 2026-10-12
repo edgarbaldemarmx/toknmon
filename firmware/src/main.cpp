@@ -292,8 +292,10 @@ static void set_device_name(char* text) {
     ESP.restart();
 }
 
-// Hands-free QA: `screen usage|splash`, `next` (page the carousel like a
-// tap), `slot <0-2>` (show that provider slot if fresh). Reply `ok` / `err <why>`.
+// Hands-free QA: `screen usage|splash [claude|codex|kimi]` (a provider name
+// opens mascot mode for it; bare `splash` is the default Claude splash),
+// `parade on|off`, `next` (page the carousel like a tap), `slot <0-2>` (show
+// that provider slot if fresh). Reply `ok` / `err <why>`.
 static void qa_reply(bool ok, const char* why) {
     if (ok) Serial.println("ok");
     else    Serial.printf("err %s\n", why);
@@ -301,8 +303,26 @@ static void qa_reply(bool ok, const char* why) {
 
 static void cmd_screen(const char* arg) {
     if (strcmp(arg, "usage") == 0)       { ui_show_screen(SCREEN_USAGE);  qa_reply(true, NULL); }
-    else if (strcmp(arg, "splash") == 0) { ui_show_screen(SCREEN_SPLASH); qa_reply(true, NULL); }
-    else                                   qa_reply(false, "unknown screen (usage|splash)");
+    else if (strcmp(arg, "splash") == 0) { ui_show_mascot(-1);            qa_reply(true, NULL); }
+    else if (strncmp(arg, "splash ", 7) == 0) {
+        const char* prov = arg + 7;
+        while (*prov == ' ') prov++;
+        for (int i = 0; i < PROVIDER_COUNT; i++) {
+            if (strcmp(prov, provider_short(i)) == 0) {
+                ui_show_mascot(i);
+                qa_reply(true, NULL);
+                return;
+            }
+        }
+        qa_reply(false, "unknown provider (claude|codex|kimi)");
+    }
+    else                                   qa_reply(false, "unknown screen (usage|splash [provider])");
+}
+
+static void cmd_parade(const char* arg) {
+    if (strcmp(arg, "on") == 0)       qa_reply(ui_parade_start(), "no fresh slot");
+    else if (strcmp(arg, "off") == 0) { ui_show_screen(SCREEN_USAGE); qa_reply(true, NULL); }
+    else                              qa_reply(false, "parade on|off");
 }
 
 static void cmd_slot(const char* arg) {
@@ -327,6 +347,7 @@ static void check_serial_cmd() {
             else if (strncmp(cmd_buf, "screen ", 7) == 0) cmd_screen(cmd_buf + 7);
             else if (strcmp(cmd_buf, "next") == 0) qa_reply(ui_carousel_next(), "need usage view with 2+ fresh slots");
             else if (strncmp(cmd_buf, "slot ", 5) == 0) cmd_slot(cmd_buf + 5);
+            else if (strncmp(cmd_buf, "parade ", 7) == 0) cmd_parade(cmd_buf + 7);
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;
@@ -468,6 +489,7 @@ void loop() {
         bool primary_now = input_hal_is_held(INPUT_BTN_PRIMARY);
         if (primary_now != primary_was) {
             if (primary_now) {
+                ui_note_activity();
                 if (idle_consume_wake_press()) primary_wake_swallowed = true;
                 else                            ble_keyboard_press(0x2C, 0);  // HID Space, no mods
             } else {
@@ -483,6 +505,7 @@ void loop() {
             bool secondary_now = input_hal_is_held(INPUT_BTN_SECONDARY);
             if (secondary_now != secondary_was) {
                 if (secondary_now) {
+                    ui_note_activity();
                     if (idle_consume_wake_press()) secondary_wake_swallowed = true;
                     else                            ble_keyboard_press(0x2B, 0x02);  // HID Tab + LEFT_SHIFT
                 } else {
@@ -494,6 +517,7 @@ void loop() {
         }
 
         if (power_hal_pwr_pressed()) {
+            ui_note_activity();
             if (!idle_consume_wake_press()) {
                 // On splash: cycle animations. On the usage view: cycle
                 // screen brightness (single non-splash view, no more screens).

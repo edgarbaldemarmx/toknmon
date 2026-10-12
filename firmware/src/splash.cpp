@@ -23,11 +23,15 @@ static inline const splash_anim_def_t* anim_at(int i) {
     if (i < 0 || i >= anim_count()) return NULL;
     return (i < SPLASH_ANIM_COUNT) ? &splash_anims[i] : &custom_anims[i - SPLASH_ANIM_COUNT];
 }
-static const splash_anim_def_t* anim_by_name(const char *n) {
-    if (!n) return NULL;
+static int anim_index_by_name(const char *n) {
+    if (!n) return -1;
     for (int i = 0; i < anim_count(); i++)
-        if (strcmp(anim_at(i)->name, n) == 0) return anim_at(i);
-    return NULL;
+        if (strcmp(anim_at(i)->name, n) == 0) return i;
+    return -1;
+}
+static const splash_anim_def_t* anim_by_name(const char *n) {
+    const int i = anim_index_by_name(n);
+    return (i < 0) ? NULL : anim_at(i);
 }
 
 // 60×60 stage. CELL sized so the canvas fits the smaller display dimension —
@@ -51,10 +55,12 @@ static int  canvas_h  = GRID * 8;
 #define COL_EMPTY    0x0000
 
 LV_FONT_DECLARE(font_styrene_28);
+LV_FONT_DECLARE(font_styrene_20);
 
 static lv_obj_t *splash_container = NULL;
 static lv_obj_t *canvas = NULL;
 static lv_obj_t *label_status = NULL;     // shown only when no animations loaded
+static lv_obj_t *label_provider = NULL;   // mascot mode: provider name, top center
 static uint16_t *canvas_buf = NULL;        // 480x480 RGB565 (PSRAM)
 
 static uint16_t cur_anim = 0;
@@ -116,6 +122,29 @@ static bool     loop_release = false;
 static uint32_t loop_entered_ms = 0;
 static bool     pending_pick = false;   // rotate requested; honor at completion
 #define SCENE_LOOP_MS 6000
+
+// ─── Mascot mode (per-provider play-lists) and the parade ───────────────────
+// The default splash is Claude's: animations come from the usage-rate groups
+// above and the PWR button walks the whole catalog. Mascot mode pins the
+// splash to one provider's play-list instead: entries play in order (intro →
+// loop for SCENE_LOOP_MS → outro, then the next), PWR advances within the
+// list, and the rate-group pick is a no-op. Claude has no list — selecting
+// it (or -1) restores the default behavior, so the boot path is untouched.
+// The parade cycles providers every PARADE_PROVIDER_MS across the fresh
+// slots the UI handed over, each playing its own set.
+#define SET_MAX 4
+static const char* const PROVIDER_SETS[PROVIDER_COUNT][SET_MAX] = {
+    { NULL, NULL, NULL, NULL },                                       // Claude: rate groups
+    { "codex.idle", "codex.dots", "codex.think", "codex.bike" },
+    { "kimi.idle",  "kimi.glow",  "kimi.sleep",  "kimi.bike"  },
+};
+static int      provider_mode = -1;     // -1 = Claude default; else PROVIDER_* with a set
+static uint8_t  set_pos = 0;            // index into PROVIDER_SETS[provider_mode]
+#define PARADE_PROVIDER_MS 20000
+static bool     parade_on = false;
+static bool     parade_fresh[PROVIDER_COUNT] = { false, false, false };
+static int      parade_slot = 0;
+static uint32_t parade_started_ms = 0;
 
 // ─── Walk translation ────────────────────────────────────────────────────────
 // The walk gaits animate in place; screen travel is ours, locked to the feet:
@@ -341,6 +370,8 @@ static void render_frame(const uint8_t *cells, const uint16_t *palette) {
     }
 
     blit_cells(cells, palette, gx0, gy0, gx1, gy1);
+    // The full repaint went straight to the panel, under the LVGL label.
+    if (full && label_provider) lv_obj_invalidate(label_provider);
 
     memcpy(prev_cells, cells, GRID * GRID);
     prev_palette = palette;
@@ -909,6 +940,39 @@ void splash_mascot_set_trips(bool enabled) {
     mas_trips_enabled = enabled;
 }
 
+// Start entry `pos` of the active provider set on the stage (frame 0 drawn
+// now; the direct path defers while hidden). A name missing from the catalog
+// is skipped so a half-compiled set still plays.
+static void set_play(uint8_t pos) {
+    if (provider_mode < 0) return;
+    for (int tries = 0; tries < SET_MAX; tries++) {
+        const uint8_t p = (uint8_t)((pos + tries) % SET_MAX);
+        const char *name = PROVIDER_SETS[provider_mode][p];
+        if (!name) continue;
+        const int idx = anim_index_by_name(name);
+        if (idx < 0) continue;
+        const splash_anim_def_t *a = anim_at(idx);
+        set_pos = p;
+        cur_anim = (uint16_t)idx;
+        cur_frame = 0;
+        frame_started_ms = millis();
+        last_pick_ms = frame_started_ms;
+        anim_reset(a);
+        render_frame(compose_stage(a, 0), a->palette);
+        return;
+    }
+}
+
+// Next fresh parade slot after `from` in rotation order (wrapping, so a
+// single fresh provider returns itself), or -1 when the mask is empty.
+static int parade_next_slot(int from) {
+    for (int k = 1; k <= PROVIDER_COUNT; k++) {
+        const int i = (from + k) % PROVIDER_COUNT;
+        if (parade_fresh[i]) return i;
+    }
+    return -1;
+}
+
 static void show_placeholder() {
     // Solid dark background + centered status label. On the direct-draw path
     // there's no canvas; the black container is the background and the LVGL
@@ -986,6 +1050,14 @@ void splash_init(lv_obj_t *parent) {
     lv_obj_set_style_text_align(label_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(label_status);
 
+    // Mascot-mode provider label: hidden on Claude's default splash.
+    label_provider = lv_label_create(splash_container);
+    lv_label_set_text(label_provider, "");
+    lv_obj_set_style_text_font(label_provider, &font_styrene_20, 0);
+    lv_obj_set_style_text_color(label_provider, lv_color_hex(0xb0aea5), 0);
+    lv_obj_align(label_provider, LV_ALIGN_TOP_MID, 0, 16);
+    lv_obj_add_flag(label_provider, LV_OBJ_FLAG_HIDDEN);
+
     resolve_group_lists();
 
     if (anim_count() == 0) {
@@ -1023,6 +1095,17 @@ void splash_tick(void) {
 
     if (walk_active) walk_choreo(a);
 
+    // Parade: hand the stage to the next fresh provider on its timer.
+    if (parade_on && now - parade_started_ms >= PARADE_PROVIDER_MS) {
+        parade_started_ms = now;
+        const int nxt = parade_next_slot(parade_slot);
+        if (nxt >= 0 && nxt != parade_slot) {
+            parade_slot = nxt;
+            splash_set_provider(nxt);
+            return;                    // a fresh frame 0 is on the stage
+        }
+    }
+
     // Scenes: hold the loop for SCENE_LOOP_MS, then let the outro play.
     if (!walk_active && in_loop && !loop_release &&
         now - loop_entered_ms >= SCENE_LOOP_MS)
@@ -1030,7 +1113,8 @@ void splash_tick(void) {
 
     // Auto-rotate — never a hard cut. Walkers switch only while standing at
     // home; everything else releases its loop and switches after the outro.
-    if (now - last_pick_ms >= SPLASH_ROTATE_INTERVAL_MS) {
+    // Mascot mode has no rotation timer: the set advances at completion.
+    if (provider_mode < 0 && now - last_pick_ms >= SPLASH_ROTATE_INTERVAL_MS) {
         if (walk_active) {
             if (walk_phase == 0 && pb_done) splash_pick_for_current_rate();
         } else {
@@ -1050,6 +1134,10 @@ void splash_tick(void) {
         next = a->loop_start;
 
     if (next >= a->frame_count) {              // completed the file
+        if (provider_mode >= 0) {              // mascot mode: next set entry
+            set_play((uint8_t)((set_pos + 1) % SET_MAX));
+            return;
+        }
         if (pending_pick) {
             pending_pick = false;
             splash_pick_for_current_rate();
@@ -1089,6 +1177,10 @@ void splash_tick(void) {
 
 void splash_next(void) {
     if (anim_count() == 0) return;
+    if (provider_mode >= 0) {                  // mascot mode: within the set
+        set_play((uint8_t)((set_pos + 1) % SET_MAX));
+        return;
+    }
     cur_anim = (cur_anim + 1) % anim_count();
     cur_frame = 0;
     frame_started_ms = millis();
@@ -1101,6 +1193,7 @@ void splash_next(void) {
 
 void splash_pick_for_current_rate(void) {
     if (anim_count() == 0) return;
+    if (provider_mode >= 0) return;            // mascot mode owns the stage
     int g = usage_rate_group();
     if (g < 0 || g >= GROUP_COUNT) g = 0;
     if (group_size[g] == 0) return;
@@ -1119,10 +1212,53 @@ void splash_pick_for_current_rate(void) {
     render_frame(compose_stage(a, 0), a->palette);
 }
 
+// ─── Mascot mode / parade API ────────────────────────────────────────────────
+void splash_set_provider(int slot) {
+    const bool has_set = slot > 0 && slot < PROVIDER_COUNT && PROVIDER_SETS[slot][0];
+    provider_mode = has_set ? slot : -1;
+    set_pos = 0;
+    if (label_provider) {
+        if (has_set) {
+            lv_label_set_text(label_provider, provider_name(slot));
+            lv_obj_set_style_text_color(label_provider, provider_theme(slot).accent, 0);
+            lv_obj_align(label_provider, LV_ALIGN_TOP_MID, 0, 16);
+            lv_obj_clear_flag(label_provider, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(label_provider);
+        } else {
+            lv_obj_add_flag(label_provider, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (!active) return;                       // splash_show() starts playback
+    if (has_set) set_play(0);
+    else         splash_pick_for_current_rate();
+}
+
+void splash_parade_start(const bool fresh[PROVIDER_COUNT]) {
+    int first = -1;
+    for (int i = 0; i < PROVIDER_COUNT; i++) {
+        parade_fresh[i] = fresh && fresh[i];
+        if (first < 0 && parade_fresh[i]) first = i;
+    }
+    if (first < 0) { parade_on = false; return; }   // nothing fresh: no parade
+    parade_on = true;
+    parade_slot = first;
+    parade_started_ms = millis();
+    splash_set_provider(first);
+}
+
+void splash_parade_stop(void) {
+    parade_on = false;
+}
+
+bool splash_is_parade(void) { return parade_on; }
+
 bool splash_is_active(void) { return active; }
 
 void splash_show(void) {
-    splash_pick_for_current_rate();   // select animation; direct path defers the draw
+    // Select the animation; the direct path defers the draw. Mascot mode
+    // starts its set at the retained position, the default path picks by rate.
+    if (provider_mode >= 0) set_play(set_pos);
+    else                    splash_pick_for_current_rate();
     if (splash_container) lv_obj_clear_flag(splash_container, LV_OBJ_FLAG_HIDDEN);
     active = true;
 #if SPLASH_DIRECT_DRAW

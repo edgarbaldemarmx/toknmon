@@ -30,10 +30,10 @@ Reactive animations by usage state; provider-aware attention mascot (H7).
 `ask-on-risk`. Forecast ~600 authored changed lines (engine ~300, UI ~120, art ~180).
 
 ## Tasks
-- [ ] T1 — Art: `codex.think`, `kimi.sleep` via the grid pipeline; `--verify` strips read clearly. Route: delegated writer.
-- [ ] T2 — Engine: provider sets, `splash_set_provider`, parade rotation, provider label; serial QA commands. Route: same writer.
-- [ ] T3 — UI: long-press → mascot mode; inactivity → parade; touch exits. Route: same writer.
-- [ ] T4 — Verify: sim autoshots of Codex and Kimi full-size (idle/act/bike) and parade handoff; hardware flash + `screen splash codex` / `screen splash kimi` / `parade on` screenshots; commit. Route: writer self-verification + parent spot check.
+- [x] T1 — Art: `codex.think` (8 frames, bright pulse then dim pulse across the dots, hold 180) and `kimi.sleep` (6 frames, eyes closed, two 4x4 "z" glyphs rising and fading, hold 250) via the grid pipeline; `--verify` strips read clearly (the first 3x3 "z" read as an "I" and was replaced). Route: delegated writer (trigger: 2+ non-trivial files, art + engine + UI).
+- [x] T2 — Engine: `PROVIDER_SETS`, `splash_set_provider`, set playback at completion, `splash_next` within the set, rate pick no-op, `styrene_20` provider label, `splash_parade_start/stop/is_parade` with `PARADE_PROVIDER_MS` 20 s; serial `screen splash [claude|codex|kimi]`, `parade on|off`; `screenshot.sh --screen splash:<provider>`; sim `SIM_SPLASH_PROVIDER`, `SIM_PARADE` (ble_sim.cpp, documented in board.h). Route: same writer.
+- [x] T3 — UI: long-press → `ui_show_mascot(visible_slot)`; `ui_show_screen()` resets provider and stops the parade on non-splash screens; `IDLE_PARADE_MS` 5 min `lv_timer`, reset by indev `LV_EVENT_PRESSED` and `ui_note_activity()` from the three button handlers in main.cpp; `ui_parade_start()` builds the fresh mask. Route: same writer.
+- [x] T4 — Verify: sim autoshots (Codex and Kimi idle/dots-glow/think-sleep/bike, parade Claude → Codex → Kimi → Claude, default splash unchanged, inactivity path with a temporarily shortened timer, reverted); hardware flash + `screen splash codex` ×2 / `screen splash kimi` / `parade on` ×2 screenshots. Commit: pending (parent). Route: writer self-verification + parent spot check.
 
 ## Verification
 - `node --test tools/test/`, `node tools/convert_grid_animations.js` (idempotent)
@@ -41,7 +41,14 @@ Reactive animations by usage state; provider-aware attention mascot (H7).
 - Hardware: flash, `screen splash codex` → screenshot; `screen splash kimi` → screenshot; `parade on` → two screenshots 25 s apart show different providers; `screen usage` to finish.
 
 ## Verification evidence
-(pending)
+Scratch: `<scratchpad>/h6/` (PNGs listed below are relative to it).
+- `node --test tools/test/`: 8 tests, 8 pass, 0 fail.
+- `node tools/convert_grid_animations.js` ×3: `custom_animations.h` md5 unchanged across runs (idempotent); `--verify`: `verify/codex_think.png`, `verify/kimi_sleep.png` read as intended.
+- `pio run -e sim`: SUCCESS. Autoshots (`sim/`): `codex-{2000,9000,16000,23000}.png` = idle, dots wave, think (dim pulse), bike with teal "Codex" label; `kimi-{2000,9000,16000,23000}.png` = idle, glow, sleep (z), bike with blue "Kimi" label; `parade-5000.png` Claude (pointing, no label) → `parade-25000.png` Codex → `parade-45000.png` Kimi → `parade-65000.png` Claude walking; `default-3000.png` = official magnifier (boot pick unchanged). `idle-parade-27000.png`: with `IDLE_PARADE_MS` temporarily 5 s and boot on usage, the parade had started and handed off to Codex by 27 s (edits reverted, sim rebuilt).
+- `pio run -e waveshare_amoled_216`: SUCCESS, RAM 33.9%, Flash 65.8% (2199239 bytes).
+- Hardware (`/dev/cu.usbmodem101`, flashed as "ToknMon Desk One", live data at 41 s): `hw-codex-splash.png` (idle), `hw-codex-splash-2.png` (+8 s, dots wave), `hw-kimi-splash.png` (idle), `hw-parade-1.png` (Claude magnifier), `hw-parade-3.png` (+30 s, Codex, with a three-provider payload batch landing at 21 s mid-parade). Labels sit top-center clear of the art; battery icon hidden on the splash as before. Finished on `screen usage`.
+- Anomaly: one earlier parade run came back on the usage screen within 25 s with no serial evidence (no alert line, no command); not reproduced on the rerun. The only firmware paths to usage from the parade are a splash touch or a daemon alert, so a touch on the device is the likely cause. Two parade screenshot transfers also stalled once (serial, transient) and succeeded on retry.
+- `grep -rn "ifdef BOARD_" firmware/src/*.cpp firmware/src/*.h`: only `BOARD_HAS_PSRAM`.
 
 ## Next step
-Launch writer.
+Parent spot check, then the work-unit commit (writer did not commit).

@@ -22,6 +22,17 @@ bool ui_carousel_next(void);
 bool ui_show_slot(int idx);
 void ui_show_screen(screen_t screen);
 void ui_toggle_splash(void);
+// Mascot mode: the splash pinned to one provider's play-list (long-press on
+// the usage view; serial `screen splash <provider>`). A tap returns to usage,
+// which also restores the default Claude splash.
+void ui_show_mascot(int slot);
+// Parade: the splash cycles every fresh provider's mascot, 20 s each. Starts
+// after IDLE_PARADE_MS without input on the usage view, or via serial
+// `parade on`. False when no slot is fresh. Any touch ends it.
+bool ui_parade_start(void);
+// Input bookkeeping for the parade timer. Touches are seen on the input
+// device; main.cpp reports physical button presses through this.
+void ui_note_activity(void);
 screen_t ui_get_current_screen(void);
 void ui_update_ble_status(ble_state_t state, const char* name, const char* mac);
 void ui_update_battery(int percent, bool charging, bool usb_power);  // percent < 0 = no battery

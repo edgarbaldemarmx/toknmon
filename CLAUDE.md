@@ -274,6 +274,29 @@ have no walk gait, so they only ever act in place. The corner buffer is sized
 from the largest frame across all specs at create time and `mas_render()`
 refuses (and logs once) any frame that would not fit.
 
+### Mascot mode and parade (H6)
+
+The default splash is Claude's (rate groups, PWR walks the whole catalog).
+`splash_set_provider(slot)` pins it to one provider's play-list instead
+(`PROVIDER_SETS` in `splash.cpp`: Codex = idle, dots, think, bike; Kimi =
+idle, glow, sleep, bike): entries play in order (intro → loop for
+`SCENE_LOOP_MS` → outro → next), PWR advances within the list, the rate pick
+is a no-op, and a `styrene_20` label in the provider accent names the
+provider top-center. Claude or `-1` restores the default — the boot path
+never calls it. The UI opens mascot mode on a long-press of the usage view
+(`ui_show_mascot(visible_slot)`); any tap goes back to usage, and
+`ui_show_screen()` resets the provider and stops the parade on every
+non-splash screen. The parade (`splash_parade_start(fresh[])`) rotates the
+fresh slots every `PARADE_PROVIDER_MS` (20 s), Claude included with its
+rate-group pick; `ui_parade_start()` builds the mask and runs after
+`IDLE_PARADE_MS` (5 min) without input on the usage view — touches reset the
+timer through an indev `LV_EVENT_PRESSED` callback, buttons through
+`ui_note_activity()` from `main.cpp`. QA without hands: serial `screen splash
+codex|kimi|claude` and `parade on|off` (`./screenshot.sh out.png [port]
+--screen splash:codex`); in the sim, `SIM_SPLASH_PROVIDER=codex` and
+`SIM_PARADE=1` (the parade needs fresh slots, so pair it with a
+multi-provider scenario via `SIM_SCENARIO`).
+
 
 ## User profile / preferences
 

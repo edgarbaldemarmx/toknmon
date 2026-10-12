@@ -6,6 +6,7 @@
 // it (same main-loop pass), mirroring the daemon's back-to-back provider
 // writes, so the RX-queue draining path is exercised in the sim too.
 #include "../../ble.h"
+#include "../../ui.h"
 #include "sim_platform.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -114,7 +115,29 @@ void ble_init(void) {
     refresh_title();
 }
 
+// Headless QA hooks (see board.h): SIM_SPLASH_PROVIDER=claude|codex|kimi
+// opens mascot mode for that provider, SIM_PARADE=1 starts the parade. They
+// make the same calls as the serial `screen splash <p>` / `parade on`
+// commands, once the first scenario payloads have landed (the parade needs a
+// fresh slot, so it keeps trying until one is).
+static void apply_env_hooks(void) {
+    static bool done = false;
+    if (done || millis() < 1000) return;
+    const char* parade = getenv("SIM_PARADE");
+    if (parade && atoi(parade) > 0) {
+        done = ui_parade_start();
+        return;
+    }
+    done = true;
+    const char* prov = getenv("SIM_SPLASH_PROVIDER");
+    if (!prov) return;
+    for (int i = 0; i < PROVIDER_COUNT; i++)
+        if (strcmp(prov, provider_short(i)) == 0) { ui_show_mascot(i); return; }
+    printf("[sim] SIM_SPLASH_PROVIDER=%s: unknown provider (claude|codex|kimi)\n", prov);
+}
+
 void ble_tick(void) {
+    apply_env_hooks();
     if (!connected || q_count > 0 || !playing || n_states == 0) return;
     if (millis() - delivered_ms >= states[cur].hold_ms) {
         cur = (cur + 1) % n_states;

@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <lvgl.h>
+#include "data.h"
 
 // Initialize splash module. Creates the canvas widget inside `parent` and
 // allocates the 480x480 pixel buffer (PSRAM).
@@ -23,6 +24,19 @@ void splash_pick_for_current_rate(void);
 
 // True when splash is currently rendering (used to gate re-picks).
 bool splash_is_active(void);
+
+// Mascot mode: pin the splash to one provider's play-list (PROVIDER_* in
+// data.h). Codex and Kimi cycle their own sets (idle, acts, bike) with a
+// small provider label on top; PWR advances within the set. Claude or -1
+// restores the default rate-group splash (the boot path). Takes effect on
+// the next splash_show() when the splash is hidden.
+void splash_set_provider(int slot);
+// Parade: rotate the stage across the fresh provider slots every
+// PARADE_PROVIDER_MS, each playing its own set (Claude uses its rate groups).
+// Does nothing when no slot is fresh. The UI stops it on any touch.
+void splash_parade_start(const bool fresh[PROVIDER_COUNT]);
+void splash_parade_stop(void);
+bool splash_is_parade(void);
 
 // Root container (so ui.cpp can attach a click event).
 lv_obj_t* splash_get_root(void);
