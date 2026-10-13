@@ -9,6 +9,20 @@ H0–H8); the entries below summarize them.
 
 ## [Unreleased]
 
+### Added
+
+- `tools/check_pii.sh` scans every tracked file for personal or hardware
+  identifiers (home paths, hostnames, e-mail addresses, non-documentation MAC
+  addresses, credential-looking strings, scratch paths) and runs in CI as the
+  `pii-check` job.
+
+### Changed
+
+- `screenshot.sh` retries a stalled transfer up to three times and accepts
+  `--screen usage:<provider>`; `install-mac.sh` uses `launchctl bootout` /
+  `bootstrap` with a documented fallback; `flash-mac.sh` prints usage and a
+  hint when called without arguments.
+
 ## [0.1.0] — 2026-10-12
 
 First public release of the fork. Everything below is relative to upstream

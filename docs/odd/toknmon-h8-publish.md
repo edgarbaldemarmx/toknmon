@@ -119,5 +119,17 @@ Findings from a clean README walkthrough on a fresh user account, all reproduced
 
 Checks: `bash -n screenshot.sh install-mac.sh flash-mac.sh` OK; `tools/test/shell/test_device_name_validator.sh` → `All device-name validator tests passed.`; link check → `checked 91 local links in 15 files; missing: 0`; `grep -n 'load -w\|unload' install-mac.sh docs/install-macos.md README.md` → only the documented fallback branch and its note. Not run: launchd commands, flashing (out of the writer's surface).
 
+### Publish and privacy remediation evidence (T5, parent, 2026-10-12)
+- Repo created as an independent repository (not a GitHub fork) at `edgarbaldemarmx/toknmon`; `upstream` remote kept at `HermannBjorgvin/Clawdmeter` for cherry-picking fixes. `gh` account switched to `edgarbaldemarmx` only around GitHub operations; the active account stays `erps90`.
+- First CI run failed with "workflow file issue": job id `firmware-2.16` (dots are not allowed) → `firmware-amoled-216` (06517bc). Actions bumped to current majors (7ab176b); Dependabot PRs superseded.
+- First-user walkthrough from a clean clone in `~/Downloads/toknmon` (writer F findings above, 11698a3). The launchd agent `com.toknmon.daemon` now runs from that clone.
+- Privacy audit by a Kimi K3 agent (Herdr pane, report kept locally in `/tmp/toknmon-audit.md`): the published tree and history still carried the author's home paths, hostname and scratch paths from `docs/odd/` and tests. Remediation: `tools/check_pii.sh` scanning every tracked file (home paths, hostnames, e-mails, non-doc MAC addresses, credential-looking strings, scratch paths; placeholders allow-listed) wired as CI job `pii-check` (00c43b1); history rewritten with `git filter-repo --refs 1f446fd..main --replace-text`; finally the GitHub repo was deleted by the author and recreated from the clean tree so no scrubbed objects remain reachable.
+- `pii-check` failed on Linux only: GNU grep honours `\b` inside the MAC pattern while macOS grep does not → portable pattern plus allow-listed placeholders (edfa4ce). CI run 38311439337 green on all five jobs.
+- `gh repo create --source . --remote origin --push` printed "Unable to add remote origin" because the remote already existed and silently skipped the push; pushed with `git push -u origin main` and verified `git ls-remote origin main` = `edfa4ce` in both the dev tree and `~/Downloads/toknmon`.
+- Lesson recorded: before any push run `tools/check_pii.sh`; after `gh repo create --push` verify `git ls-remote`.
+
+## Status
+H0–H8 complete and published; `main` = `edfa4ce` on `edgarbaldemarmx/toknmon`, CI green, working trees clean. Release 0.1.0 is the CHANGELOG entry; no git tag has been created yet (owner's decision).
+
 ## Next step
-Parent: spot-check T3 (README render, one doc), commit the T3 work unit (`docs: publish ToknMon README, guides, license and changelog`), then T5 (author rewrite, repo creation, push with user confirmation, daemon reinstall).
+To resume: `git pull`, read `CLAUDE.md`, this file and `CHANGELOG.md`, then run `daemon/.venv/bin/python -m pytest daemon/tests -q` and `node --test tools/test/` as the baseline. Candidate H9 backlog (not authorized yet): more subscriptions through `daemon/providers/` (`ProviderResult`, `detect()`, label-keyed `to_payload`), reactive animations tied to usage, provider-aware attention mascot, daemon heartbeat on the device, Kimi CLI vs daemon refresh-token coexistence check, optional `v0.1.0` tag and GitHub release with the firmware artifact.
