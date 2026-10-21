@@ -24,7 +24,7 @@
 //
 // Headless / CI: SDL_VIDEODRIVER=dummy SIM_AUTOSHOT_MS=<ms> saves a
 // screenshot (SIM_AUTOSHOT_PATH, default sim-autoshot.bmp) after <ms> and
-// exits. SIM_SPLASH_PROVIDER=claude|codex|kimi opens mascot mode for that
+// exits. SIM_SPLASH_PROVIDER=claude|codex|kimi|grok opens mascot mode for that
 // provider at ~1 s; SIM_PARADE=1 starts the mascot parade as soon as a
 // provider slot is fresh (pair it with a multi-provider scenario to see the
 // hand-off). Both do what the serial `screen splash <p>` / `parade on`

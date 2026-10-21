@@ -28,7 +28,7 @@ void splash_pick_for_current_rate(void);
 bool splash_is_active(void);
 
 // Mascot mode: pin the splash to one provider's play-list (PROVIDER_* in
-// data.h). Codex and Kimi cycle their own sets (idle, acts, bike) with a
+// data.h). Codex, Kimi and Grok cycle their own sets (idle, acts, bike) with a
 // small provider label on top; PWR advances within the set. Claude or -1
 // restores the default rate-group splash (the boot path). Takes effect on
 // the next splash_show() when the splash is hidden.
@@ -62,8 +62,9 @@ void splash_mascot_set_visible(bool v);
 // PSRAM mascot.
 void splash_mascot_attention(bool on);
 // Swap the corner mascot for the given provider slot (PROVIDER_* in data.h):
-// Clawd for Claude, the dots for Codex, the moon for Kimi. Called by the UI
-// whenever the carousel changes slot. No-op without the PSRAM mascot.
+// Clawd for Claude, the dots for Codex, the moon for Kimi, the ringed orb for
+// Grok. Called by the UI whenever the carousel changes slot. No-op without
+// the PSRAM mascot.
 void splash_mascot_set_provider(int slot);
 // Allow or pause the walk-off / lurk / walk-back trips (the full-size lurk
 // crosses the panel area). Acts in place keep playing either way.

@@ -56,7 +56,7 @@ daemon payload plus two optional keys:
 Lines starting with `#` are comments. Every other line is one daemon payload
 exactly as the host daemon would write it over BLE: the quota fields (`s`,
 `sr`, `w`, `wr`, `st`, `ok`, `t`, `tf`, …) plus `p` for the provider
-(`claude` when absent, `codex`, `kimi`) so multi-provider scenarios can fill
+(`claude` when absent, `codex`, `kimi`, `grok`) so multi-provider scenarios can fill
 several carousel slots. The sim's `ble_sim.cpp` hands each line to the same
 JSON parser the firmware uses on hardware; there is no separate session
 channel.
@@ -71,7 +71,7 @@ a small built-in state list is used.
 | `SIM_SCENARIO=<path>` | scenario file to play instead of `sim/scenario.jsonl` |
 | `SIM_AUTOSHOT_MS=<ms>` | headless hook: save a screenshot after `<ms>` and exit |
 | `SIM_AUTOSHOT_PATH=<file>` | where the autoshot BMP goes (default `sim-autoshot.bmp`) |
-| `SIM_SPLASH_PROVIDER=claude\|codex\|kimi` | open mascot mode for that provider once the first payloads land (same as serial `screen splash <p>`) |
+| `SIM_SPLASH_PROVIDER=claude\|codex\|kimi\|grok` | open mascot mode for that provider once the first payloads land (same as serial `screen splash <p>`) |
 | `SIM_PARADE=1` | start the ambient parade once a fresh slot exists (same as serial `parade on`); pair it with a multi-provider scenario |
 | `SIM_NO_BATTERY=1` | start in "USB power only" mode (plug-zap icon) |
 | `SDL_VIDEODRIVER=dummy` | SDL's own switch: render off-screen, for CI and headless captures |

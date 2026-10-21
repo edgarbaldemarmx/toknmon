@@ -17,7 +17,7 @@ firmware/
     theme.h                 palettes per provider
     data.h                  UsageData slots
     splash_animations.h     generated: official Clawd set
-    custom_animations.h     generated: Codex/Kimi grids
+    custom_animations.h     generated: Codex/Kimi/Grok grids
     font_*.c, icons.h, logo.h
     hal/                    board-agnostic interfaces
     boards/<name>/          one folder per board (display, touch, input, power, imu, caps)
@@ -25,7 +25,7 @@ firmware/
   sim/                      scenario.jsonl (dev), gallery.jsonl (docs captures)
 daemon/
   claude_usage_daemon.py    macOS daemon (bleak); poll loop, config, BLE, HID fallback, stale-bond repair
-  providers/                claude.py, codex.py, kimi.py, base.py (ProviderResult → payload)
+  providers/                claude.py, codex.py, kimi.py, grok.py, base.py (ProviderResult → payload)
   com.toknmon.daemon.plist  launchd template
   requirements-macos.txt
   tests/                    pytest suite (fixtures under tests/fixtures)

@@ -55,6 +55,9 @@ through the whole catalog, custom animations included (`claude.bike`).
   and reset time, a compact 5h bar only if the plan reports one; the three
   dots in the corner.
 - **Kimi**: Current and Weekly bars in blue; the moon in the corner.
+- **Grok**: the same 10×10 dot grid as Codex, filled to the weekly (or
+  monthly) credit percentage, in silver; Grok has no 5-hour window, so there
+  is never a 5h row. The ringed orb sits in the corner.
 - **Carousel**: with two or more providers fresh, the meter rotates every
   8 s; the provider name sits in the title in its accent color. A slot is
   fresh for 90 s after its last payload; stale slots are skipped. The status
@@ -72,7 +75,7 @@ through the whole catalog, custom animations included (`claude.bike`).
 Long-press the meter to pin the splash to the provider on screen. The
 provider's full-size set plays in order: for Codex idle → dots → think → bike
 → scene *wave* → scene *rain*; for Kimi idle → glow → sleep → bike → scene
-*night* → scene *orbit*; Claude keeps the official set. Each entry plays
+*night* → scene *orbit*; for Grok idle → spin → bike; Claude keeps the official set. Each entry plays
 intro → loop (6 s) → outro, then the next; a tap, a horizontal swipe or PWR
 steps manually. The provider name shows top-center in its accent (Claude has
 no label, to keep the official look). Swipe vertically to return to the meter.
@@ -80,8 +83,8 @@ no label, to keep the official look). Swipe vertically to return to the meter.
 ### Parade
 
 In the parade every provider with live data gets **20 s** of full-size
-mascot in turn, Claude with its rate-group pick, Codex and Kimi with their
-sets. Taps step the current animation; the rotation keeps going. A vertical
+mascot in turn, Claude with its rate-group pick, Codex, Kimi and Grok with
+their sets. Taps step the current animation; the rotation keeps going. A vertical
 swipe returns to the meter and stops it. The parade never starts on its own:
 the meter stays on screen until you touch it. Start it with the serial
 command `parade on`.
@@ -103,8 +106,8 @@ Open the USB serial console at **115200 baud**
 | `name <text>` | set the name (1–18 printable ASCII, no `#`) and reboot | `BLE: name set to "<text>", restarting` |
 | `screen usage` | show the meter | `ok` |
 | `screen splash` | show the default (Claude) splash | `ok` |
-| `screen splash claude\|codex\|kimi` | mascot mode for that provider | `ok` / `err …` |
-| `slot 0-2` | show that provider's slot on the meter (0 Claude, 1 Codex, 2 Kimi) | `ok` / `err slot not fresh` |
+| `screen splash claude\|codex\|kimi\|grok` | mascot mode for that provider | `ok` / `err …` |
+| `slot 0-3` | show that provider's slot on the meter (0 Claude, 1 Codex, 2 Kimi, 3 Grok) | `ok` / `err slot not fresh` |
 | `next` | page the carousel | `ok` / `err need usage view with 2+ fresh slots` |
 | `splash next` / `splash prev` | step the animation (splash on screen) | `ok` / `err splash not on screen` |
 | `swipe up\|down\|left\|right` | inject a gesture through the same handlers as touch | `ok` |
@@ -120,7 +123,7 @@ Screenshots without touching the board:
 ./screenshot.sh out.png [port] --screen splash:codex    # mascot mode for Codex, then capture
 ```
 
-`usage:claude|codex|kimi` sends `screen usage` and then `slot 0|1|2`. The raw
+`usage:claude|codex|kimi|grok` sends `screen usage` and then `slot 0|1|2|3`. The raw
 dump can stall while the board logs BLE traffic, so the script retries the
 whole capture up to 3 times (`retrying (n/3)`) and exits non-zero only after
 the last failure.

@@ -6,7 +6,7 @@ corner mascots:
 | Catalog | Source | Generated header | Redistributed? |
 | --- | --- | --- | --- |
 | **Official Clawd set** (17 animations: core poses and persona scenes) | Anthropic's GIF/Lottie assets, fetched on demand | `firmware/src/splash_animations.h` | the header ships; the sources are not committed (see `NOTICE.md`) |
-| **Custom grid animations** (13: Codex and Kimi mascots, scenes, the three bikes) | hand-authored text grids in `assets/animations/` | `firmware/src/custom_animations.h` | yes, original art (MIT) |
+| **Custom grid animations** (16: Codex, Kimi and Grok mascots, scenes, the four bikes) | hand-authored text grids in `assets/animations/` | `firmware/src/custom_animations.h` | yes, original art (MIT) |
 
 Both headers are generated: do not hand-edit them. The engine treats the two
 tables as one catalog (`anim_count()` / `anim_at()`), so a custom animation
@@ -70,7 +70,9 @@ Two things to keep in mind:
 
 - **Index 0 is opaque black on the full splash but transparent on the corner
   mascot.** Use `#141413` for visible ink; the bikes use ivory metal because a
-  dark frame vanished on the splash.
+  dark frame vanished on the splash. A large dark body needs a visible color
+  and an outline: the Grok orb's core is slate `#2B2F36` inside a violet rim,
+  because `#141413` would read as a hole on the black panel.
 - **Keep idle and act files of one mascot at the same left edge (`origin_x`)
   and the same crop height.** The corner mascot is bottom-left anchored and
   ignores `origin`, so a different crop would make the character jump
@@ -97,7 +99,7 @@ Everything is looked up **by name** in `firmware/src/splash.cpp`:
 
 | Where | What it controls |
 | --- | --- |
-| `MASCOT_SPECS[provider]` | the corner mascot: `idle`, optional walk gait, `acts[]` per usage-rate group, `lurk`. Codex and Kimi have no walk gait, so they act in place. |
+| `MASCOT_SPECS[provider]` | the corner mascot: `idle`, optional walk gait, `acts[]` per usage-rate group, `lurk`. Codex, Kimi and Grok have no walk gait, so they act in place. |
 | `PROVIDER_SETS[provider]` | the mascot-mode play-list (idle, acts, bike, scenes) used by long-press, the parade and `screen splash <provider>`. A name missing from the catalog is skipped and logged once. |
 | `GROUP_NAMES` | the mood groups the default Claude splash picks from by usage rate (`claude.bike` lives in the busy groups). |
 

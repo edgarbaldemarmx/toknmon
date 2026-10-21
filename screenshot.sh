@@ -1,12 +1,12 @@
 #!/bin/bash
 # Take a screenshot from the Waveshare AMOLED display via LVGL snapshot.
 # Usage: ./screenshot.sh [output.png] [port] [--screen <name>]
-#   <name>: usage | usage:claude | usage:codex | usage:kimi
-#           splash | splash:claude | splash:codex | splash:kimi
+#   <name>: usage | usage:claude | usage:codex | usage:kimi | usage:grok
+#           splash | splash:claude | splash:codex | splash:kimi | splash:grok
 # Default port: /dev/cu.usbmodem101 on macOS, /dev/ttyACM0 on Linux.
 # --screen sends the firmware's `screen <name>` serial command first, waits
 # 300 ms for the redraw, then captures — no button press needed.
-# `usage:<provider>` sends `screen usage` and then `slot 0|1|2` so the meter
+# `usage:<provider>` sends `screen usage` and then `slot 0|1|2|3` so the meter
 # shows that provider (the slot must hold fresh data). `splash:<provider>`
 # opens mascot mode for that provider; bare `splash` is the default Claude
 # splash. The colon stands in for the space in the serial command, so no
@@ -24,13 +24,14 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --screen)
             case "$2" in
-                usage|splash|splash:claude|splash:codex|splash:kimi)
+                usage|splash|splash:claude|splash:codex|splash:kimi|splash:grok)
                     SCREEN="${2/:/ }" ;;
                 usage:claude) SCREEN="usage"; SLOT=0 ;;
                 usage:codex)  SCREEN="usage"; SLOT=1 ;;
                 usage:kimi)   SCREEN="usage"; SLOT=2 ;;
+                usage:grok)   SCREEN="usage"; SLOT=3 ;;
                 *)
-                    echo "Usage: --screen usage|usage:claude|usage:codex|usage:kimi|splash|splash:claude|splash:codex|splash:kimi" >&2
+                    echo "Usage: --screen usage|usage:claude|usage:codex|usage:kimi|usage:grok|splash|splash:claude|splash:codex|splash:kimi|splash:grok" >&2
                     exit 2 ;;
             esac
             shift 2 ;;

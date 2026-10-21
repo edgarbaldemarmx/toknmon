@@ -3,11 +3,12 @@
 
 // Provider slots. The daemon tags each payload with "p" (missing ⇒ claude);
 // the firmware keeps one UsageData per provider and shows them as a carousel.
-#define PROVIDER_COUNT 3
+#define PROVIDER_COUNT 4
 enum provider_t {
     PROVIDER_CLAUDE = 0,
     PROVIDER_CODEX  = 1,
     PROVIDER_KIMI   = 2,
+    PROVIDER_GROK   = 3,
 };
 
 // Display name ("Claude") and wire id ("claude", the value of the payload's
@@ -16,6 +17,7 @@ static inline const char* provider_name(int i) {
     switch (i) {
     case PROVIDER_CODEX: return "Codex";
     case PROVIDER_KIMI:  return "Kimi";
+    case PROVIDER_GROK:  return "Grok";
     default:             return "Claude";
     }
 }
@@ -23,6 +25,7 @@ static inline const char* provider_short(int i) {
     switch (i) {
     case PROVIDER_CODEX: return "codex";
     case PROVIDER_KIMI:  return "kimi";
+    case PROVIDER_GROK:  return "grok";
     default:             return "claude";
     }
 }
@@ -30,7 +33,8 @@ static inline const char* provider_short(int i) {
 struct UsageData {
     uint8_t provider;        // PROVIDER_* slot this payload belongs to
     // Window presence: the payload carried the "s" / "w" key. A missing key
-    // means the plan has no such window (e.g. weekly-only Codex plans), so
+    // means the plan has no such window (e.g. weekly-only Codex plans and
+    // Grok, which only has a weekly or monthly credit window), so
     // the UI omits that bar instead of drawing an empty one. Claude payloads
     // always carry both.
     bool has_session;

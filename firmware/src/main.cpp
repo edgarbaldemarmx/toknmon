@@ -292,9 +292,9 @@ static void set_device_name(char* text) {
     ESP.restart();
 }
 
-// Hands-free QA: `screen usage|splash [claude|codex|kimi]` (a provider name
+// Hands-free QA: `screen usage|splash [claude|codex|kimi|grok]` (a provider name
 // opens mascot mode for it; bare `splash` is the default Claude splash),
-// `parade on|off`, `next` (page the carousel like a tap), `slot <0-2>` (show
+// `parade on|off`, `next` (page the carousel like a tap), `slot <0-3>` (show
 // that provider slot if fresh), `splash next|prev` (step the splash like a
 // tap / horizontal swipe), `swipe up|down|left|right` (the touch gesture
 // handler). Reply `ok` / `err <why>`.
@@ -316,7 +316,7 @@ static void cmd_screen(const char* arg) {
                 return;
             }
         }
-        qa_reply(false, "unknown provider (claude|codex|kimi)");
+        qa_reply(false, "unknown provider (claude|codex|kimi|grok)");
     }
     else                                   qa_reply(false, "unknown screen (usage|splash [provider])");
 }
@@ -331,7 +331,7 @@ static void cmd_slot(const char* arg) {
     char* end = NULL;
     long idx = strtol(arg, &end, 10);
     if (end == arg || *end != '\0' || idx < 0 || idx >= PROVIDER_COUNT) {
-        qa_reply(false, "slot must be 0-2");
+        qa_reply(false, "slot must be 0-3");
         return;
     }
     qa_reply(ui_show_slot((int)idx), "slot not fresh");

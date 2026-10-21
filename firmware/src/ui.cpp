@@ -286,14 +286,14 @@ static lv_obj_t* panel_weekly = nullptr;
 static lv_obj_t* panel_third = nullptr;
 // Usage layouts. BARS is the historical two-panel view, DENSE stacks three
 // panels when the visible slot carries a third bar (Claude only), DOTS is
-// the Codex view: a 10×10 dot grid for the weekly window plus an optional
+// the Codex and Grok view: a 10×10 dot grid for the weekly window plus an optional
 // compact 5h bar. See apply_usage_layout().
 enum usage_layout_t { LAYOUT_BARS, LAYOUT_DENSE, LAYOUT_DOTS };
 static usage_layout_t layout_mode = LAYOUT_BARS;
 // Dot grid (LAYOUT_DOTS). The 10×10 dots are drawn into one canvas whose
 // pixel buffer lives in PSRAM (100 separate objects would overflow the
 // 64 KB LVGL pool through their draw tasks alone). The C6 boards have no
-// PSRAM to spare for the buffer, so there the Codex slot keeps the bar layout.
+// PSRAM to spare for the buffer, so there Codex and Grok keep the bar layout.
 #ifdef BOARD_HAS_PSRAM
 static const bool DOTS_AVAILABLE = true;
 #else
@@ -635,7 +635,7 @@ static void build_idle_group(lv_obj_t* parent) {
     lv_obj_add_flag(idle_group, LV_OBJ_FLAG_HIDDEN);  // update_view_state decides
 }
 
-// Codex dot grid (LAYOUT_DOTS). Everything lives in one transparent container
+// Codex / Grok dot grid (LAYOUT_DOTS). Everything lives in one transparent container
 // so the layout switch is a single show/hide. Objects are created once here;
 // layout_dots() places them and show_slot() recolors the dots.
 static void build_dots_group(lv_obj_t* parent) {
@@ -1008,6 +1008,7 @@ static void refresh_title(void) {
         lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
         lv_label_set_text(lbl_provider_pill, provider_name(visible_slot));
         lv_obj_set_style_bg_color(lbl_provider_pill, provider_color(visible_slot), 0);
+        lv_obj_set_style_text_color(lbl_provider_pill, provider_theme(visible_slot).pill_text, 0);
         clock_last_min = -1;   // force the clock tick to rewrite + re-layout the title
     } else if (data_received) {
         lv_label_set_text(lbl_title, provider_name(visible_slot));
@@ -1085,14 +1086,16 @@ static void apply_usage_layout(usage_layout_t mode) {
 }
 
 // Which layout a slot's payload wants. Dense is Claude-only (the third,
-// model-scoped bar); dots is Codex-only and needs the dot objects.
+// model-scoped bar); dots is for Codex and Grok (weekly-first plans) and
+// needs the dot objects.
 static usage_layout_t layout_for(int idx, const UsageData* data) {
-    if (idx == PROVIDER_CODEX && DOTS_AVAILABLE && dots_group) return LAYOUT_DOTS;
+    const bool dots_provider = (idx == PROVIDER_CODEX || idx == PROVIDER_GROK);
+    if (dots_provider && DOTS_AVAILABLE && dots_group) return LAYOUT_DOTS;
     if (data->has_third) return LAYOUT_DENSE;
     return LAYOUT_BARS;
 }
 
-// Render a Codex payload into the dots view: weekly % as filled dots (one
+// Render a Codex or Grok payload into the dots view: weekly % as filled dots (one
 // per percent, left→right then top→bottom), plus the compact 5h row when
 // the plan has a session window.
 static void render_dots(int idx, const UsageData* data) {

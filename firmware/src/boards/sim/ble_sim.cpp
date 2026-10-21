@@ -115,7 +115,7 @@ void ble_init(void) {
     refresh_title();
 }
 
-// Headless QA hooks (see board.h): SIM_SPLASH_PROVIDER=claude|codex|kimi
+// Headless QA hooks (see board.h): SIM_SPLASH_PROVIDER=claude|codex|kimi|grok
 // opens mascot mode for that provider, SIM_PARADE=1 starts the parade. They
 // make the same calls as the serial `screen splash <p>` / `parade on`
 // commands, once the first scenario payloads have landed (the parade needs a
@@ -133,7 +133,7 @@ static void apply_env_hooks(void) {
     if (!prov) return;
     for (int i = 0; i < PROVIDER_COUNT; i++)
         if (strcmp(prov, provider_short(i)) == 0) { ui_show_mascot(i); return; }
-    printf("[sim] SIM_SPLASH_PROVIDER=%s: unknown provider (claude|codex|kimi)\n", prov);
+    printf("[sim] SIM_SPLASH_PROVIDER=%s: unknown provider (claude|codex|kimi|grok)\n", prov);
 }
 
 void ble_tick(void) {

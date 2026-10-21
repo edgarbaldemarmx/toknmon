@@ -1,13 +1,14 @@
 # Gallery scenario for tools/make_gallery.sh — deterministic, synthetic data only.
-# All three providers land in the first main-loop pass ("hold_ms":0 chains the lines).
+# All four providers land in the first main-loop pass ("hold_ms":0 chains the lines).
 # Line 1 carries an alert ("m") because the sim boots on the splash and the SDL dummy
 # driver has no touch: ui_show_alert() is the only data-driven path into the usage view.
 # Line 2 clears it ("x") and re-renders Claude, so the status line is clean again.
-# The carousel then rotates Claude -> Codex -> Kimi every CAROUSEL_MS (8 s): capture at
-# ~4 s / ~12 s / ~20 s. The last hold keeps the loop from wrapping (and re-firing the
+# The carousel then rotates Claude -> Codex -> Kimi -> Grok every CAROUSEL_MS (8 s): capture
+# at ~4 s / ~12 s / ~20 s / ~28 s. The last hold keeps the loop from wrapping (and re-firing the
 # alert) before the longest autoshot exits. SIM_SPLASH_PROVIDER / SIM_PARADE apply at ~1 s
 # on top of the same data for the mascot, scene, and parade shots.
 {"name":"claude + fable (alert opens usage)","hold_ms":0,"p":"claude","s":17.0,"sr":110,"w":73.0,"wr":860,"f":41.0,"fr":860,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24,"m":"gallery"}
 {"name":"claude + fable (3 bars)","hold_ms":0,"p":"claude","s":17.0,"sr":110,"w":73.0,"wr":860,"f":41.0,"fr":860,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24,"x":true}
 {"name":"codex (weekly only, dot grid)","hold_ms":0,"p":"codex","w":54,"wr":9400,"st":"allowed","ok":true,"t":1785474000,"tf":24}
-{"name":"kimi","hold_ms":600000,"p":"kimi","s":3.0,"sr":200,"w":9.0,"wr":6000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+{"name":"kimi","hold_ms":0,"p":"kimi","s":3.0,"sr":200,"w":9.0,"wr":6000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+{"name":"grok (weekly credits, dot grid)","hold_ms":600000,"p":"grok","w":5,"wr":8400,"st":"allowed","ok":true,"t":1785474000,"tf":24}

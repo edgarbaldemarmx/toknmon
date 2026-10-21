@@ -44,7 +44,7 @@ node --test test/                            # converter unit tests
 bash test/shell/test_device_name_validator.sh   # install-mac.sh / flash-mac.sh name validator
 ```
 
-Hand-authored provider mascots (Codex, Kimi) live as text grids under
+Hand-authored provider mascots (Codex, Kimi, Grok) live as text grids under
 `assets/animations/`; the format and rules are documented in
 `docs/animations.md` and `CLAUDE.md` ("Custom animations"). `--gif` writes
 `<name>.gif` per animation, byte-deterministic between runs; the committed
