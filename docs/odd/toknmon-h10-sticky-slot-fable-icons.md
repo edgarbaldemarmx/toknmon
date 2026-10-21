@@ -24,7 +24,7 @@ Objective: the usage view stays on the slot the user picked, Claude's model-scop
 
 | ID | Specs | Route | Status | Commit |
 | --- | --- | --- | --- | --- |
-| T1 | S1 | inline | done | `e68dbda`, `0484385` |
+| T1 | S1 | inline | done | `e68dbda`, `0484385`, review fix (see L8) |
 | T2 | S2 | inline (after T1, same `ui.cpp`) | done | `7a3ef70` |
 | T3 | S3 | delegated writer (parallelism with T1/T2; disjoint surface: assets, `splash.cpp`, generated header) | done | `d37c217` |
 | T4 | shared docs (README, CLAUDE.md, CHANGELOG), seam check, flash, delivery | inline | done (push pending user confirmation) | `94bc2de` |
@@ -40,3 +40,4 @@ Route evidence: T3 is an independent art unit (three grids, several hundred line
 - **L5** T2 evidence: daemon RED 4 failed (`fl` missing / overflow drop order), GREEN 294 passed, 2 skipped. Hardware screenshots: Claude two full-size bars; Fable view with the 10×10 Clawd grid, "Weekly" pill and reset countdown (label "Fable" because the installed daemon on `main` does not send `fl` yet).
 - **L6** T3 evidence (delegated writer): `codex.icon` 24×18, `kimi.icon` 21×18, `grok.icon` 18×18 cells, frame 0 held 2400 ms then a 140 ms blink; `splash_step()` skips `*.icon`; hardware screenshots of the Codex and Kimi corners.
 - **L7** Seam check on `0484385`'s tree: `node --test tools/test/` 10 pass; daemon 294 passed, 2 skipped; builds sim, `waveshare_amoled_216` (flash ~70.1 %) and `waveshare_amoled_216_c6` SUCCESS; gallery 16 screens, 21 GIFs. Board flashed with this build.
+- **L8** Native review `review-827090f74522a184` (risk, readability, reliability) over `006d0eb..27de54c`: approved and acknowledged (authority burned). Advisory R3-stale-pick-stuck (`ui.cpp:1277`) was a real H10 regression: paging required 2+ fresh views, which was safe while a stale view auto-jumped away, but with a sticky pick a stale view plus one live view left tap → splash and swipe / `next` refused. Fixed with `can_page()` (another fresh view exists); `next`'s error now reads "need usage view and another fresh view". No headless harness drives staleness plus a tap (sim has no serial or touch, staleness takes 90 s), so the check is builds (sim, 2.16, C6 SUCCESS) and hardware paging with all views fresh: `next` → view 4 (Fable) → view 1 (Codex), `slot 0` back to Claude. Other advisories (slot command comment, view/slot naming, no sticky tests) left as follow-ups.
