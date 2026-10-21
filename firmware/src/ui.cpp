@@ -1254,6 +1254,7 @@ static void pick_slot(int idx) {
     prefs.begin(UI_SLOT_NVS_NAMESPACE, false);
     prefs.putUChar(UI_SLOT_NVS_KEY, (uint8_t)idx);
     prefs.end();
+    Serial.printf("UI: picked view %d\n", idx);
 }
 
 static int load_picked_slot(void) {
@@ -1261,6 +1262,7 @@ static int load_picked_slot(void) {
     prefs.begin(UI_SLOT_NVS_NAMESPACE, true);
     int idx = prefs.getUChar(UI_SLOT_NVS_KEY, PROVIDER_CLAUDE);
     prefs.end();
+    Serial.printf("UI: restored picked view %d\n", idx);
     return (idx >= 0 && idx < UI_VIEW_COUNT) ? idx : PROVIDER_CLAUDE;
 }
 
