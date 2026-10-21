@@ -2,13 +2,13 @@
 
 **ToknMon** is a desk-side usage monitor for AI coding assistants: an ESP32-S3
 board with a small AMOLED shows the rate-limit windows of Claude Code, OpenAI
-Codex CLI and Kimi Code side by side (carousel, per-provider mascots and
+Codex CLI, Kimi Code and Grok Build CLI side by side (carousel, per-provider mascots and
 scenes), fed over BLE by a host daemon running on a Mac. It derives from
 [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) by Hermann
 Bjorgvin (single-provider Claude monitor); the firmware architecture, board
 ports and the hardware notes below are inherited from it and credited to that
 project. ToknMon adds multi-provider polling, a configurable BLE device name,
-hand-drawn Codex/Kimi mascots, mascot mode, the parade and gesture navigation
+hand-drawn Codex/Kimi/Grok mascots, mascot mode, the parade and gesture navigation
 (design log per milestone in `docs/odd/`). Only the Waveshare ESP32-S3
 Touch AMOLED 2.16 is verified with ToknMon; the other ports build but are
 untested since the fork.
@@ -35,7 +35,7 @@ Plus one non-hardware target: `boards/sim/` — **native desktop simulator** (SD
 
 The shared code calls a small HAL (`firmware/src/hal/`) that each board implements: display, touch, input, power, IMU. Optional features are guarded by `BoardCaps` (runtime) and `BOARD_HAS_*` (compile-time) rather than `#ifdef BOARD_*`.
 
-Connects to a host daemon over BLE; the daemon polls each enabled provider (Claude usage endpoint, Codex session logs, Kimi usage API) and pushes one JSON payload per provider. This file is for future Claude Code sessions to bootstrap quickly. Read this first.
+Connects to a host daemon over BLE; the daemon polls each enabled provider (Claude usage endpoint, Codex session logs, Kimi usage API, Grok billing endpoint with a log fallback) and pushes one JSON payload per provider. This file is for future Claude Code sessions to bootstrap quickly. Read this first.
 
 ## Hardware (critical pins)
 
@@ -257,7 +257,7 @@ the converter prefers them over the antialiased GIF rescales.
 
 ### Custom animations (grid pipeline)
 
-Hand-authored art (the Codex and Kimi corner mascots) lives as text grids in
+Hand-authored art (the Codex, Kimi and Grok corner mascots) lives as text grids in
 `assets/animations/<provider>.<role>.txt` and compiles into
 `firmware/src/custom_animations.h` (generated, do not hand-edit):
 
@@ -359,7 +359,7 @@ multi-provider scenario via `SIM_SCENARIO`).
 
 ## Daemon / host side
 
-**macOS (the ToknMon daemon):** `daemon/claude_usage_daemon.py` (Python, bleak/CoreBluetooth) with one module per provider under `daemon/providers/` (`claude.py` OAuth usage endpoint, `codex.py` local session logs, `kimi.py` usage API with token refresh). `install-mac.sh` creates `daemon/.venv` from `daemon/requirements-macos.txt`, renders `daemon/com.toknmon.daemon.plist` into `~/Library/LaunchAgents/com.toknmon.daemon.plist` (logs: `~/Library/Logs/toknmon.{out,err}.log`) and walks the config prompts; `--yes --no-prime [--providers a,b] [--device-name N]` runs it non-interactively. Config: `~/.config/toknmon/config` (keys in `daemon/config.example`, re-read every poll). On first start the daemon copies a Clawdmeter-era `~/.config/claude-usage-monitor/{config,ble-address}` into the new dir (`migrate_legacy_config()`, never deletes) and the installer boots out the legacy `com.user.claude-usage-daemon` agent, parking its plist under `~/.config/toknmon/legacy/`. Tests: `daemon/.venv/bin/python -m pytest daemon/tests -q`. The daemon finds the board by service UUID; `device_name` (default `ToknMon`, legacy `TokenMon`/`Clawdmeter` always accepted) only matters for the HID fallback and the stale-bond repair via `blueutil`. The attention-card hook (`daemon/attention-hook.sh`) still drops its flags in `~/.config/claude-usage-monitor` and the daemon reads them there.
+**macOS (the ToknMon daemon):** `daemon/claude_usage_daemon.py` (Python, bleak/CoreBluetooth) with one module per provider under `daemon/providers/` (`claude.py` OAuth usage endpoint, `codex.py` local session logs, `kimi.py` usage API with token refresh, `grok.py` billing endpoint with Grok's own token — never refreshed — and a `~/.grok/logs/unified.jsonl` fallback). `install-mac.sh` creates `daemon/.venv` from `daemon/requirements-macos.txt`, renders `daemon/com.toknmon.daemon.plist` into `~/Library/LaunchAgents/com.toknmon.daemon.plist` (logs: `~/Library/Logs/toknmon.{out,err}.log`) and walks the config prompts; `--yes --no-prime [--providers a,b] [--device-name N]` runs it non-interactively. Config: `~/.config/toknmon/config` (keys in `daemon/config.example`, re-read every poll). On first start the daemon copies a Clawdmeter-era `~/.config/claude-usage-monitor/{config,ble-address}` into the new dir (`migrate_legacy_config()`, never deletes) and the installer boots out the legacy `com.user.claude-usage-daemon` agent, parking its plist under `~/.config/toknmon/legacy/`. Tests: `daemon/.venv/bin/python -m pytest daemon/tests -q`. The daemon finds the board by service UUID; `device_name` (default `ToknMon`, legacy `TokenMon`/`Clawdmeter` always accepted) only matters for the HID fallback and the stale-bond repair via `blueutil`. The attention-card hook (`daemon/attention-hook.sh`) still drops its flags in `~/.config/claude-usage-monitor` and the daemon reads them there.
 
 **Linux (inherited from Clawdmeter, Claude-only, untested with ToknMon):** Bash daemon (`daemon/claude-usage-daemon.sh`) reads OAuth token, polls Anthropic API, sends JSON over BLE GATT. Run with `systemctl --user start claude-usage-daemon`. The unit file's `ExecStart` is the absolute path to the script — repoint it when switching between the worktree and the main checkout. Windows (`daemon/*_windows.py`, `install-windows.ps1`) is in the same inherited state.
 

@@ -40,11 +40,11 @@ git-ignored directory, and only the generated header ships.
 
 ## Original art in this repository
 
-The Codex and Kimi mascots and scenes (`assets/animations/codex.*.txt`,
-`assets/animations/kimi.*.txt`, the generated `firmware/src/custom_animations.h`
+The Codex, Kimi and Grok mascots and scenes (`assets/animations/codex.*.txt`,
+`assets/animations/kimi.*.txt`, `assets/animations/grok.*.txt`, the generated `firmware/src/custom_animations.h`
 and the GIF previews under `docs/media/animations/`) are original pixel art
-created for ToknMon. They are **not** official brand assets of OpenAI or
-Moonshot AI; the names "Codex" and "Kimi" belong to their respective owners
+created for ToknMon. They are **not** official brand assets of OpenAI,
+Moonshot AI or xAI; the names "Codex", "Kimi" and "Grok" belong to their respective owners
 and are used only to identify the monitored services. The Clawd mountain-bike
 grid (`assets/animations/claude.bike.txt`) is an original drawing in the style
 of Anthropic's mascot and is subject to the same caution as the official set.

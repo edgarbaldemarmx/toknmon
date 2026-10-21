@@ -11,6 +11,14 @@ H0–H8); the entries below summarize them.
 
 ### Added
 
+- **Grok Build CLI provider** (H9): the daemon polls Grok's weekly credit
+  window from `https://cli-chat-proxy.grok.com/v1/billing?format=credits`
+  with the token Grok keeps in `~/.grok/auth.json` (never refreshed by the
+  daemon), falling back to the newest billing line in Grok's log. The
+  firmware gets a fourth slot (`grok`, `slot 3`) with a silver dot grid, an
+  original ringed-orb mascot (idle, spin, bike) and a deeper BLE receive
+  queue so four back-to-back payloads fit.
+
 - `tools/check_pii.sh` scans every tracked file for personal or hardware
   identifiers (home paths, hostnames, e-mail addresses, non-documentation MAC
   addresses, credential-looking strings, scratch paths) and runs in CI as the
