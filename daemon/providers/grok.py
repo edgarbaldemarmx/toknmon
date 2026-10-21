@@ -63,6 +63,7 @@ import datetime
 import fcntl
 import hashlib
 import json
+import math
 import os
 import time
 from collections.abc import Callable
@@ -107,12 +108,19 @@ def _default_log(msg: str) -> None:
 log: Callable[[str], None] = _default_log
 
 # In-process state: discovered token endpoint per issuer, the last live-path
-# state that was logged, one-shot warnings, and fingerprints of refresh tokens
-# the issuer rejected with invalid_grant (never the tokens themselves).
+# state that was logged, one-shot warnings, fingerprints of refresh tokens the
+# issuer rejected with invalid_grant or already consumed in a successful
+# refresh (never the tokens themselves), and rotated entries that could not be
+# written back yet (kept so a consumed refresh token is never sent again).
 _token_endpoints: dict[str, str] = {}
 _live_state = ""
 _warned: set[str] = set()
 _dead_refresh_tokens: set[str] = set()
+_used_refresh_tokens: set[str] = set()
+_unsaved_entries: dict[str, dict] = {}
+# Upper bound for a usable ``expires_in`` (30 days); anything else falls back
+# to DEFAULT_TOKEN_LIFETIME_S.
+MAX_TOKEN_LIFETIME_S = 30 * 86400
 
 
 class RefreshError(Exception):
@@ -331,6 +339,8 @@ async def refresh_access_token(home: Path, name: str, entry: dict, client: httpx
         raise RefreshError("no refresh_token in auth.json")
     if _fingerprint(refresh) in _dead_refresh_tokens:
         raise RefreshError(SIGNIN_EXPIRED)
+    if _fingerprint(refresh) in _used_refresh_tokens:
+        return _retry_unsaved(home, name, now)
     # Discovery happens before the lock so Grok never waits on it.
     url = await _token_endpoint(client, entry)
     path = home / "auth.json"
@@ -368,12 +378,12 @@ async def refresh_access_token(home: Path, name: str, entry: dict, client: httpx
         token = body.get("access_token") if isinstance(body, dict) else None
         if not isinstance(token, str) or not token:
             raise RefreshError("refresh response has no access_token")
-        try:
-            expires_in = int(float(body.get("expires_in")))
-        except (TypeError, ValueError):
-            expires_in = 0
-        if expires_in <= 0:
-            expires_in = DEFAULT_TOKEN_LIFETIME_S
+        rotated = body.get("refresh_token")
+        if isinstance(rotated, str) and rotated and rotated != refresh:
+            # The issuer rotated it: the old refresh token is consumed and
+            # must never be sent again, even if the write-back below fails.
+            _used_refresh_tokens.add(_fingerprint(refresh))
+        expires_in = _lifetime(body.get("expires_in"))
         updated = dict(current)   # same field order; only three values change
         updated["key"] = token
         if isinstance(body.get("refresh_token"), str) and body["refresh_token"]:
@@ -382,11 +392,47 @@ async def refresh_access_token(home: Path, name: str, entry: dict, client: httpx
         blob[name] = updated      # same entry position
         try:
             _write_auth_atomic(path, blob)
+            _unsaved_entries.pop(name, None)
         except OSError as e:
-            # The issuer may have rotated the refresh token already; use the
-            # new access token for this poll and say why it was not stored.
-            log(f"Grok: refreshed token could not be written to auth.json ({type(e).__name__})")
+            # The issuer may have rotated the refresh token already: keep the
+            # new entry in memory, use it, and retry the write on later polls.
+            _unsaved_entries[name] = updated
+            log(f"Grok: refreshed token could not be written to auth.json ({type(e).__name__}); will retry")
         return token
+
+
+def _lifetime(value) -> int:
+    """Seconds from a token response's ``expires_in``; non-numeric,
+    non-finite, non-positive or absurd values use DEFAULT_TOKEN_LIFETIME_S."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_TOKEN_LIFETIME_S
+    if not math.isfinite(seconds) or seconds <= 0 or seconds > MAX_TOKEN_LIFETIME_S:
+        return DEFAULT_TOKEN_LIFETIME_S
+    return int(seconds)
+
+
+def _retry_unsaved(home: Path, name: str, now: float) -> str:
+    """The on-disk refresh token was already consumed by this process: write
+    the rotated entry kept in memory (under Grok's lock) and return its access
+    token. Never contacts the issuer."""
+    pending = _unsaved_entries.get(name)
+    if pending is None:
+        raise RefreshError("refresh token already used; waiting for Grok to store a new one")
+    with _AuthLock(home):
+        blob = _load_auth(home)
+        if isinstance(blob, dict) and isinstance(blob.get(name), dict):
+            blob[name] = {**blob[name], **{k: pending[k] for k in ("key", "refresh_token", "expires_at")}}
+            try:
+                _write_auth_atomic(home / "auth.json", blob)
+                _unsaved_entries.pop(name, None)
+            except OSError as e:
+                log(f"Grok: refreshed token could not be written to auth.json ({type(e).__name__}); will retry")
+    exp = iso_to_epoch(pending.get("expires_at"))
+    if exp is not None and exp <= now:
+        raise RefreshError("unsaved refreshed token expired")
+    return pending["key"]
 
 
 async def _resolve_token(client: httpx.AsyncClient, home: Path, now: float) -> tuple[str | None, str]:

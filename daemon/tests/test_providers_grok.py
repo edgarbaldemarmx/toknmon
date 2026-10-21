@@ -74,6 +74,8 @@ def _fresh_module_state(monkeypatch):
     monkeypatch.setattr(grok, "_live_state", "")
     monkeypatch.setattr(grok, "_warned", set())
     monkeypatch.setattr(grok, "_dead_refresh_tokens", set())
+    monkeypatch.setattr(grok, "_used_refresh_tokens", set(), raising=False)
+    monkeypatch.setattr(grok, "_unsaved_entries", {}, raising=False)
     monkeypatch.setattr(grok, "read_config", lambda key: None)
     lines: list[str] = []
     monkeypatch.setattr(grok, "log", lines.append)
@@ -255,6 +257,49 @@ def test_expiring_token_is_refreshed_and_written_back(tmp_path, monkeypatch, log
     assert sorted(p.name for p in home.iterdir()) == ["auth.json", "auth.json.lock", "version.json"]
     assert re.fullmatch(rf"{os.getpid()}:\d+", (home / "auth.json.lock").read_text())
     _no_secret(json.dumps(res.extra), *logged)
+
+
+def test_unsaved_rotated_tokens_are_kept_and_the_used_refresh_token_never_resent(tmp_path, monkeypatch):
+    """A refresh whose write-back fails must not leave the daemon replaying
+    the refresh token the issuer already consumed: the rotated tokens are kept
+    in memory, used, and written once auth.json is writable again."""
+    home = _grok_home(tmp_path, monkeypatch, expires_at=NOW - 1)
+    real_write = grok._write_auth_atomic
+    failing = {"on": True}
+
+    def flaky_write(path, blob):
+        if failing["on"]:
+            raise OSError("read-only file system")
+        real_write(path, blob)
+
+    monkeypatch.setattr(grok, "_write_auth_atomic", flaky_write)
+    seen: list[httpx.Request] = []
+    client = _client(_oidc_handler(seen))
+    for _ in range(2):   # first poll refreshes, second must not POST again
+        res = _run(grok.poll(client=client, now=NOW))
+        assert res.ok is True
+    posts = [r for r in seen if r.method == "POST"]
+    assert len(posts) == 1
+    assert [r.headers["authorization"] for r in seen if str(r.url) == BILLING_URL] == [f"Bearer {NEW_KEY}"] * 2
+    assert json.loads((home / "auth.json").read_text())[ENTRY]["refresh_token"] == REFRESH
+
+    failing["on"] = False
+    res = _run(grok.poll(client=client, now=NOW))
+    assert res.ok is True
+    assert len([r for r in seen if r.method == "POST"]) == 1
+    stored = json.loads((home / "auth.json").read_text())[ENTRY]
+    assert stored["key"] == NEW_KEY and stored["refresh_token"] == NEW_REFRESH
+
+
+@pytest.mark.parametrize("expires_in", [1e20, "Infinity", "NaN", -5], ids=["huge", "inf", "nan", "negative"])
+def test_unusable_expires_in_still_persists_the_rotated_tokens(tmp_path, monkeypatch, expires_in):
+    home = _grok_home(tmp_path, monkeypatch, expires_at=NOW - 1)
+    body = {"access_token": NEW_KEY, "refresh_token": NEW_REFRESH, "expires_in": expires_in}
+    res = _run(grok.poll(client=_client(_oidc_handler([], token_body=body)), now=NOW))
+    assert res.ok is True
+    stored = json.loads((home / "auth.json").read_text())[ENTRY]
+    assert stored["key"] == NEW_KEY and stored["refresh_token"] == NEW_REFRESH
+    assert stored["expires_at"] == _grok_iso(NOW + grok.DEFAULT_TOKEN_LIFETIME_S)
 
 
 def test_rotated_refresh_token_absent_keeps_the_old_one(tmp_path, monkeypatch):
@@ -550,3 +595,48 @@ def test_daemon_wires_grok_config_hook():
             "assert g.read_config is m.read_config_value")
     root = Path(__file__).resolve().parents[2]
     subprocess.run([sys.executable, "-c", code], cwd=root, check=True)
+
+
+@pytest.mark.parametrize("kind", ["500", "403", "400-other", "network", "not-json", "no-token", "list-body"])
+def test_every_refresh_failure_leaves_auth_json_byte_identical_and_releases_the_lock(tmp_path, monkeypatch, kind):
+    home = _grok_home(tmp_path, monkeypatch, expires_at=NOW - 1)
+    before = (home / "auth.json").read_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == DISCOVERY_URL:
+            return httpx.Response(200, json={"issuer": ISSUER, "token_endpoint": TOKEN_URL})
+        if request.method == "POST":
+            if kind == "network":
+                raise httpx.ConnectError("boom", request=request)
+            return {
+                "500": httpx.Response(500, json={}),
+                "403": httpx.Response(403, json={"error": "forbidden"}),
+                "400-other": httpx.Response(400, json={"error": "invalid_request"}),
+                "not-json": httpx.Response(200, text="{not json"),
+                "no-token": httpx.Response(200, json={}),
+                "list-body": httpx.Response(200, json=[1, 2]),
+            }[kind]
+        raise AssertionError(f"unexpected request to {request.url}")
+
+    res = _run(grok.poll(client=_client(handler), now=NOW))
+    assert res.ok is False
+    assert (home / "auth.json").read_bytes() == before
+    fd = os.open(home / "auth.json.lock", os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)   # released on the failure path
+    finally:
+        os.close(fd)
+
+
+def test_invalid_grant_is_not_retried_until_the_refresh_token_changes(tmp_path, monkeypatch):
+    home = _grok_home(tmp_path, monkeypatch, expires_at=NOW - 1)
+    seen: list[httpx.Request] = []
+    client = _client(_oidc_handler(seen, token_status=400, token_body={"error": "invalid_grant"}))
+    for _ in range(3):
+        assert _run(grok.poll(client=client, now=NOW)).ok is False
+    assert [r.method for r in seen].count("POST") == 1
+    blob = json.loads((home / "auth.json").read_text())
+    blob[ENTRY]["refresh_token"] = "xai-test-relogin-refresh"
+    _write_auth(home, blob)
+    _run(grok.poll(client=client, now=NOW))
+    assert [r.method for r in seen].count("POST") == 2
