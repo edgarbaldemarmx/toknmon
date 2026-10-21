@@ -121,7 +121,7 @@ def test_poll_ignores_files_older_than_7_days(tmp_path, monkeypatch):
     home = _codex_home(tmp_path, monkeypatch)
     old = home / "sessions" / "2026" / "10" / "11" / "rollout-old.jsonl"
     shutil.copy(FIXTURE, old)
-    stale = time.time() - 8 * 86400
+    stale = NOW - 8 * 86400
     os.utime(old, (stale, stale))
     assert _run(codex.poll(now=NOW)).ok is False
 
