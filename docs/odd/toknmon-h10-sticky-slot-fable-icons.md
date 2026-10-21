@@ -1,0 +1,38 @@
+# ToknMon — H10 Sticky meter, Fable page and refined provider icons
+
+Objective: the usage view stays on the slot the user picked, Claude's model-scoped weekly limit ("Fable") gets its own page filled with small Clawd symbols, and Codex/Kimi/Grok get higher-quality corner icons. Branch `feat/h10-sticky-slot-fable-icons` from `006d0eb`. Delivery: feature branch fast-forwarded to `main` and pushed after confirmation (same as H9); test runners `daemon/.venv/bin/python -m pytest daemon/tests -q`, `node --test tools/test/`, `pio run -d firmware -e sim`, `pio run -d firmware -e waveshare_amoled_216`, `pio run -d firmware -e waveshare_amoled_216_c6`.
+
+## Specs
+
+- **S1** — "Que no sea carrusel de medidores, que se mantenga en el que lo deje (ej. grok o codex) en vez de estar rotando."
+  - **S1.1** The 8 s carousel timer is removed; the visible slot changes only on a user action (tap with 2+ fresh slots, horizontal swipe, serial `next` / `slot N` / `swipe left|right`).
+  - **S1.2** No automatic jump away from the slot the user picked: neither when it goes stale nor on an `ok:false` payload for it. At boot, before the picked slot has data, the first slot that receives data is shown, and the view moves to the picked slot as soon as its data arrives (assumption: the boot fallback is not a user choice).
+  - **S1.3** The picked slot is stored in NVS (`Preferences`) on every user change and restored at boot (default Claude).
+  - **S1.4** The headless gallery, which relied on the rotation, can still capture each provider's usage view (sim env hook to pick the slot).
+  - **S1.5** Docs that describe the 8 s rotation are updated (README, docs/controls.md, docs/providers.md, CLAUDE.md, code comments).
+- **S2** — "EL medidor de claude como tiene 3 barras se ve pequeño, podemos separar el de fable en uno individual donde se vaya llenando con simbolitos de claude el uso (ya que ese es semanal) y asi mantenemos las dos barritas de claude en una sola pantalla (fable solo esta activo si tienes sub pro o max)"
+  - **S2.1** Claude's page always uses the two-bar layout (Current + Weekly) at full size.
+  - **S2.2** The model-scoped weekly limit becomes its own page right after Claude in the slot order, shown only while Claude's payload carries it (`f`/`fr`); otherwise it is skipped by paging and by the boot fallback.
+  - **S2.3** That page is a 10×10 grid of small Clawd symbols; `round(pct)` symbols are filled in Claude's accent, the rest are dim; the header shows the model label, the "Weekly" pill and "Resets in …"; the corner mascot is Claude's.
+  - **S2.4** The daemon sends the model's display name as `fl` (ASCII, at most 11 characters) with `f`/`fr`, so the label is the real model name instead of the "Fable" fallback.
+  - **S2.5** Boards without PSRAM (no dot canvas) keep the third bar in the Claude page as today.
+- **S3** — "Refinar los iconos de kimi, codex y grok, que se vea de mejor calidad". Decision (2026-10-21, user chose "Icono nuevo solo en el medidor"): "Dibujo un icono propio por proveedor, del tamaño de Clawd (~24×18 celdas), con más detalle y sombreado, con parpadeo. Las animaciones de pantalla completa y las escenas no cambian. En el medidor el icono ya no hace las animaciones chicas por nivel de uso."
+  - **S3.1** New grids `assets/animations/{codex,kimi,grok}.icon.txt`: original art (no OpenAI, Moonshot or xAI logos), about Clawd's footprint (24×18 cells, within the 28×21 envelope), more detail and shading than the current idle, a still frame 0 and a blink.
+  - **S3.2** The corner mascot uses the icon for those three providers (idle = icon frame 0, the only act is the icon's blink); full-screen splash animations, scenes and the Claude corner mascot are unchanged; icons never appear as splash entries.
+
+## Tasks
+
+| ID | Specs | Route | Status | Commit |
+| --- | --- | --- | --- | --- |
+| T1 | S1 | inline | pending | |
+| T2 | S2 | inline (after T1, same `ui.cpp`) | pending | |
+| T3 | S3 | delegated writer (parallelism with T1/T2; disjoint surface: assets, `splash.cpp`, generated header) | pending | |
+| T4 | shared docs (README, CLAUDE.md, CHANGELOG), seam check, flash, delivery | inline | pending | |
+
+Route evidence: T3 is an independent art unit (three grids, several hundred lines, header regeneration, `splash.cpp` specs) with no file shared with T1/T2 (`ui.cpp`, `main.cpp`, `data.h`, daemon) → Writer trigger (a). Shared docs are owned by the parent in T4.
+
+## Log
+
+- **L1** (2026-10-21, user, verbatim): "Hay que hacer los siguientes modificaciones: 1. Que no sea carrusel de medidores, que se mantenga en el que lo deje (ej. grok o codex) en vez de estar rotando. 2. EL medidor de claude como tiene 3 barras se ve pequeño, podemos separar el de fable en uno individual donde se vaya llenando con simbolitos de claude el uso (ya que ese es semanal) y asi mantenemos las dos barritas de claude en una sola pantalla (fable solo esta activo si tienes sub pro o max) 3. Refinar los iconos de kimi, codex y grok, que se vea de mejor calidad"
+- **L2** Exploration: rotation is `carousel_timer` / `CAROUSEL_MS 8000` (`ui.cpp:348,983,1137`); auto-jumps at `ui.cpp:1180` (ok:false), `:1207` (first payload / stale visible), `:1343` (stale tick); `visible_slot` is not persisted. Claude's third bar comes from `weekly_scoped` with `scope.model.display_name` (`daemon/providers/claude.py:76-110`), sent as `f`/`fr` without `fl`; the firmware falls back to "Fable". The corner icon is the animated corner mascot at 3 px/cell (Codex idle 23×7, Kimi 19×15, Grok 14×14 cells vs Clawd 24×18). Hardware screenshots of all four usage views taken before the change.
+- **L3** (2026-10-21, user decision): S3 icons → "Icono nuevo solo en el medidor (Recommended)".
