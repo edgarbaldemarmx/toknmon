@@ -79,12 +79,12 @@ no label, to keep the official look). Swipe vertically to return to the meter.
 
 ### Parade
 
-Leave the meter untouched for **5 minutes** and the device starts the parade:
-every provider with live data gets **20 s** of full-size mascot in turn,
-Claude with its rate-group pick, Codex and Kimi with their sets. Taps step
-the current animation; the rotation keeps going. A vertical swipe returns to
-the meter and stops it. Any touch or button press on the meter resets the
-5-minute timer.
+In the parade every provider with live data gets **20 s** of full-size
+mascot in turn, Claude with its rate-group pick, Codex and Kimi with their
+sets. Taps step the current animation; the rotation keeps going. A vertical
+swipe returns to the meter and stops it. The parade never starts on its own:
+the meter stays on screen until you touch it. Start it with the serial
+command `parade on`.
 
 ### Brightness and idle
 

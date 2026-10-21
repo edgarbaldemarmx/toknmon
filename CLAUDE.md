@@ -326,11 +326,10 @@ end with the full-screen scenes (`codex.scene.wave/rain`,
 `kimi.scene.night/orbit`); a name missing from the catalog is skipped and
 logged once. The parade (`splash_parade_start(fresh[])`) rotates the
 fresh slots every `PARADE_PROVIDER_MS` (20 s), Claude included with its
-rate-group pick; `ui_parade_start()` builds the mask and runs after
-`IDLE_PARADE_MS` (5 min) without input on the usage view — touches reset the
-timer through an indev `LV_EVENT_PRESSED` callback, buttons through
-`ui_note_activity()` from `main.cpp`; the parade ends on a vertical swipe,
-taps only step its current animation. QA without hands: serial `screen splash
+rate-group pick; `ui_parade_start()` builds the mask; it never runs on its own (the idle
+timer was removed in H9 so the meter stays up until the user touches it),
+only through serial `parade on` / `SIM_PARADE`; the parade ends on a
+vertical swipe, taps only step its current animation. QA without hands: serial `screen splash
 codex|kimi|claude` and `parade on|off` (`./screenshot.sh out.png [port]
 --screen splash:codex`); in the sim, `SIM_SPLASH_PROVIDER=codex` and
 `SIM_PARADE=1` (the parade needs fresh slots, so pair it with a

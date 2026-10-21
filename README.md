@@ -14,8 +14,8 @@
 ESP32-S3 board with a round-cornered AMOLED shows the rate-limit windows of
 **Claude Code**, **OpenAI Codex CLI** and **Kimi Code** side by side, each
 with its own colors and pixel-art mascot, fed over Bluetooth by a small daemon
-on your Mac. When nothing needs your attention it plays animations; leave it
-alone for a while and the mascots parade.
+on your Mac. The meter stays on screen until you touch it; a tap, swipe or
+long-press brings up the animations.
 
 It is a fork of [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) by
 Hermann Bjorgvin, which monitors Claude Code only. ToknMon adds the
@@ -49,7 +49,7 @@ requests are welcome, support is best-effort.
 | <img src="docs/media/screens/claude-usage.png" width="240" alt="Claude usage view with Current, Weekly and Fable bars"> | **Three providers, one carousel.** Claude Code (5-hour session, weekly and the model-scoped **Fable** weekly window when your plan has one), Codex CLI and Kimi Code each get a slot. Tap or swipe to page, or let it rotate every 8 s. Slots without fresh data are skipped. |
 | <img src="docs/media/screens/hw-codex.png" width="240" alt="Codex dot grid at 91 percent on the real panel"> | **A screen per provider.** Codex shows a 10×10 dot grid filling to the weekly percentage (plus a compact 5h bar when the plan has one); Kimi shows 5h and weekly bars in blue; Claude keeps its bars in clay. Palettes, bar tiers and status lines never bleed between providers. |
 | <img src="docs/media/screens/mascot-codex.png" width="240" alt="Mascot mode pinned to Codex"> | **Mascots and mascot mode.** Clawd for Claude (Anthropic's official set), original three-dots and crescent-moon characters for Codex and Kimi, each with idle, acts, a mountain-bike ride and two full-screen scenes. Long-press the meter to watch a provider's set full-size. |
-| <img src="docs/media/screens/parade.png" width="240" alt="Idle parade with the Codex mascot on stage"> | **The parade.** Five minutes without input and the device rotates every live provider's full-size mascot every 20 s, until you swipe back. |
+| <img src="docs/media/screens/parade.png" width="240" alt="Idle parade with the Codex mascot on stage"> | **The parade.** The device rotates every live provider's full-size mascot every 20 s, until you swipe back. It never starts on its own (serial `parade on`). |
 | <img src="docs/media/screens/scene-kimi-night.png" width="240" alt="Kimi night scene"> | **Draw your own.** Animations are plain text grids compiled by a small Node tool. The Codex and Kimi scenes were authored by an AI agent from a two-sentence brief. |
 | <img src="docs/media/screens/splash-claude.png" width="240" alt="Default Clawd splash"> | **Quiet by design.** No cloud, no accounts of its own: the daemon reads the tokens your CLIs already have (Claude Code, Kimi) or local logs (Codex), polls once a minute with no token spend, and pushes ~150 bytes per provider over BLE. The side buttons double as Bluetooth keyboard keys for Claude Code (Space, Shift+Tab). |
 
@@ -193,8 +193,9 @@ The board boots on the **splash** (animations) and swipes to the **meter**
   dots, think, bike, wave, rain; Kimi: idle, glow, sleep, bike, night, orbit;
   Claude: the official set) with the provider's name on top; tap, swipe
   sideways or PWR to step; swipe vertically to return.
-- **Parade**: after 5 minutes without input on the meter, every live
-  provider's mascot gets 20 s on stage in turn; a vertical swipe ends it.
+- **Parade**: every live provider's mascot gets 20 s on stage in turn; a
+  vertical swipe ends it. It never starts on its own: the meter stays up
+  until you touch it (serial `parade on` starts it).
 - **Attention alerts**: with the Claude Code hooks installed
   ([how](docs/install-macos.md#attention-alerts-from-claude-code-optional)),
   Clawd walks on and waves when a session waits for you.

@@ -18,6 +18,10 @@ H0–H8); the entries below summarize them.
 
 ### Changed
 
+- The parade no longer starts after 5 minutes without input: the meter stays
+  on screen until you touch it, and the animations only play on a tap, swipe
+  or long-press (serial `parade on` still starts the parade).
+
 - `screenshot.sh` retries a stalled transfer up to three times and accepts
   `--screen usage:<provider>`; `install-mac.sh` uses `launchctl bootout` /
   `bootstrap` with a documented fallback; `flash-mac.sh` prints usage and a
