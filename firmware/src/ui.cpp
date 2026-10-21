@@ -1348,6 +1348,7 @@ void ui_update_slot(int idx, const UsageData* data) {
 // Render one slot's data into the panels and make it the visible slot.
 static void show_view(int idx) {
     if (idx == UI_VIEW_FABLE && !fable_available()) idx = PROVIDER_CLAUDE;   // the limit went away
+    if (idx != visible_view) Serial.printf("UI: showing view %d\n", idx);
     visible_view = idx;
     const int prov = view_provider(idx);
     const UsageData* data = &slots[prov].data;

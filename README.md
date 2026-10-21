@@ -305,6 +305,7 @@ The most common ones; the full list is in
 pio run -d firmware -e sim && (cd firmware && .pio/build/sim/program)   # desktop simulator (SDL2)
 daemon/.venv/bin/python -m pytest daemon/tests -q                       # daemon tests
 node --test tools/test/ && bash tools/test/shell/test_device_name_validator.sh
+bash tools/test/shell/test_sim_sticky_view.sh                           # sticky usage view (needs the sim build)
 pio run -d firmware -e waveshare_amoled_216                             # firmware
 ```
 

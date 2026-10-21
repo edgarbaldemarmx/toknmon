@@ -42,6 +42,7 @@ node convert_grid_animations.js --verify DIR # + one PNG frame strip per animati
 node convert_grid_animations.js --gif DIR    # + one looping GIF per animation (×6 scale, per-frame holds; ImageMagick)
 node --test test/                            # converter unit tests
 bash test/shell/test_device_name_validator.sh   # install-mac.sh / flash-mac.sh name validator
+bash test/shell/test_sim_sticky_view.sh         # sticky usage view, headless sim (build -e sim first)
 ```
 
 Hand-authored provider mascots (Codex, Kimi, Grok) live as text grids under

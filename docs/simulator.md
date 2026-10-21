@@ -89,7 +89,10 @@ Saves `sim-autoshot.bmp` (override with `SIM_AUTOSHOT_PATH`) after the given
 delay and exits. Combine with `SIM_SCENARIO` pointing at a single-state file,
 or with `SIM_SLOT` / `SIM_SPLASH_PROVIDER` / `SIM_PARADE`, to capture any specific screen.
 `*.bmp` and `sim-autoshot*` are git-ignored; `tools/make_gallery.sh` uses
-these hooks to regenerate the screenshots under `docs/media/`.
+these hooks to regenerate the screenshots under `docs/media/`, and
+`tools/test/shell/test_sim_sticky_view.sh` uses `SIM_SLOT` with the serial log
+(`UI: restored picked view N`, `UI: showing view N`) to check that the usage
+view stays where the user left it.
 
 ## Caveat
 

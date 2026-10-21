@@ -116,6 +116,10 @@ jobs:
       - name: Build sim
         run: pio run -d firmware -e sim
 
+      # Sticky usage view (H10): headless runs read the firmware's serial log.
+      - name: Sticky usage view tests (sim)
+        run: bash tools/test/shell/test_sim_sticky_view.sh
+
       # Headless smoke: the sim runs under SDL's dummy video driver, takes a
       # screenshot after SIM_AUTOSHOT_MS and exits (sim_platform.cpp). The
       # scenario file is resolved relative to cwd, hence `cd firmware`.
