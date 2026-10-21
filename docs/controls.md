@@ -75,7 +75,8 @@ through the whole catalog, custom animations included (`claude.bike`).
 Long-press the meter to pin the splash to the provider on screen. The
 provider's full-size set plays in order: for Codex idle → dots → think → bike
 → scene *wave* → scene *rain*; for Kimi idle → glow → sleep → bike → scene
-*night* → scene *orbit*; for Grok idle → look → bike; Claude keeps the official set. Each entry plays
+*night* → scene *orbit*; for Grok idle → look → bike → scene
+*stars* → scene *build*; Claude keeps the official set. Each entry plays
 intro → loop (6 s) → outro, then the next; a tap, a horizontal swipe or PWR
 steps manually. The provider name shows top-center in its accent (Claude has
 no label, to keep the official look). Swipe vertically to return to the meter.

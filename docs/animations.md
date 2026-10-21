@@ -6,7 +6,7 @@ corner mascots:
 | Catalog | Source | Generated header | Redistributed? |
 | --- | --- | --- | --- |
 | **Official Clawd set** (17 animations: core poses and persona scenes) | Anthropic's GIF/Lottie assets, fetched on demand | `firmware/src/splash_animations.h` | the header ships; the sources are not committed (see `NOTICE.md`) |
-| **Custom grid animations** (16: Codex, Kimi and Grok mascots, scenes, the four bikes) | hand-authored text grids in `assets/animations/` | `firmware/src/custom_animations.h` | yes, original art (MIT) |
+| **Custom grid animations** (18: Codex, Kimi and Grok mascots, six scenes, the four bikes) | hand-authored text grids in `assets/animations/` | `firmware/src/custom_animations.h` | yes, original art (MIT) |
 
 Both headers are generated: do not hand-edit them. The engine treats the two
 tables as one catalog (`anim_count()` / `anim_at()`), so a custom animation
@@ -78,6 +78,15 @@ Two things to keep in mind:
   ignores `origin`, so a different crop would make the character jump
   between idle and act.
 
+Full-screen scenes are optional `<provider>.scene.<name>` grids on the 53×37
+stage (`origin: 1 0`). The Codex and Kimi scenes loop the whole file; the
+Grok scenes add a short intro and outro that start and end on the exact
+`grok.idle` pose (ball at stage 15,23), so the set passes through the idle
+ball between entries: `grok.scene.stars` floats the ball up into a starry
+sky with a ringed planet and a shooting star (loop: floating), and
+`grok.scene.build` types code at a desk, then stacks three blocks and hops
+when the build finishes (loop: typing).
+
 ### Converter
 
 ```bash
@@ -91,7 +100,8 @@ The converter is pure Node (no dependencies) and deterministic: running it
 twice yields a byte-identical header, which CI checks. It prints one line per
 animation (`codex.dots 23x15 at 15,22 8 frames, 5 colors, loop 1-6, 2.1 KB`).
 Each corner-sized animation costs 2–3 KB of flash, a full-screen scene
-12–17 KB; the 2.16 build has well over 1 MB free.
+5–17 KB, or about 40 KB for the two Grok scenes, which carry intro and outro
+frames; the 2.16 build has about 1 MB of flash free.
 
 ### Wiring an animation into the firmware
 
@@ -136,10 +146,14 @@ the file list and which captures vary by frame phase between runs.
 
 ## Authoring with an AI agent
 
-The four full-screen scenes (`codex.scene.wave`, `codex.scene.rain`,
-`kimi.scene.night`, `kimi.scene.orbit`) were drawn by an AI coding agent
-(Kimi K3, driven through a terminal multiplexer) using nothing but the text-grid
-format above. The workflow works with any agent that can run shell commands:
+The four Codex and Kimi full-screen scenes (`codex.scene.wave`,
+`codex.scene.rain`, `kimi.scene.night`, `kimi.scene.orbit`) were drawn by an
+AI coding agent (Kimi K3, driven through a terminal multiplexer) using nothing
+but the text-grid format above. The two Grok scenes (`grok.scene.stars`,
+`grok.scene.build`) were drawn by Claude Code with a throwaway generator script
+that composed the ball, props and per-frame motion into the same text grids;
+only the grids are committed. The workflow works with any agent that can run
+shell commands:
 
 1. Give the agent the **format section of this page** and one existing file
    (for example `assets/animations/kimi.glow.txt`) as a concrete example.
