@@ -305,7 +305,7 @@ refuses (and logs once) any frame that would not fit.
 The default splash is Claude's (rate groups, PWR walks the whole catalog).
 `splash_set_provider(slot)` pins it to one provider's play-list instead
 (`PROVIDER_SETS` in `splash.cpp`: Codex = idle, dots, think, bike; Kimi =
-idle, glow, sleep, bike): entries play in order (intro → loop for
+idle, glow, sleep, bike; Grok = idle, look, bike): entries play in order (intro → loop for
 `SCENE_LOOP_MS` → outro → next), PWR advances within the list, the rate pick
 is a no-op, and a `styrene_20` label in the provider accent names the
 provider top-center. Claude or `-1` restores the default — the boot path
@@ -323,7 +323,7 @@ SHORT_CLICKED/CLICKED after a GESTURE on the same press, so `gesture_seen`
 the tap and long-press handlers ignore a swipe; serial `splash next|prev`
 and `swipe up|down|left|right` drive the same handlers. The provider sets
 end with the full-screen scenes (`codex.scene.wave/rain`,
-`kimi.scene.night/orbit`); a name missing from the catalog is skipped and
+`kimi.scene.night/orbit`, `grok.scene.stars/build`); a name missing from the catalog is skipped and
 logged once. The parade (`splash_parade_start(fresh[])`) rotates the
 fresh slots every `PARADE_PROVIDER_MS` (20 s), Claude included with its
 rate-group pick; `ui_parade_start()` builds the mask; it never runs on its own (the idle
@@ -359,7 +359,7 @@ multi-provider scenario via `SIM_SCENARIO`).
 
 ## Daemon / host side
 
-**macOS (the ToknMon daemon):** `daemon/claude_usage_daemon.py` (Python, bleak/CoreBluetooth) with one module per provider under `daemon/providers/` (`claude.py` OAuth usage endpoint, `codex.py` local session logs, `kimi.py` usage API with token refresh, `grok.py` billing endpoint with Grok's own token — never refreshed — and a `~/.grok/logs/unified.jsonl` fallback). `install-mac.sh` creates `daemon/.venv` from `daemon/requirements-macos.txt`, renders `daemon/com.toknmon.daemon.plist` into `~/Library/LaunchAgents/com.toknmon.daemon.plist` (logs: `~/Library/Logs/toknmon.{out,err}.log`) and walks the config prompts; `--yes --no-prime [--providers a,b] [--device-name N]` runs it non-interactively. Config: `~/.config/toknmon/config` (keys in `daemon/config.example`, re-read every poll). On first start the daemon copies a Clawdmeter-era `~/.config/claude-usage-monitor/{config,ble-address}` into the new dir (`migrate_legacy_config()`, never deletes) and the installer boots out the legacy `com.user.claude-usage-daemon` agent, parking its plist under `~/.config/toknmon/legacy/`. Tests: `daemon/.venv/bin/python -m pytest daemon/tests -q`. The daemon finds the board by service UUID; `device_name` (default `ToknMon`, legacy `TokenMon`/`Clawdmeter` always accepted) only matters for the HID fallback and the stale-bond repair via `blueutil`. The attention-card hook (`daemon/attention-hook.sh`) still drops its flags in `~/.config/claude-usage-monitor` and the daemon reads them there.
+**macOS (the ToknMon daemon):** `daemon/claude_usage_daemon.py` (Python, bleak/CoreBluetooth) with one module per provider under `daemon/providers/` (`claude.py` OAuth usage endpoint, `codex.py` local session logs, `kimi.py` usage API with token refresh, `grok.py` billing endpoint with Grok's token, refreshed under Grok's own `auth.json.lock` when expired, and a `~/.grok/logs/unified.jsonl` fallback under 6 h old). `install-mac.sh` creates `daemon/.venv` from `daemon/requirements-macos.txt`, renders `daemon/com.toknmon.daemon.plist` into `~/Library/LaunchAgents/com.toknmon.daemon.plist` (logs: `~/Library/Logs/toknmon.{out,err}.log`) and walks the config prompts; `--yes --no-prime [--providers a,b] [--device-name N]` runs it non-interactively. Config: `~/.config/toknmon/config` (keys in `daemon/config.example`, re-read every poll). On first start the daemon copies a Clawdmeter-era `~/.config/claude-usage-monitor/{config,ble-address}` into the new dir (`migrate_legacy_config()`, never deletes) and the installer boots out the legacy `com.user.claude-usage-daemon` agent, parking its plist under `~/.config/toknmon/legacy/`. Tests: `daemon/.venv/bin/python -m pytest daemon/tests -q`. The daemon finds the board by service UUID; `device_name` (default `ToknMon`, legacy `TokenMon`/`Clawdmeter` always accepted) only matters for the HID fallback and the stale-bond repair via `blueutil`. The attention-card hook (`daemon/attention-hook.sh`) still drops its flags in `~/.config/claude-usage-monitor` and the daemon reads them there.
 
 **Linux (inherited from Clawdmeter, Claude-only, untested with ToknMon):** Bash daemon (`daemon/claude-usage-daemon.sh`) reads OAuth token, polls Anthropic API, sends JSON over BLE GATT. Run with `systemctl --user start claude-usage-daemon`. The unit file's `ExecStart` is the absolute path to the script — repoint it when switching between the worktree and the main checkout. Windows (`daemon/*_windows.py`, `install-windows.ps1`) is in the same inherited state.
 

@@ -13,12 +13,14 @@ H0–H8); the entries below summarize them.
 
 - **Grok Build CLI provider** (H9): the daemon polls Grok's weekly credit
   window from `https://cli-chat-proxy.grok.com/v1/billing?format=credits`
-  with the token Grok keeps in `~/.grok/auth.json` (never refreshed by the
-  daemon), falling back to the newest billing line in Grok's log. The
+  with the token Grok keeps in `~/.grok/auth.json`, falling back to the
+  newest billing line in Grok's log when it is under 6 h old. The
   firmware gets a fourth slot (`grok`, `slot 3`) with a silver dot grid, an
   original Grokbot-style mascot (a white ball with capsule eyes: idle, look,
-  bike) and a deeper BLE receive
-  queue so four back-to-back payloads fit.
+  bike, and the full-screen scenes `grok.scene.stars` and `grok.scene.build`)
+  and a deeper BLE receive queue so four back-to-back payloads fit. The
+  daemon refreshes Grok's token itself through Grok's own `auth.json.lock`
+  so the slot stays live while Grok is closed.
 
 - `tools/check_pii.sh` scans every tracked file for personal or hardware
   identifiers (home paths, hostnames, e-mail addresses, non-documentation MAC

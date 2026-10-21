@@ -48,7 +48,7 @@ requests are welcome, support is best-effort.
 | --- | --- |
 | <img src="docs/media/screens/claude-usage.png" width="240" alt="Claude usage view with Current, Weekly and Fable bars"> | **Four providers, one carousel.** Claude Code (5-hour session, weekly and the model-scoped **Fable** weekly window when your plan has one), Codex CLI, Kimi Code and Grok Build CLI each get a slot. Tap or swipe to page, or let it rotate every 8 s. Slots without fresh data are skipped. |
 | <img src="docs/media/screens/hw-codex.png" width="240" alt="Codex dot grid at 91 percent on the real panel"> | **A screen per provider.** Codex shows a 10×10 dot grid filling to the weekly percentage (plus a compact 5h bar when the plan has one); Grok shows its weekly credit window on a silver dot grid; Kimi shows 5h and weekly bars in blue; Claude keeps its bars in clay. Palettes, bar tiers and status lines never bleed between providers. |
-| <img src="docs/media/screens/mascot-codex.png" width="240" alt="Mascot mode pinned to Codex"> | **Mascots and mascot mode.** Clawd for Claude (Anthropic's official set), original three-dots, crescent-moon and Grokbot-style ball characters for Codex, Kimi and Grok, each with idle, acts and a mountain-bike ride (Codex and Kimi also have two full-screen scenes). Long-press the meter to watch a provider's set full-size. |
+| <img src="docs/media/screens/mascot-codex.png" width="240" alt="Mascot mode pinned to Codex"> | **Mascots and mascot mode.** Clawd for Claude (Anthropic's official set), original three-dots, crescent-moon and Grokbot-style ball characters for Codex, Kimi and Grok, each with idle, acts, a mountain-bike ride and two full-screen scenes. Long-press the meter to watch a provider's set full-size. |
 | <img src="docs/media/screens/parade.png" width="240" alt="Idle parade with the Codex mascot on stage"> | **The parade.** The device rotates every live provider's full-size mascot every 20 s, until you swipe back. It never starts on its own (serial `parade on`). |
 | <img src="docs/media/screens/scene-kimi-night.png" width="240" alt="Kimi night scene"> | **Draw your own.** Animations are plain text grids compiled by a small Node tool. The Codex and Kimi scenes were authored by an AI agent from a two-sentence brief. |
 | <img src="docs/media/screens/splash-claude.png" width="240" alt="Default Clawd splash"> | **Quiet by design.** No cloud, no accounts of its own: the daemon reads the tokens your CLIs already have (Claude Code, Kimi) or local logs (Codex), polls once a minute with no token spend, and pushes ~150 bytes per provider over BLE. The side buttons double as Bluetooth keyboard keys for Claude Code (Space, Shift+Tab). |
@@ -68,7 +68,7 @@ per cell ([`docs/media/README.md`](docs/media/README.md)).
 | **Claude** | <img src="docs/media/screens/splash-claude.png" width="96" alt="Clawd on the splash"><br>official Clawd set (17 animations: core poses and persona scenes, not redistributed here) | — | — | <img src="docs/media/animations/claude.bike.gif" width="150" alt="Clawd on a mountain bike"> | — | — |
 | **Codex** | <img src="docs/media/animations/codex.idle.gif" width="150" alt="Codex idle"> | <img src="docs/media/animations/codex.dots.gif" width="150" alt="Codex dots bouncing"> | <img src="docs/media/animations/codex.think.gif" width="150" alt="Codex thinking"> | <img src="docs/media/animations/codex.bike.gif" width="150" alt="Codex on a mountain bike"> | <img src="docs/media/animations/codex.scene.wave.gif" width="150" alt="Codex wave scene"> | <img src="docs/media/animations/codex.scene.rain.gif" width="150" alt="Codex rain scene"> |
 | **Kimi** | <img src="docs/media/animations/kimi.idle.gif" width="150" alt="Kimi idle"> | <img src="docs/media/animations/kimi.glow.gif" width="150" alt="Kimi glow"> | <img src="docs/media/animations/kimi.sleep.gif" width="150" alt="Kimi sleeping"> | <img src="docs/media/animations/kimi.bike.gif" width="150" alt="Kimi on a mountain bike"> | <img src="docs/media/animations/kimi.scene.night.gif" width="150" alt="Kimi night scene"> | <img src="docs/media/animations/kimi.scene.orbit.gif" width="150" alt="Kimi orbit scene"> |
-| **Grok** | <img src="docs/media/animations/grok.idle.gif" width="150" alt="Grok idle"> | <img src="docs/media/animations/grok.look.gif" width="150" alt="Grok glancing and hopping"> | — | <img src="docs/media/animations/grok.bike.gif" width="150" alt="Grok on a mountain bike"> | — | — |
+| **Grok** | <img src="docs/media/animations/grok.idle.gif" width="150" alt="Grok idle"> | <img src="docs/media/animations/grok.look.gif" width="150" alt="Grok glancing and hopping"> | — | <img src="docs/media/animations/grok.bike.gif" width="150" alt="Grok on a mountain bike"> | <img src="docs/media/animations/grok.scene.stars.gif" width="150" alt="Grok stars scene"> | <img src="docs/media/animations/grok.scene.build.gif" width="150" alt="Grok build scene"> |
 
 On the device the scenes fill the 480×480 panel:
 
@@ -115,7 +115,7 @@ PlatformIO env; shared code never changes. See
 | Claude Code | logged in (`claude` → `/login`): the OAuth token lives in the Keychain (service `Claude Code-credentials`) |
 | Codex CLI | at least one session so `~/.codex/sessions/` has a `rollout-*.jsonl` from the last 7 days; no credentials are read |
 | Kimi Code CLI | logged in once so `~/.kimi-code/credentials/` has a token file; the daemon refreshes the token itself afterwards |
-| Grok Build CLI | logged in (`grok login`) so `~/.grok/auth.json` holds a token; the daemon never refreshes it, Grok does while it runs |
+| Grok Build CLI | logged in (`grok login`) so `~/.grok/auth.json` holds a token; the daemon refreshes it afterwards the way Grok does, under Grok's own `auth.json.lock` |
 
 > **Clone location.** launchd runs the daemon from the Python inside
 > `daemon/.venv`. If the clone lives under `~/Documents`, `~/Desktop` or
@@ -193,7 +193,7 @@ The board boots on the **splash** (animations) and swipes to the **meter**
   a slot is live for 90 s after its last payload and skipped otherwise.
 - **Mascot mode**: the provider's full-size set plays in order (Codex: idle,
   dots, think, bike, wave, rain; Kimi: idle, glow, sleep, bike, night, orbit;
-  Grok: idle, look, bike; Claude: the official set) with the provider's name on top; tap, swipe
+  Grok: idle, look, bike, stars, build; Claude: the official set) with the provider's name on top; tap, swipe
   sideways or PWR to step; swipe vertically to return.
 - **Parade**: every live provider's mascot gets 20 s on stage in turn; a
   vertical swipe ends it. It never starts on its own: the meter stays up
@@ -209,7 +209,7 @@ The board boots on the **splash** (animations) and swipes to the **meter**
 | **Claude Code** | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token — one request per poll, no token spend | Current (5h), Weekly, and the **Fable** weekly bar when the subscription reports a model-scoped window |
 | **Codex CLI** | the newest `rate_limits` entry in `~/.codex/sessions/**/rollout-*.jsonl` (last 7 days) — local files, no network | 10×10 dot grid for the weekly window, large percentage and reset time; compact 5h bar only when the plan has one |
 | **Kimi Code** | `GET https://api.kimi.com/coding/v1/usages` with the token from `~/.kimi-code/credentials`; expired tokens are refreshed through `https://auth.kimi.com/api/oauth/token` and written back like the CLI does | 5h and weekly bars |
-| **Grok Build CLI** | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with the access token from `~/.grok/auth.json` (never refreshed by the daemon); when the token has expired or the call fails, the newest billing line in `~/.grok/logs/unified.jsonl` | 10×10 dot grid for the weekly credit window (Grok has no 5h window) |
+| **Grok Build CLI** | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with the access token from `~/.grok/auth.json`; an expired token is refreshed through `https://auth.x.ai/oauth2/token` and written back like Grok does; when the call still fails, the newest billing line in `~/.grok/logs/unified.jsonl` if it is under 6 h old | 10×10 dot grid for the weekly credit window (Grok has no 5h window) |
 
 **Detection.** With `providers = auto` (the default) the daemon checks on every
 poll which providers are usable, locally and without network: a Claude Code
@@ -295,7 +295,7 @@ The most common ones; the full list is in
 | Two daemons fighting over the board | A Clawdmeter-era agent is still loaded: `./install-mac.sh` retires it, or `launchctl bootout gui/$(id -u)/com.user.claude-usage-daemon` |
 | Kimi slot stays empty | Log in once with the Kimi Code CLI; the daemon refreshes the token from then on |
 | Codex slot stays empty | Run Codex once; logs older than 7 days are ignored |
-| Grok slot stays empty or stale | Run `grok` once (or `grok login`): the daemon reuses Grok's token and, once it expires, only the value Grok last logged |
+| Grok slot stays empty | Run `grok login`: the stored sign-in was rejected (`invalid_grant`), so the daemon cannot refresh the token any more |
 | `No /dev/cu.usbmodem* found` when flashing | Data cable, other USB-C port, or pass the port explicitly |
 
 ## Development
