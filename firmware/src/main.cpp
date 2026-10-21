@@ -364,7 +364,7 @@ static void check_serial_cmd() {
             else if (strcmp(cmd_buf, "name") == 0)  print_device_name();
             else if (strncmp(cmd_buf, "name ", 5) == 0) set_device_name(cmd_buf + 5);
             else if (strncmp(cmd_buf, "screen ", 7) == 0) cmd_screen(cmd_buf + 7);
-            else if (strcmp(cmd_buf, "next") == 0) qa_reply(ui_carousel_next(), "need usage view with 2+ fresh slots");
+            else if (strcmp(cmd_buf, "next") == 0) qa_reply(ui_carousel_next(), "need usage view and another fresh view");
             else if (strncmp(cmd_buf, "slot ", 5) == 0) cmd_slot(cmd_buf + 5);
             else if (strncmp(cmd_buf, "parade ", 7) == 0) cmd_parade(cmd_buf + 7);
             else if (strncmp(cmd_buf, "splash ", 7) == 0) cmd_splash(cmd_buf + 7);

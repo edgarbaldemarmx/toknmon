@@ -397,12 +397,6 @@ static bool view_received(int v) {
     return slots[v].received;
 }
 
-static int fresh_view_count(void) {
-    int n = 0;
-    for (int v = 0; v < UI_VIEW_COUNT; v++) if (view_fresh(v)) n++;
-    return n;
-}
-
 static int view_pos(int v) {
     for (int i = 0; i < UI_VIEW_COUNT; i++) if (VIEW_ORDER[i] == v) return i;
     return 0;
@@ -426,6 +420,14 @@ static int prev_fresh_slot(int from) {
         if (view_fresh(v)) return v;
     }
     return -1;
+}
+
+// True when a fresh view other than the one on screen exists. The picked
+// view stays up after it goes stale, so a stale pick with a single live view
+// elsewhere must still page; counting fresh views would block it.
+static bool can_page(void) {
+    int nxt = next_fresh_slot(visible_slot);
+    return nxt >= 0 && nxt != visible_slot;
 }
 
 static lv_color_t provider_color(int i) {
@@ -1274,13 +1276,13 @@ static void carousel_advance(void) {
 }
 
 bool ui_carousel_next(void) {
-    if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_view_count() < 2) return false;
+    if (current_screen != SCREEN_USAGE || view_state != 2 || !can_page()) return false;
     carousel_advance();
     return true;
 }
 
 bool ui_carousel_prev(void) {
-    if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_view_count() < 2) return false;
+    if (current_screen != SCREEN_USAGE || view_state != 2 || !can_page()) return false;
     int prv = prev_fresh_slot(visible_slot);
     if (prv < 0 || prv == visible_slot) return false;
     pick_slot(prv);
@@ -1544,14 +1546,14 @@ static void global_click_cb(lv_event_t* e) {
     else                                  ui_show_screen(SCREEN_SPLASH);
 }
 
-// Usage view tap: with more than one live provider it pages the carousel;
+// Usage view tap: when another view is live it pages the carousel;
 // otherwise it keeps the historical behavior (toggle to the splash).
 // LVGL delivers the object's SHORT_CLICKED before the indev CLICKED that
 // alert_tap_cb vetoes, so a tap that dismisses an alert must do nothing here.
 static void usage_tap_cb(lv_event_t* e) {
     (void)e;
     if (gesture_seen || alert_active) return;
-    if (current_screen == SCREEN_USAGE && view_state == 2 && fresh_view_count() > 1) {
+    if (current_screen == SCREEN_USAGE && view_state == 2 && can_page()) {
         carousel_advance();
         return;
     }

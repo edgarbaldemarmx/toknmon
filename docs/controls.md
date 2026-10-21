@@ -119,7 +119,7 @@ Open the USB serial console at **115200 baud**
 | `screen splash` | show the default (Claude) splash | `ok` |
 | `screen splash claude\|codex\|kimi\|grok` | mascot mode for that provider | `ok` / `err …` |
 | `slot 0-4` | show that view on the meter and make it the picked one (0 Claude, 1 Codex, 2 Kimi, 3 Grok, 4 Fable) | `ok` / `err slot not fresh` |
-| `next` | page the carousel | `ok` / `err need usage view with 2+ fresh slots` |
+| `next` | page the carousel | `ok` / `err need usage view and another fresh view` |
 | `splash next` / `splash prev` | step the animation (splash on screen) | `ok` / `err splash not on screen` |
 | `swipe up\|down\|left\|right` | inject a gesture through the same handlers as touch | `ok` |
 | `parade on` / `parade off` | start the parade / back to the meter | `ok` / `err no fresh slot` |
