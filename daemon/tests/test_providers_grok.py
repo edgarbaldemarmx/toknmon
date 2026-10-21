@@ -15,6 +15,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -76,6 +77,7 @@ def _fresh_module_state(monkeypatch):
     monkeypatch.setattr(grok, "_dead_refresh_tokens", set())
     monkeypatch.setattr(grok, "_used_refresh_tokens", set(), raising=False)
     monkeypatch.setattr(grok, "_unsaved_entries", {}, raising=False)
+    monkeypatch.setattr(grok, "_refresh_backoff_until", 0.0, raising=False)
     monkeypatch.setattr(grok, "read_config", lambda key: None)
     lines: list[str] = []
     monkeypatch.setattr(grok, "log", lines.append)
@@ -640,3 +642,128 @@ def test_invalid_grant_is_not_retried_until_the_refresh_token_changes(tmp_path, 
     _write_auth(home, blob)
     _run(grok.poll(client=client, now=NOW))
     assert [r.method for r in seen].count("POST") == 2
+
+
+
+def _fail_writes_once(monkeypatch):
+    real_write = grok._write_auth_atomic
+    state = {"failing": True}
+
+    def flaky_write(path, blob):
+        if state["failing"]:
+            raise OSError("read-only file system")
+        real_write(path, blob)
+
+    monkeypatch.setattr(grok, "_write_auth_atomic", flaky_write)
+    return state
+
+
+def test_unsaved_tokens_never_overwrite_credentials_stored_after_a_new_sign_in(tmp_path, monkeypatch):
+    """A `grok login` between the failed write-back and the retry wins: the
+    retry must not merge the stale in-memory tokens over the new sign-in."""
+    home = _grok_home(tmp_path, monkeypatch, expires_at=NOW - 1)
+    writes = _fail_writes_once(monkeypatch)
+    seen: list[httpx.Request] = []
+    client = _client(_oidc_handler(seen))
+    _run(grok.poll(client=client, now=NOW))                    # refresh ok, write fails
+    writes["failing"] = False
+    real_enter = grok._AuthLock.__enter__
+
+    def sign_in_first(lock):
+        # The user runs `grok login` after the daemon read auth.json but
+        # before it takes the lock.
+        blob = json.loads((home / "auth.json").read_text())
+        blob[ENTRY].update(key="xai-test-relogin-key", refresh_token="xai-test-relogin-refresh",
+                           expires_at=_grok_iso(NOW + 3600))
+        _write_auth(home, blob)
+        monkeypatch.setattr(grok._AuthLock, "__enter__", real_enter)
+        return real_enter(lock)
+
+    monkeypatch.setattr(grok._AuthLock, "__enter__", sign_in_first)
+    res = _run(grok.poll(client=client, now=NOW))
+    assert res.ok is True
+    stored = json.loads((home / "auth.json").read_text())[ENTRY]
+    assert stored["key"] == "xai-test-relogin-key"
+    assert stored["refresh_token"] == "xai-test-relogin-refresh"
+    assert [r.headers["authorization"] for r in seen if str(r.url) == BILLING_URL][-1] == "Bearer xai-test-relogin-key"
+
+
+def test_busy_lock_still_uses_the_unsaved_refreshed_token(tmp_path, monkeypatch):
+    home = _grok_home(tmp_path, monkeypatch, expires_at=NOW - 1)
+    _fail_writes_once(monkeypatch)
+    seen: list[httpx.Request] = []
+    client = _client(_oidc_handler(seen))
+    _run(grok.poll(client=client, now=NOW))
+    fd = os.open(home / "auth.json.lock", os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX)                             # Grok holds the lock
+    try:
+        other = os.open(home / "auth.json.lock", os.O_RDWR)   # separate open file: conflicts
+        os.close(other)
+        res = _run(grok.poll(client=client, now=NOW))
+    finally:
+        os.close(fd)
+    assert res.ok is True
+    assert [r.headers["authorization"] for r in seen if str(r.url) == BILLING_URL] == [f"Bearer {NEW_KEY}"] * 2
+    assert [r.method for r in seen].count("POST") == 1
+
+
+def test_transient_refresh_failure_backs_off_before_the_next_token_request(tmp_path, monkeypatch):
+    _grok_home(tmp_path, monkeypatch, expires_at=NOW - 1)
+    seen: list[httpx.Request] = []
+    client = _client(_oidc_handler(seen, token_status=503, token_body={}))
+    _run(grok.poll(client=client, now=NOW))
+    _run(grok.poll(client=client, now=NOW + 60))               # inside the back-off: no POST
+    assert [r.method for r in seen].count("POST") == 1
+    _run(grok.poll(client=client, now=NOW + grok.REFRESH_BACKOFF_S + 1))
+    assert [r.method for r in seen].count("POST") == 2
+
+
+def test_slow_token_endpoint_is_abandoned_within_the_budget_and_releases_the_lock(tmp_path, monkeypatch):
+    home = _grok_home(tmp_path, monkeypatch, expires_at=NOW - 1)
+    before = (home / "auth.json").read_bytes()
+    monkeypatch.setattr(grok, "REFRESH_POST_BUDGET_S", 0.05, raising=False)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == DISCOVERY_URL:
+            return httpx.Response(200, json={"issuer": ISSUER, "token_endpoint": TOKEN_URL})
+        await asyncio.sleep(5)
+        return httpx.Response(200, json={})
+
+    started = time.monotonic()
+    res = _run(grok.poll(client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), now=NOW))
+    assert time.monotonic() - started < 2
+    assert res.ok is False
+    assert (home / "auth.json").read_bytes() == before
+    fd = os.open(home / "auth.json.lock", os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        os.close(fd)
+
+
+
+def test_expired_credentials_from_another_process_drop_the_unsaved_tokens_and_refresh_with_the_new_grant(tmp_path, monkeypatch):
+    home = _grok_home(tmp_path, monkeypatch, expires_at=NOW - 1)
+    writes = _fail_writes_once(monkeypatch)
+    seen: list[httpx.Request] = []
+    client = _client(_oidc_handler(seen))
+    _run(grok.poll(client=client, now=NOW))                    # refresh ok, write fails
+    writes["failing"] = False
+    real_enter = grok._AuthLock.__enter__
+
+    def store_expired_first(lock):
+        blob = json.loads((home / "auth.json").read_text())
+        blob[ENTRY].update(key="xai-test-other-key", refresh_token="xai-test-other-refresh",
+                           expires_at=_grok_iso(NOW - 10))
+        _write_auth(home, blob)
+        monkeypatch.setattr(grok._AuthLock, "__enter__", real_enter)
+        return real_enter(lock)
+
+    monkeypatch.setattr(grok._AuthLock, "__enter__", store_expired_first)
+    second = _run(grok.poll(client=client, now=NOW))
+    assert second.ok is False                                  # neither stale nor expired token is used
+    assert json.loads((home / "auth.json").read_text())[ENTRY]["refresh_token"] == "xai-test-other-refresh"
+    third = _run(grok.poll(client=client, now=NOW))
+    assert third.ok is True
+    posts = [parse_qs(r.content.decode()) for r in seen if r.method == "POST"]
+    assert [p["refresh_token"] for p in posts] == [[REFRESH], ["xai-test-other-refresh"]]

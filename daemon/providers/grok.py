@@ -88,6 +88,11 @@ TIMEOUT = 10.0
 # Refresh when the token expires within this many seconds (Grok's own
 # GROK_AUTH_EARLY_INVALIDATION_SECS default).
 REFRESH_MARGIN_S = 300
+# After a transient refresh failure (network, HTTP, bad response, discovery)
+# no new token request is sent for this long.
+REFRESH_BACKOFF_S = 300
+# Upper bound for the token POST, which runs while Grok's lock is held.
+REFRESH_POST_BUDGET_S = 8.0
 # Lifetime assumed when a successful refresh response carries no usable
 # ``expires_in``; the new tokens are still persisted so a rotated refresh
 # token is never lost.
@@ -118,6 +123,7 @@ _warned: set[str] = set()
 _dead_refresh_tokens: set[str] = set()
 _used_refresh_tokens: set[str] = set()
 _unsaved_entries: dict[str, dict] = {}
+_refresh_backoff_until = 0.0
 # Upper bound for a usable ``expires_in`` (30 days); anything else falls back
 # to DEFAULT_TOKEN_LIFETIME_S.
 MAX_TOKEN_LIFETIME_S = 30 * 86400
@@ -341,8 +347,33 @@ async def refresh_access_token(home: Path, name: str, entry: dict, client: httpx
         raise RefreshError(SIGNIN_EXPIRED)
     if _fingerprint(refresh) in _used_refresh_tokens:
         return _retry_unsaved(home, name, now)
+    if now < _refresh_backoff_until:
+        raise RefreshError("refresh paused after a failed attempt")
+    try:
+        return await _refresh_under_lock(home, name, entry, client, now)
+    except _TransientRefreshError as e:
+        _back_off(now)
+        raise RefreshError(str(e)) from e
+
+
+class _TransientRefreshError(RefreshError):
+    """A refresh failure worth retrying only after REFRESH_BACKOFF_S."""
+
+
+def _back_off(now: float) -> None:
+    global _refresh_backoff_until
+    _refresh_backoff_until = now + REFRESH_BACKOFF_S
+
+
+async def _refresh_under_lock(home: Path, name: str, entry: dict, client: httpx.AsyncClient,
+                              now: float) -> str:
     # Discovery happens before the lock so Grok never waits on it.
-    url = await _token_endpoint(client, entry)
+    try:
+        url = await _token_endpoint(client, entry)
+    except RefreshError as e:
+        if str(e).startswith("refresh refused"):
+            raise
+        raise _TransientRefreshError(str(e)) from e
     path = home / "auth.json"
     with _AuthLock(home):
         blob = _load_auth(home)
@@ -363,21 +394,24 @@ async def refresh_access_token(home: Path, name: str, entry: dict, client: httpx
         form = {"grant_type": "refresh_token", "refresh_token": refresh, "client_id": client_id}
         headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
         try:
-            resp = await client.post(url, data=form, headers=headers, timeout=TIMEOUT)
+            resp = await asyncio.wait_for(client.post(url, data=form, headers=headers, timeout=TIMEOUT),
+                                          REFRESH_POST_BUDGET_S)
+        except asyncio.TimeoutError as e:
+            raise _TransientRefreshError("refresh request timed out") from e
         except httpx.HTTPError as e:
-            raise RefreshError(f"refresh request failed: {type(e).__name__}") from e
+            raise _TransientRefreshError(f"refresh request failed: {type(e).__name__}") from e
         if resp.status_code in (400, 401) and _invalid_grant(resp):
             _dead_refresh_tokens.add(_fingerprint(refresh))
             raise RefreshError(SIGNIN_EXPIRED)
         if resp.status_code != 200:
-            raise RefreshError(f"refresh HTTP {resp.status_code}")
+            raise _TransientRefreshError(f"refresh HTTP {resp.status_code}")
         try:
             body = resp.json()
         except ValueError as e:
-            raise RefreshError("refresh response is not JSON") from e
+            raise _TransientRefreshError("refresh response is not JSON") from e
         token = body.get("access_token") if isinstance(body, dict) else None
         if not isinstance(token, str) or not token:
-            raise RefreshError("refresh response has no access_token")
+            raise _TransientRefreshError("refresh response has no access_token")
         rotated = body.get("refresh_token")
         if isinstance(rotated, str) and rotated and rotated != refresh:
             # The issuer rotated it: the old refresh token is consumed and
@@ -416,23 +450,47 @@ def _lifetime(value) -> int:
 def _retry_unsaved(home: Path, name: str, now: float) -> str:
     """The on-disk refresh token was already consumed by this process: write
     the rotated entry kept in memory (under Grok's lock) and return its access
-    token. Never contacts the issuer."""
+    token. Never contacts the issuer. If auth.json meanwhile holds a refresh
+    token this process did not consume (Grok refreshed, or `grok login`), the
+    disk wins and the pending entry is dropped. A busy lock skips the write
+    but still returns the pending token."""
     pending = _unsaved_entries.get(name)
     if pending is None:
         raise RefreshError("refresh token already used; waiting for Grok to store a new one")
-    with _AuthLock(home):
-        blob = _load_auth(home)
-        if isinstance(blob, dict) and isinstance(blob.get(name), dict):
-            blob[name] = {**blob[name], **{k: pending[k] for k in ("key", "refresh_token", "expires_at")}}
-            try:
-                _write_auth_atomic(home / "auth.json", blob)
-                _unsaved_entries.pop(name, None)
-            except OSError as e:
-                log(f"Grok: refreshed token could not be written to auth.json ({type(e).__name__}); will retry")
+    try:
+        lock = _AuthLock(home).__enter__()
+    except RefreshError:
+        lock = None   # busy: write on a later poll, the pending token is still valid
+    if lock is not None:
+        try:
+            blob = _load_auth(home)
+            current = blob.get(name) if isinstance(blob, dict) else None
+            if isinstance(current, dict):
+                stored = current.get("refresh_token")
+                if not (isinstance(stored, str) and _fingerprint(stored) in _used_refresh_tokens):
+                    _unsaved_entries.pop(name, None)
+                    return _disk_key(current, now)
+                blob[name] = {**current, **{k: pending[k] for k in ("key", "refresh_token", "expires_at")}}
+                try:
+                    _write_auth_atomic(home / "auth.json", blob)
+                    _unsaved_entries.pop(name, None)
+                except OSError as e:
+                    log(f"Grok: refreshed token could not be written to auth.json ({type(e).__name__}); will retry")
+        finally:
+            lock.__exit__(None, None, None)
     exp = iso_to_epoch(pending.get("expires_at"))
     if exp is not None and exp <= now:
         raise RefreshError("unsaved refreshed token expired")
     return pending["key"]
+
+
+def _disk_key(entry: dict, now: float) -> str:
+    """Access token of an entry another process stored, if it is still valid."""
+    key = entry.get("key")
+    exp = iso_to_epoch(entry.get("expires_at"))
+    if isinstance(key, str) and key.strip() and (exp is None or exp > now):
+        return key.strip()
+    raise RefreshError("auth.json changed during refresh; retrying on the next poll")
 
 
 async def _resolve_token(client: httpx.AsyncClient, home: Path, now: float) -> tuple[str | None, str]:

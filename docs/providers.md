@@ -115,8 +115,15 @@ providers = claude, grok         # Claude and Grok only
 
   A rejected grant (`invalid_grant`) leaves `auth.json` untouched, reports
   "Grok sign-in expired; run `grok login`" and is not retried until the
-  refresh token changes. Any other failure also leaves the file untouched.
-  Tokens never appear in the log.
+  refresh token changes. Any other failure also leaves the file untouched,
+  and the daemon sends no new token request for 5 minutes. The token
+  request is abandoned after 8 s so Grok never waits long on the lock.
+  If the write-back fails, the daemon keeps the new tokens in memory, uses
+  them and retries the write on later polls (skipping it while Grok holds
+  the lock); if `auth.json` meanwhile holds credentials the daemon did not
+  produce (Grok refreshed, or `grok login`), those win and the kept tokens
+  are dropped. The kept tokens do not survive a daemon restart; after one,
+  run `grok` or `grok login` once. Tokens never appear in the log.
 - **Grok fallback**: when there is no usable token or the endpoint fails, the
   daemon reads the newest `billing: fetched credits config` line that the CLI
   logged in `~/.grok/logs/unified.jsonl` (scanned off the event loop, at most
