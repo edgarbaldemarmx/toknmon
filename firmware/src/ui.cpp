@@ -349,17 +349,19 @@ struct SlotState {
     bool      ok;         // last payload's ok flag
 };
 static SlotState  slots[PROVIDER_COUNT] = {};
-static int        visible_slot = PROVIDER_CLAUDE;
+static int        visible_view = PROVIDER_CLAUDE;
 static bool       data_received = false;     // any ok payload on any slot since boot
-static int        picked_slot = PROVIDER_CLAUDE;   // the user's choice (NVS)
+static int        picked_view = PROVIDER_CLAUDE;   // the user's choice (NVS)
 static bool       fable_seen = false;        // a Claude payload carried the model limit since boot
 
 // ---- Views ----
 // The carousel pages views, not providers: one per provider slot plus the
 // Fable view (Claude's model-scoped weekly limit as a grid of small Clawds).
 // It follows Claude in paging order and exists only while Claude's payload
-// carries that limit and the board has the dot canvas. visible_slot and
-// picked_slot hold view ids (UI_VIEW_FABLE = PROVIDER_COUNT).
+// carries that limit and the board has the dot canvas. Naming: a slot is a
+// provider's stored payload (slots[], ui_update_slot()); a view is a page of
+// the carousel. visible_view and picked_view hold view ids
+// (UI_VIEW_FABLE = PROVIDER_COUNT); view_provider() maps one to its slot.
 static const int VIEW_ORDER[UI_VIEW_COUNT] = {
     PROVIDER_CLAUDE, UI_VIEW_FABLE, PROVIDER_CODEX, PROVIDER_KIMI, PROVIDER_GROK };
 
@@ -403,7 +405,7 @@ static int view_pos(int v) {
 }
 
 // Next fresh view after `from` in paging order, or -1 when none is fresh.
-static int next_fresh_slot(int from) {
+static int next_fresh_view(int from) {
     const int pos = view_pos(from);
     for (int k = 1; k <= UI_VIEW_COUNT; k++) {
         int v = VIEW_ORDER[(pos + k) % UI_VIEW_COUNT];
@@ -413,7 +415,7 @@ static int next_fresh_slot(int from) {
 }
 
 // Previous fresh view before `from` in paging order, or -1 when none is fresh.
-static int prev_fresh_slot(int from) {
+static int prev_fresh_view(int from) {
     const int pos = view_pos(from);
     for (int k = 1; k <= UI_VIEW_COUNT; k++) {
         int v = VIEW_ORDER[(pos + UI_VIEW_COUNT - k) % UI_VIEW_COUNT];
@@ -426,8 +428,8 @@ static int prev_fresh_slot(int from) {
 // view stays up after it goes stale, so a stale pick with a single live view
 // elsewhere must still page; counting fresh views would block it.
 static bool can_page(void) {
-    int nxt = next_fresh_slot(visible_slot);
-    return nxt >= 0 && nxt != visible_slot;
+    int nxt = next_fresh_view(visible_view);
+    return nxt >= 0 && nxt != visible_view;
 }
 
 static lv_color_t provider_color(int i) {
@@ -683,7 +685,7 @@ static void build_idle_group(lv_obj_t* parent) {
 
 // Codex / Grok dot grid (LAYOUT_DOTS). Everything lives in one transparent container
 // so the layout switch is a single show/hide. Objects are created once here;
-// layout_dots() places them and show_slot() recolors the dots.
+// layout_dots() places them and show_view() recolors the dots.
 static void build_dots_group(lv_obj_t* parent) {
     dots_group = lv_obj_create(parent);
     lv_obj_set_size(dots_group, L.scr_w, L.scr_h);
@@ -775,7 +777,7 @@ static void draw_dots(int filled, const ProviderTheme& th) {
         lv_canvas_finish_layer(dots_canvas, &layer);
     }
     dots_filled = filled;
-    dots_view = visible_slot;
+    dots_view = visible_view;
 }
 
 // Fable view: the same canvas drawn as a 10×10 grid of small Clawds, `filled`
@@ -1019,7 +1021,7 @@ static void init_alert(void) {
 
 // ======== Public API ========
 
-static int load_picked_slot(void);
+static int load_picked_view(void);
 
 void ui_init(void) {
     compute_layout(board_caps());
@@ -1074,8 +1076,8 @@ void ui_init(void) {
 
     init_alert();
     apply_usage_layout(LAYOUT_BARS);
-    picked_slot = load_picked_slot();
-    visible_slot = picked_slot;
+    picked_view = load_picked_view();
+    visible_view = picked_view;
 }
 
 // ---- Title area: clock + provider ----
@@ -1107,15 +1109,15 @@ static const char* view_title(int v) {
 }
 
 static void refresh_title(void) {
-    const int prov = view_provider(visible_slot);
+    const int prov = view_provider(visible_view);
     if (clock_base_epoch > 0) {
         lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
-        lv_label_set_text(lbl_provider_pill, view_title(visible_slot));
+        lv_label_set_text(lbl_provider_pill, view_title(visible_view));
         lv_obj_set_style_bg_color(lbl_provider_pill, provider_color(prov), 0);
         lv_obj_set_style_text_color(lbl_provider_pill, provider_theme(prov).pill_text, 0);
         clock_last_min = -1;   // force the clock tick to rewrite + re-layout the title
     } else if (data_received) {
-        lv_label_set_text(lbl_title, view_title(visible_slot));
+        lv_label_set_text(lbl_title, view_title(visible_view));
         lv_obj_set_style_text_color(lbl_title, provider_color(prov), 0);
     } else {
         lv_label_set_text(lbl_title, "Usage");
@@ -1245,13 +1247,13 @@ static void render_dots(int idx, const UsageData* data) {
 }
 
 // ---- Carousel ----
-static void show_slot(int idx);
+static void show_view(int idx);
 
 // The user picked `idx`: show it and remember it across reboots.
-static void pick_slot(int idx) {
-    show_slot(idx);
-    if (picked_slot == idx) return;
-    picked_slot = idx;
+static void pick_view(int idx) {
+    show_view(idx);
+    if (picked_view == idx) return;
+    picked_view = idx;
     Preferences prefs;
     prefs.begin(UI_SLOT_NVS_NAMESPACE, false);
     prefs.putUChar(UI_SLOT_NVS_KEY, (uint8_t)idx);
@@ -1259,7 +1261,7 @@ static void pick_slot(int idx) {
     Serial.printf("UI: picked view %d\n", idx);
 }
 
-static int load_picked_slot(void) {
+static int load_picked_view(void) {
     Preferences prefs;
     prefs.begin(UI_SLOT_NVS_NAMESPACE, true);
     int idx = prefs.getUChar(UI_SLOT_NVS_KEY, PROVIDER_CLAUDE);
@@ -1270,9 +1272,9 @@ static int load_picked_slot(void) {
 
 // Move to the next fresh slot (if there is another one).
 static void carousel_advance(void) {
-    int nxt = next_fresh_slot(visible_slot);
-    if (nxt < 0 || nxt == visible_slot) return;
-    pick_slot(nxt);
+    int nxt = next_fresh_view(visible_view);
+    if (nxt < 0 || nxt == visible_view) return;
+    pick_view(nxt);
 }
 
 bool ui_carousel_next(void) {
@@ -1283,15 +1285,15 @@ bool ui_carousel_next(void) {
 
 bool ui_carousel_prev(void) {
     if (current_screen != SCREEN_USAGE || view_state != 2 || !can_page()) return false;
-    int prv = prev_fresh_slot(visible_slot);
-    if (prv < 0 || prv == visible_slot) return false;
-    pick_slot(prv);
+    int prv = prev_fresh_view(visible_view);
+    if (prv < 0 || prv == visible_view) return false;
+    pick_view(prv);
     return true;
 }
 
 bool ui_show_slot(int idx) {
     if (idx < 0 || idx >= UI_VIEW_COUNT || !view_fresh(idx)) return false;
-    pick_slot(idx);
+    pick_view(idx);
     return true;
 }
 
@@ -1334,19 +1336,19 @@ void ui_update_slot(int idx, const UsageData* data) {
     // The picked view always comes (back) on screen. Until it has data since
     // boot, the first view with data stands in for it; otherwise only the
     // view on screen re-renders.
-    if (view_provider(picked_slot) == idx && view_fresh(picked_slot)) {
-        show_slot(picked_slot);
-    } else if (!view_received(picked_slot) && (first || !view_fresh(visible_slot))) {
-        show_slot(idx);
-    } else if (view_provider(visible_slot) == idx) {
-        show_slot(visible_slot);
+    if (view_provider(picked_view) == idx && view_fresh(picked_view)) {
+        show_view(picked_view);
+    } else if (!view_received(picked_view) && (first || !view_fresh(visible_view))) {
+        show_view(idx);
+    } else if (view_provider(visible_view) == idx) {
+        show_view(visible_view);
     }
 }
 
 // Render one slot's data into the panels and make it the visible slot.
-static void show_slot(int idx) {
+static void show_view(int idx) {
     if (idx == UI_VIEW_FABLE && !fable_available()) idx = PROVIDER_CLAUDE;   // the limit went away
-    visible_slot = idx;
+    visible_view = idx;
     const int prov = view_provider(idx);
     const UsageData* data = &slots[prov].data;
     refresh_title();
@@ -1564,7 +1566,7 @@ static void usage_tap_cb(lv_event_t* e) {
 static void usage_long_press_cb(lv_event_t* e) {
     (void)e;
     if (gesture_seen || alert_active) return;
-    if (current_screen == SCREEN_USAGE) ui_show_mascot(view_provider(visible_slot));
+    if (current_screen == SCREEN_USAGE) ui_show_mascot(view_provider(visible_view));
 }
 
 // Swipe on either view (fires once per press, when the finger has travelled

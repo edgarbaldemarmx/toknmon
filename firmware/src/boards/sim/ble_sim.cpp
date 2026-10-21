@@ -112,7 +112,7 @@ static void refresh_title(void) {
 
 // SIM_SLOT=0-4 (see board.h) seeds the picked usage slot in the in-memory
 // NVS before ui_init() restores it, the headless stand-in for a swipe.
-static void seed_picked_slot(void) {
+static void seed_picked_view(void) {
     const char* slot = getenv("SIM_SLOT");
     if (!slot) return;
     Preferences prefs;
@@ -122,7 +122,7 @@ static void seed_picked_slot(void) {
 }
 
 void ble_init(void) {
-    seed_picked_slot();
+    seed_picked_view();
     load_scenario();
     enqueue_chain();
     refresh_title();

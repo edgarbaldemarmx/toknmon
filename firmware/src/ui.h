@@ -17,10 +17,10 @@ void ui_update_slot(int idx, const UsageData* data);
 void ui_update(const UsageData* data);
 void ui_tick_anim(void);
 // Serial QA hooks. ui_carousel_next() / ui_carousel_prev() page like a tap or
-// a horizontal swipe (false unless the live usage view is up with 2+ fresh
-// slots); ui_show_slot() brings one provider slot on screen (false when out
-// of range or stale). Each of them makes that slot the picked one: it stays
-// on screen until the next user action and survives a reboot.
+// a horizontal swipe (false unless the live usage view is up and another view
+// is fresh); ui_show_slot() brings view `idx` (0..UI_VIEW_COUNT-1) on screen
+// (false when out of range or stale). Each of them makes that view the picked
+// one: it stays on screen until the next user action and survives a reboot.
 bool ui_carousel_next(void);
 bool ui_carousel_prev(void);
 bool ui_show_slot(int idx);

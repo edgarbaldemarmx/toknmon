@@ -309,7 +309,7 @@ refuses (and logs once) any frame that would not fit.
 The usage view pages *views*, not providers (`VIEW_ORDER` in `ui.cpp`:
 Claude, Fable, Codex, Kimi, Grok; `UI_VIEW_FABLE = PROVIDER_COUNT` in
 `ui.h`). It never moves on its own: tap, horizontal swipe and serial
-`next` / `slot 0-4` pick a view, which `pick_slot()` stores in NVS
+`next` / `slot 0-4` pick a view, which `pick_view()` stores in NVS
 (`clawdmeter` / `slot`) and `ui_init()` restores; a picked view that goes
 stale or reports `ok:false` stays on screen with its last values. At boot,
 until the picked view has data, the first view with data stands in. The
@@ -330,7 +330,7 @@ idle, glow, sleep, bike; Grok = idle, look, bike): entries play in order (intro 
 is a no-op, and a `styrene_20` label in the provider accent names the
 provider top-center. Claude or `-1` restores the default — the boot path
 never calls it. The UI opens mascot mode on a long-press of the usage view
-(`ui_show_mascot(visible_slot)`); a vertical swipe goes back to usage, and
+(`ui_show_mascot(view_provider(visible_view))`); a vertical swipe goes back to usage, and
 `ui_show_screen()` resets the provider and stops the parade on every
 non-splash screen. Gestures (H7): one `LV_EVENT_GESTURE` handler on the
 screen object (gestures bubble up from the splash root and the usage
