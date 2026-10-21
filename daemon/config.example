@@ -43,6 +43,8 @@
 #                       ${CODEX_HOME:-~/.codex}/sessions (any age)
 #              kimi   = a credential file with an access token under
 #                       ~/.kimi-code/credentials (an expired token is fine)
+#              grok   = an entry with a "key" in ${GROK_HOME:-~/.grok}/auth.json
+#                       (an expired token is fine)
 #            When only Claude is detected the payload is identical to older
 #            daemons (no provider tag); when nothing is detected the device
 #            stays on the splash screen.
@@ -55,8 +57,14 @@
 #   kimi   = Kimi Code (uses the token in ~/.kimi-code/credentials and refreshes
 #            it when expired, exactly like the Kimi CLI; override the API with
 #            KIMI_CODE_BASE_URL)
+#   grok   = Grok Build CLI (weekly credit usage from the CLI's billing
+#            endpoint with the key in ${GROK_HOME:-~/.grok}/auth.json; never
+#            refreshes the token: when it has expired, or the endpoint fails,
+#            the last value the grok CLI logged in logs/unified.jsonl is used.
+#            Weekly only, there is no 5-hour window; override the API with
+#            GROK_CLI_CHAT_PROXY_BASE_URL)
 # providers = auto
-# providers = claude, codex, kimi
+# providers = claude, codex, kimi, grok
 
 # Kimi OAuth token endpoint used to refresh an expired Kimi access token (HTTPS
 # only). Default: ${KIMI_CODE_OAUTH_HOST:-https://auth.kimi.com}/api/oauth/token.

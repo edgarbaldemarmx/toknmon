@@ -41,6 +41,16 @@ console (115200 baud) prints every BLE event and payload.
 | `Kimi token refresh failed` | The refresh token was revoked or the endpoint changed. Log in again with the CLI; if Kimi moved its OAuth host, set `kimi_token_url` (HTTPS only) |
 | Credential file permissions error | The daemon rewrites the file atomically with mode 0600; make sure the directory is writable by your user |
 
+### Grok
+
+| Symptom | Fix |
+| --- | --- |
+| `grok: unavailable — Grok CLI not found` / `not logged in` (`--detect`, or `grok skipped` in the log) | Run `grok login`; `~/.grok/auth.json` needs an entry with a `key`. A custom `GROK_HOME` must be visible to the launchd agent (set it in the plist or symlink `~/.grok`) |
+| `Provider grok: no data (no valid token; no billing line in logs/unified.jsonl)` | The token has expired and Grok has not logged a credits fetch yet. Run `grok` once (or `grok login` if the token expired for good); the daemon never refreshes the Grok token itself |
+| Grok value does not move | The token has expired, so the value comes from the log fallback, which only refreshes when Grok runs and fetches its credits. Run `grok` once to renew the token; the daemon then reads the live endpoint again |
+| `Provider grok: no data (HTTP 4xx…)` with no fallback | The endpoint refused the request and the log has no credits line; run `grok` once so it logs one, and check that the CLI itself still works |
+| Grok shows 0 % with a 0 m countdown | The credit period in the last value has ended; the next live poll or Grok run brings the new period |
+
 ## Board
 
 | Symptom | Cause | Fix |

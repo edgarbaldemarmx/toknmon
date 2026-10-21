@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ToknMon usage daemon (BLE) — macOS host side.
 
-Polls each enabled provider (Claude, Codex, Kimi) for usage data and writes a
+Polls each enabled provider (Claude, Codex, Kimi, Grok) for usage data and writes a
 JSON payload to the ESP32 "ToknMon" peripheral over a custom GATT service.
 Uses bleak (CoreBluetooth backend on macOS). Derived from the Clawdmeter
 daemon by Hermann Bjorgvin (https://github.com/HermannBjorgvin/Clawdmeter).

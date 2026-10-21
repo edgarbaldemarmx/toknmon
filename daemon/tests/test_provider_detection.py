@@ -3,7 +3,8 @@ providers whose CLI is installed and logged in on this machine.
 
 Detection is local and cheap (no network): Claude needs a readable OAuth token
 source, Codex a ``rollout-*.jsonl`` under ``$CODEX_HOME/sessions``, Kimi a
-credential file under ``$KIMI_CODE_HOME/credentials``. The installer runs the
+credential file under ``$KIMI_CODE_HOME/credentials``, Grok an ``auth.json``
+entry with a ``key`` under ``$GROK_HOME``. The installer runs the
 same code through ``claude_usage_daemon.py --detect``.
 """
 
@@ -34,6 +35,12 @@ def _codex_home(tmp_path: Path, monkeypatch) -> Path:
 def _kimi_home(tmp_path: Path, monkeypatch) -> Path:
     home = tmp_path / "kimi"
     monkeypatch.setenv("KIMI_CODE_HOME", str(home))
+    return home
+
+
+def _grok_home(tmp_path: Path, monkeypatch) -> Path:
+    home = tmp_path / "grok"
+    monkeypatch.setenv("GROK_HOME", str(home))
     return home
 
 
@@ -112,8 +119,21 @@ def test_detect_unknown_provider_is_unavailable():
     assert res.available is False and "gemini" in res.reason
 
 
+def test_detect_grok_needs_an_auth_entry_with_a_key(tmp_path, monkeypatch):
+    home = _grok_home(tmp_path, monkeypatch)
+    res = detect("grok")
+    assert res.available is False and "grok login" in res.reason
+
+    home.mkdir()
+    (home / "auth.json").write_text(json.dumps(
+        {"https://auth.x.ai::u": {"key": "xai-secret", "expires_at": "2000-01-01T00:00:00Z"}}))
+    res = detect("grok")
+    assert res.available is True                 # expired is fine: Grok refreshes, log fallback
+    assert "xai-secret" not in res.reason and "auth.json" in res.reason
+
+
 def test_detectors_cover_the_registry():
-    assert set(DETECTORS) == set(PROVIDERS) == {"claude", "codex", "kimi"}
+    assert set(DETECTORS) == set(PROVIDERS) == {"claude", "codex", "kimi", "grok"}
 
 
 # --- config parsing --------------------------------------------------------
@@ -139,6 +159,9 @@ def test_parse_providers_fully_unknown_falls_back_to_auto():
 # --- resolution ------------------------------------------------------------
 
 def _fake_detect(monkeypatch, available: dict[str, bool]):
+    """Fake detectors for ``available``; Grok defaults to unavailable so tests
+    written for three providers never read the real ``~/.grok``."""
+    available = {"grok": False, **available}
     for pid, ok in available.items():
         reason = f"{pid} ok" if ok else f"{pid.title()} CLI not found: fake reason."
         monkeypatch.setitem(DETECTORS, pid, lambda ok=ok, reason=reason: DetectResult(ok, reason))
@@ -148,7 +171,7 @@ def test_resolve_auto_keeps_registry_order_and_reports_skipped(monkeypatch):
     _fake_detect(monkeypatch, {"claude": True, "codex": True, "kimi": False})
     chosen, skipped = resolve_providers(AUTO)
     assert chosen == ["claude", "codex"]
-    assert list(skipped) == ["kimi"] and "fake reason" in skipped["kimi"]
+    assert list(skipped) == ["kimi", "grok"] and "fake reason" in skipped["kimi"]
 
 
 def test_resolve_explicit_list_ignores_detection(monkeypatch):
@@ -159,7 +182,7 @@ def test_resolve_explicit_list_ignores_detection(monkeypatch):
 def test_resolve_auto_with_nothing_available_is_empty(monkeypatch):
     _fake_detect(monkeypatch, {"claude": False, "codex": False, "kimi": False})
     chosen, skipped = resolve_providers(AUTO)
-    assert chosen == [] and set(skipped) == {"claude", "codex", "kimi"}
+    assert chosen == [] and set(skipped) == {"claude", "codex", "kimi", "grok"}
 
 
 def test_read_providers_auto_logs_only_when_the_set_changes(tmp_path, monkeypatch):
@@ -174,8 +197,8 @@ def test_read_providers_auto_logs_only_when_the_set_changes(tmp_path, monkeypatc
     assert logged[0].startswith("Providers (auto): claude, codex")
     assert "kimi skipped: Kimi CLI not found: fake reason." in logged[0]
 
-    _fake_detect(monkeypatch, {"kimi": True})
-    assert mod.read_providers() == ["claude", "codex", "kimi"]
+    _fake_detect(monkeypatch, {"kimi": True, "grok": True})
+    assert mod.read_providers() == ["claude", "codex", "kimi", "grok"]
     assert len(logged) == 2 and "skipped" not in logged[1]
 
 
@@ -245,6 +268,7 @@ def test_detection_lines_format(monkeypatch):
         "claude: available",
         "codex: available",
         "kimi: unavailable — Kimi CLI not found: fake reason.",
+        "grok: unavailable — Grok CLI not found: fake reason.",
     ]
 
 
@@ -254,4 +278,5 @@ def test_print_detection_writes_one_line_per_provider(monkeypatch, capsys):
     out = capsys.readouterr().out.splitlines()
     assert rc == 0
     assert out == ["claude: unavailable — Claude CLI not found: fake reason.",
-                   "codex: available", "kimi: available"]
+                   "codex: available", "kimi: available",
+                   "grok: unavailable — Grok CLI not found: fake reason."]

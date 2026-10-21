@@ -1,6 +1,6 @@
 # Providers
 
-The daemon monitors up to three AI coding assistants and pushes one BLE
+The daemon monitors up to four AI coding assistants and pushes one BLE
 payload per provider. The board keeps one usage slot per provider and shows
 them as a carousel with a palette and a mascot of their own.
 
@@ -9,10 +9,12 @@ them as a carousel with a palette and a mascot of their own.
 | Claude Code | `claude` | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token (Keychain service `Claude Code-credentials`, or `~/.claude/.credentials.json`) | one GET per poll, **no token spend** | **Current** (5-hour session), **Weekly**, and the model-scoped weekly bar (**Fable**) when the subscription has one; reset countdowns; the Clawd corner mascot |
 | OpenAI Codex CLI | `codex` | newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` modified in the last 7 days | **none** (local files only) | a **10×10 dot grid** filled to the weekly percentage with the large percentage and reset time; a compact 5h bar only when the plan reports a short window; the three-dots mascot |
 | Kimi Code | `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest token in `~/.kimi-code/credentials/*.json` | one GET per poll, plus a token refresh when needed | **Current** (5h) and **Weekly** bars in blue; the crescent-moon mascot |
+| Grok Build CLI | `grok` | `GET ${GROK_CLI_CHAT_PROXY_BASE_URL:-https://cli-chat-proxy.grok.com/v1}/billing?format=credits` with the `key` in `${GROK_HOME:-~/.grok}/auth.json`; fallback: the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` | one GET per poll, **never a token refresh** | the **dot grid** filled to the weekly credit percentage (Grok has no 5-hour window); the black-hole orb mascot |
 
 Palettes: Claude clay (`#D97757`), Codex teal (`#10A37F`), Kimi blue
-(`#3B6CF6`); each provider also has its own warning and danger tiers for the
-bars so nothing on a Codex or Kimi screen reads as Claude's orange.
+(`#3B6CF6`), Grok: cool silver, dot grid, weekly only; each provider also has
+its own warning and danger tiers for the bars so nothing on a Codex, Kimi or
+Grok screen reads as Claude's orange.
 
 ## Choosing providers
 
@@ -21,6 +23,7 @@ The `providers` key in `~/.config/toknmon/config` decides what is polled:
 ```ini
 providers = auto                 # default: detect what is installed, every poll
 providers = claude, codex        # explicit list, any order
+providers = claude, grok         # Claude and Grok only
 ```
 
 - **`auto`** (default, also used when the key is absent): on every poll the
@@ -32,6 +35,7 @@ providers = claude, codex        # explicit list, any order
   | `claude` | an OAuth token exists in the macOS Keychain (`Claude Code-credentials`) or in `<config_dir>/.credentials.json` for any dir in `config_dirs` |
   | `codex` | at least one `rollout-*.jsonl` exists under `${CODEX_HOME:-~/.codex}/sessions` (any age; polling then reads the last 7 days) |
   | `kimi` | a credential file with an access token exists under `~/.kimi-code/credentials` (an expired token is fine, the daemon refreshes it) |
+  | `grok` | `${GROK_HOME:-~/.grok}/auth.json` has an entry with a non-empty `key` (an expired token is fine: the log fallback still works and Grok refreshes it itself) |
 
   Logging in to a new tool or running it once is picked up within a minute,
   no reinstall and no restart. The daemon logs the resolved set whenever it
@@ -85,6 +89,18 @@ providers = claude, codex        # explicit list, any order
   tokens back to the same file atomically with mode 0600, exactly like the
   CLI does. A failed refresh logs one line and sends `ok: false`; it never
   loops.
+- **Grok**: run `grok login` once (Grok Build CLI). The daemon sends the `key`
+  from `~/.grok/auth.json` as a bearer to the CLI's own credits endpoint with
+  the headers `x-grok-client-version` (from `~/.grok/version.json`) and
+  `x-grok-client-mode: cli`. It never uses the `refresh_token` and never
+  writes `auth.json`: Grok refreshes its own token while it runs, and a second
+  refresher could invalidate Grok's copy. When the token has expired, or the
+  endpoint fails, the daemon reads the newest `billing: fetched credits
+  config` line that the CLI logged in `~/.grok/logs/unified.jsonl`, so the
+  value is only as fresh as the last Grok run. Neither source sends `ok:
+  false`. Grok reports one credit window (`currentPeriod`, weekly or monthly);
+  it lands on the weekly keys `w`/`wr` and the countdown runs to the real
+  period end. A period whose end has passed reads 0 %.
 
 ### Removing a provider
 
@@ -104,6 +120,9 @@ payload.
   bar sits under the grid. The grid needs PSRAM (all S3 boards); C6 boards
   fall back to bars.
 - **Kimi**: Current and Weekly bars in the Kimi palette.
+- **Grok**: the dot grid (one dot = 1 % of the credit window), the
+  percentage in large type and the reset time, in cool silver. Grok has no
+  5-hour window, so there is never a compact bar under the grid.
 - **Carousel**: with two or more fresh slots the meter rotates every 8 s; tap
   or swipe left/right to page; the title shows the provider name in its
   accent. Data older than 90 s is stale (the daemon polls every 60 s), and a
@@ -117,14 +136,15 @@ One JSON object per provider per poll, written to the BLE RX characteristic
 ```json
 {"p":"claude","s":17,"sr":110,"w":73,"wr":860,"f":1,"fr":860,"st":"allowed","ok":true,"t":1760000000,"tf":24}
 {"p":"codex","w":40,"wr":5000,"st":"allowed","ok":true,"t":1760000000,"tf":24}
+{"p":"grok","w":5,"wr":7200,"st":"allowed","ok":true,"t":1760000000,"tf":24}
 {"p":"kimi","ok":false}
 ```
 
 | Key | Meaning |
 | --- | --- |
-| `p` | provider id (`claude`, `codex`, `kimi`); missing means `claude` (compatible with Clawdmeter payloads) |
+| `p` | provider id (`claude`, `codex`, `kimi`, `grok`); missing means `claude` (compatible with Clawdmeter payloads) |
 | `s`, `sr` | session (5h) percent used and minutes until it resets; omitted when the plan has no such window |
-| `w`, `wr` | weekly percent used and minutes until reset |
+| `w`, `wr` | weekly percent used and minutes until reset (Grok: its credit window, weekly or monthly) |
 | `f`, `fr` | model-scoped weekly window (Fable) percent and minutes; Claude only, only when present |
 | `st` | status string from the API (`allowed`, …) |
 | `ok` | `true` when the poll succeeded; `false` carries no numbers and marks the slot unavailable |
@@ -141,8 +161,9 @@ Payloads stay under 180 bytes. The firmware acks on the TX characteristic
 1. Create `daemon/providers/<id>.py` returning a `ProviderResult(id, bars,
    status, ok, extra)` where `bars` is a list of `(label, percent,
    reset_minutes)`; `base.py` maps labels to the payload keys above.
-2. Register it in the `PROVIDERS` table in `daemon/claude_usage_daemon.py`
-   and in the installer's provider list and detection.
+2. Register its `poll` and `detect` in `PROVIDERS` and `DETECTORS` in
+   `daemon/providers/__init__.py` (registry order is the `auto` order), and
+   add it to the installer's provider list (`install-mac.sh`).
 3. Firmware: add a slot (`PROVIDER_COUNT`, `provider_short()` in
    `main.cpp`), a palette in `theme.h`, and optionally a mascot spec and
    provider set in `splash.cpp` ([`animations.md`](animations.md)).

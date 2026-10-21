@@ -1,0 +1,6 @@
+{"ts":"2026-10-21T10:00:00.000Z","src":"cli","pid":100,"ver":"1.0.62","lvl":"info","msg":"session started","ctx":{}}
+{"ts":"2026-10-21T10:00:01.000Z","src":"cli","pid":100,"ver":"1.0.62","lvl":"info","msg":"billing: fetched credits config","ctx":{"config":{"creditUsagePercent":11.0,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-20T05:00:00+00:00","end":"2026-10-27T05:00:00+00:00"},"historyLen":0},"onDemandEnabled":null,"subscriptionTier":"fake"}}
+not json at all
+{"ts":"2026-10-21T11:00:00.000Z","src":"cli","pid":101,"ver":"1.0.62","lvl":"info","msg":"tool call","ctx":{"name":"read"}}
+{"ts":"2026-10-21T12:00:01.000Z","src":"cli","pid":102,"ver":"1.0.62","lvl":"info","msg":"billing: fetched credits config","ctx":{"config":{"creditUsagePercent":22.0,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-20T05:00:00+00:00","end":"2026-10-27T05:00:00+00:00"},"historyLen":0},"onDemandEnabled":null,"subscriptionTier":"fake"}}
+{"ts":"2026-10-21T12:05:00.000Z","src":"cli","pid":102,"ver":"1.0.62","lvl":"info","msg":"session ended","ctx":{}}

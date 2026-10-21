@@ -65,6 +65,7 @@ def test_parse_providers_default_is_auto():
 
 def test_parse_providers_splits_lowercases_and_dedupes():
     assert parse_providers_setting("Claude, CODEX ,kimi, codex") == ["claude", "codex", "kimi"]
+    assert parse_providers_setting("GROK, claude") == ["grok", "claude"]
 
 
 def test_parse_providers_ignores_unknown_names():
@@ -77,8 +78,8 @@ def test_parse_providers_all_unknown_falls_back_to_auto():
     assert parse_providers_setting("gemini") is AUTO
 
 
-def test_registry_has_all_three_providers():
-    assert set(PROVIDERS) == {"claude", "codex", "kimi"}
+def test_registry_has_all_four_providers_in_auto_order():
+    assert list(PROVIDERS) == ["claude", "codex", "kimi", "grok"]
 
 
 # --- read_providers (config) ----------------------------------------------
@@ -94,7 +95,7 @@ def test_read_providers_absent_config_is_auto_detected(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "CONFIG_FILE", tmp_path / "config")
     monkeypatch.setattr(mod, "_last_auto_resolution", None)
     monkeypatch.setattr(mod, "log", lambda _m: None)
-    for pid, ok in (("claude", True), ("codex", False), ("kimi", False)):
+    for pid, ok in (("claude", True), ("codex", False), ("kimi", False), ("grok", False)):
         monkeypatch.setitem(DETECTORS, pid, lambda ok=ok: DetectResult(ok, "fake"))
     assert mod.read_providers() == ["claude"]
 
@@ -195,4 +196,4 @@ def test_providers_package_imports_as_script_sibling(monkeypatch):
     for name in [n for n in sys.modules if n == "providers" or n.startswith("providers.")]:
         monkeypatch.delitem(sys.modules, name)
     pkg = importlib.import_module("providers")
-    assert set(pkg.PROVIDERS) == {"claude", "codex", "kimi"}
+    assert set(pkg.PROVIDERS) == {"claude", "codex", "kimi", "grok"}

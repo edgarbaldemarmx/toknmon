@@ -17,7 +17,7 @@
 #                         installed and logged in on this Mac, re-checked by the
 #                         daemon on every poll (install a CLI later and it shows
 #                         up by itself). Or a comma-separated list to pin
-#                         (claude, codex, kimi); a listed provider that is not
+#                         (claude, codex, kimi, grok); a listed provider that is not
 #                         installed shows "no data" on the device.
 #   --device-name <name>  Bluetooth name of the board, as set when flashing
 #                         (1-18 printable ASCII characters, no '#').
@@ -63,7 +63,7 @@ while [ $# -gt 0 ]; do
         --no-prime) NO_PRIME=1 ;;
         --providers)
             shift
-            [ -n "${1:-}" ] || { echo "Error: --providers needs a value (auto, or e.g. claude,codex,kimi)" >&2; exit 2; }
+            [ -n "${1:-}" ] || { echo "Error: --providers needs a value (auto, or e.g. claude,codex,kimi,grok)" >&2; exit 2; }
             OPT_PROVIDERS="$1" ;;
         --providers=*) OPT_PROVIDERS="${1#*=}" ;;
         --device-name)
@@ -310,8 +310,8 @@ configure_providers() {
         echo "  +--------------------------------------------------------------------"
         if [ ${#found[@]} -eq 0 ]; then
             echo "  WARNING: no provider detected. The daemon will install and connect, but the"
-            echo "  device stays on its splash screen until a supported CLI (claude, codex or"
-            echo "  kimi) is installed and logged in; it is then picked up automatically."
+            echo "  device stays on its splash screen until a supported CLI (claude, codex,"
+            echo "  kimi or grok) is installed and logged in; it is then picked up automatically."
         fi
     fi
 
@@ -330,7 +330,7 @@ configure_providers() {
         echo "  poll, so a CLI you install later shows up on the device by itself. Type"
         echo "  an explicit list (e.g. claude,codex) to pin the set instead; a listed"
         echo "  provider that is not installed shows 'no data' on the device."
-        read -r -p "  Providers to monitor [auto | claude,codex,kimi] (default $suggested): " ans || ans=""
+        read -r -p "  Providers to monitor [auto | claude,codex,kimi,grok] (default $suggested): " ans || ans=""
     fi
     ans=$(echo "${ans:-$suggested}" | tr 'A-Z' 'a-z' | tr -d ' ')
     local p valid=""
@@ -340,7 +340,7 @@ configure_providers() {
         IFS=',' read -r -a parts <<< "$ans"
         for p in "${parts[@]}"; do
             case "$p" in
-                claude|codex|kimi) valid="${valid:+$valid, }$p" ;;
+                claude|codex|kimi|grok) valid="${valid:+$valid, }$p" ;;
                 "") ;;
                 auto)
                     if [ "$explicit" = 1 ]; then
@@ -351,7 +351,7 @@ configure_providers() {
                     valid="auto"; break ;;
                 *)
                     if [ "$explicit" = 1 ]; then
-                        echo "Error: --providers: unknown provider '$p' (use auto, or claude, codex, kimi)." >&2
+                        echo "Error: --providers: unknown provider '$p' (use auto, or claude, codex, kimi, grok)." >&2
                         exit 2
                     fi
                     echo "  Unknown provider '$p' — ignoring." ;;

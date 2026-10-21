@@ -14,6 +14,9 @@ by label, and a bar a provider does not have is simply absent from the payload.
 Providers that need daemon config (Kimi's ``kimi_token_url``) read it through
 ``kimi.read_config``, which the main module points at ``read_config_value``.
 
+Registry order (claude, codex, kimi, grok) is the ``auto`` polling order and
+the order of ``--detect`` output.
+
 Detection (``providers = auto``, the default): :func:`detect` answers "is this
 provider's CLI installed and logged in here?" from local files only — no
 network — and :func:`resolve_providers` turns the config setting into the list
@@ -27,7 +30,7 @@ from .base import (  # noqa: F401  (re-exported)
     Bar, DetectResult, ProviderResult, clamp_pct, iso_to_epoch, minutes_until, to_payload,
     window_bar,
 )
-from . import claude, codex, kimi
+from . import claude, codex, grok, kimi
 
 
 class _Auto:
@@ -44,6 +47,7 @@ PROVIDERS: dict[str, Callable] = {
     "claude": claude.poll,
     "codex": codex.poll,
     "kimi": kimi.poll,
+    "grok": grok.poll,
 }
 
 # Same keys as PROVIDERS; each returns a DetectResult without touching the
@@ -52,6 +56,7 @@ DETECTORS: dict[str, Callable[[], DetectResult]] = {
     "claude": claude.detect,
     "codex": codex.detect,
     "kimi": kimi.detect,
+    "grok": grok.detect,
 }
 
 

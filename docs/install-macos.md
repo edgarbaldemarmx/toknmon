@@ -17,6 +17,7 @@ inherited from Clawdmeter, poll Claude only and are untested with ToknMon.
 | Claude Code logged in | the Claude provider reads the OAuth token from the Keychain (service `Claude Code-credentials`) | `claude` → `/login` |
 | Codex CLI with at least one session under `~/.codex/sessions` (optional) | the Codex provider reads local session logs; no network, no credentials | run `codex` once |
 | Kimi Code CLI logged in once (optional) | `~/.kimi-code/credentials/*.json`; the daemon refreshes the token itself afterwards | run `kimi` and log in |
+| Grok Build CLI logged in (optional) | `~/.grok/auth.json`; the daemon never refreshes the Grok token and falls back to the CLI's own log when it has expired | `grok login` |
 | `blueutil` (optional) | automatic repair of a stale Bluetooth bond | `brew install blueutil` (the installer offers it) |
 
 A board already flashed with ToknMon and paired with this Mac
@@ -93,7 +94,7 @@ What the installer does, in order (the banners it prints):
      daemon's own detection (`claude_usage_daemon.py --detect`, local files
      only) and prints a box with `<provider>: found` / `not found` plus the
      reason and how to fix it (install Claude Code and run `claude login`,
-     run the Codex CLI once, log in with the Kimi Code CLI). The default
+     run the Codex CLI once, log in with the Kimi Code CLI, run `grok login`). The default
      `auto` makes the daemon repeat that detection on every poll, so a CLI
      installed later shows up by itself; type an explicit list
      (`claude,codex`) to pin the set. With no provider detected the daemon
@@ -121,7 +122,7 @@ Options (`./install-mac.sh --help`):
 | Flag | Effect |
 | --- | --- |
 | `--yes`, `-y` | accept the default answer for every prompt; keep existing config values |
-| `--providers <list>` | `auto`, or a comma-separated subset of `claude,codex,kimi`; an unknown name is an error |
+| `--providers <list>` | `auto`, or a comma-separated subset of `claude,codex,kimi,grok`; an unknown name is an error |
 | `--device-name <name>` | the board's Bluetooth name (1–18 printable ASCII characters, no `#`) |
 | `--no-prime` | skip the permission-priming foreground run |
 | `-h`, `--help` | usage |
@@ -221,4 +222,4 @@ want the HID keyboard connection.
 
 See [`troubleshooting.md`](troubleshooting.md): daemon hanging at startup
 under `~/Documents`, board not connecting, legacy agent conflicts, Kimi token
-problems, re-pairing after a rename.
+problems, stale Grok values, re-pairing after a rename.
