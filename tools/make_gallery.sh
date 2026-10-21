@@ -9,8 +9,9 @@
 # Requires: PlatformIO (pio), SDL2, ImageMagick (magick or convert), Node >= 18.
 # Capture times come from the firmware constants (see firmware/sim/gallery.jsonl):
 # CAROUSEL_MS = 8 s for the usage views (Claude, Codex, Kimi, Grok at 4/12/20/28 s); mascot sets play intro -> 6 s loop ->
-# outro per entry, so the full-screen scenes land ~37 s (Codex rain, 6th entry)
-# and ~31 s (Kimi night, 5th entry) after the SIM_SPLASH_PROVIDER hook at 1 s.
+# outro per entry, so the full-screen scenes land ~37 s (Codex rain, 6th entry),
+# ~31 s (Kimi night, 5th entry) and ~27 s (Grok stars, 4th entry, loop 24.5-30.5 s)
+# after the SIM_SPLASH_PROVIDER hook at 1 s.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -58,6 +59,7 @@ shot mascot-kimi       3000 SIM_SPLASH_PROVIDER=kimi &
 shot mascot-grok       3000 SIM_SPLASH_PROVIDER=grok &
 shot scene-codex-rain 37500 SIM_SPLASH_PROVIDER=codex &
 shot scene-kimi-night 30700 SIM_SPLASH_PROVIDER=kimi &
+shot scene-grok-stars 27000 SIM_SPLASH_PROVIDER=grok &
 shot parade           31000 SIM_PARADE=1 &   # Claude 1-21 s, then Codex: idle -> dots at ~27 s
 fail=0
 for job in $(jobs -p); do wait "$job" || fail=1; done

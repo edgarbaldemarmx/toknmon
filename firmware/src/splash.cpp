@@ -139,7 +139,7 @@ static const char* const PROVIDER_SETS[PROVIDER_COUNT][SET_MAX] = {
     { NULL, NULL, NULL, NULL, NULL, NULL },                           // Claude: rate groups
     { "codex.idle", "codex.dots", "codex.think", "codex.bike", "codex.scene.wave",  "codex.scene.rain"  },
     { "kimi.idle",  "kimi.glow",  "kimi.sleep",  "kimi.bike",  "kimi.scene.night",  "kimi.scene.orbit"  },
-    { "grok.idle",  "grok.look",  "grok.bike",   NULL,         NULL,                NULL                },   // scenes: later
+    { "grok.idle",  "grok.look",  "grok.bike",   "grok.scene.stars", NULL,              NULL           },
 };
 static int      provider_mode = -1;     // -1 = Claude default; else PROVIDER_* with a set
 static uint8_t  set_pos = 0;            // index into PROVIDER_SETS[provider_mode]
