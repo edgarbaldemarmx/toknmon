@@ -46,7 +46,7 @@ def _grok_home(tmp_path: Path, monkeypatch, *, key: str | None = SECRET, expires
     home = tmp_path / "grok"
     home.mkdir()
     if key is not None:
-        entry = {"auth_mode": "oidc", "key": key, "refresh_token": REFRESH, "email": "user@example.test"}
+        entry = {"auth_mode": "oidc", "key": key, "refresh_token": REFRESH, "email": "user@example.com"}
         if expires_at is not None:
             entry["expires_at"] = _iso(expires_at)
         (home / "auth.json").write_text(json.dumps({"https://auth.x.ai::0000-fake": entry}))
