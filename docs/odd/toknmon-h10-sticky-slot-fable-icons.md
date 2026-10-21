@@ -24,10 +24,10 @@ Objective: the usage view stays on the slot the user picked, Claude's model-scop
 
 | ID | Specs | Route | Status | Commit |
 | --- | --- | --- | --- | --- |
-| T1 | S1 | inline | pending | |
-| T2 | S2 | inline (after T1, same `ui.cpp`) | pending | |
-| T3 | S3 | delegated writer (parallelism with T1/T2; disjoint surface: assets, `splash.cpp`, generated header) | pending | |
-| T4 | shared docs (README, CLAUDE.md, CHANGELOG), seam check, flash, delivery | inline | pending | |
+| T1 | S1 | inline | done | `e68dbda`, `0484385` |
+| T2 | S2 | inline (after T1, same `ui.cpp`) | done | `7a3ef70` |
+| T3 | S3 | delegated writer (parallelism with T1/T2; disjoint surface: assets, `splash.cpp`, generated header) | done | `d37c217` |
+| T4 | shared docs (README, CLAUDE.md, CHANGELOG), seam check, flash, delivery | inline | done (push pending user confirmation) | `94bc2de` |
 
 Route evidence: T3 is an independent art unit (three grids, several hundred lines, header regeneration, `splash.cpp` specs) with no file shared with T1/T2 (`ui.cpp`, `main.cpp`, `data.h`, daemon) → Writer trigger (a). Shared docs are owned by the parent in T4.
 
@@ -36,3 +36,7 @@ Route evidence: T3 is an independent art unit (three grids, several hundred line
 - **L1** (2026-10-21, user, verbatim): "Hay que hacer los siguientes modificaciones: 1. Que no sea carrusel de medidores, que se mantenga en el que lo deje (ej. grok o codex) en vez de estar rotando. 2. EL medidor de claude como tiene 3 barras se ve pequeño, podemos separar el de fable en uno individual donde se vaya llenando con simbolitos de claude el uso (ya que ese es semanal) y asi mantenemos las dos barritas de claude en una sola pantalla (fable solo esta activo si tienes sub pro o max) 3. Refinar los iconos de kimi, codex y grok, que se vea de mejor calidad"
 - **L2** Exploration: rotation is `carousel_timer` / `CAROUSEL_MS 8000` (`ui.cpp:348,983,1137`); auto-jumps at `ui.cpp:1180` (ok:false), `:1207` (first payload / stale visible), `:1343` (stale tick); `visible_slot` is not persisted. Claude's third bar comes from `weekly_scoped` with `scope.model.display_name` (`daemon/providers/claude.py:76-110`), sent as `f`/`fr` without `fl`; the firmware falls back to "Fable". The corner icon is the animated corner mascot at 3 px/cell (Codex idle 23×7, Kimi 19×15, Grok 14×14 cells vs Clawd 24×18). Hardware screenshots of all four usage views taken before the change.
 - **L3** (2026-10-21, user decision): S3 icons → "Icono nuevo solo en el medidor (Recommended)".
+- **L4** T1 evidence: sim RED (the old build had rotated to Codex at 12 s), GREEN (Claude still on screen at 12 s and 30 s; `SIM_SLOT=3` shows Grok). On hardware the meter stayed on Grok for over 20 s, and after an esptool reset the boot log printed "UI: restored picked view 3" and came up on Grok. Two earlier reboots restored an unexpected view; a 2-minute serial monitor showed no spontaneous pick, so the likely cause is a tap during handling (taps now persist), not proven.
+- **L5** T2 evidence: daemon RED 4 failed (`fl` missing / overflow drop order), GREEN 294 passed, 2 skipped. Hardware screenshots: Claude two full-size bars; Fable view with the 10×10 Clawd grid, "Weekly" pill and reset countdown (label "Fable" because the installed daemon on `main` does not send `fl` yet).
+- **L6** T3 evidence (delegated writer): `codex.icon` 24×18, `kimi.icon` 21×18, `grok.icon` 18×18 cells, frame 0 held 2400 ms then a 140 ms blink; `splash_step()` skips `*.icon`; hardware screenshots of the Codex and Kimi corners.
+- **L7** Seam check on `0484385`'s tree: `node --test tools/test/` 10 pass; daemon 294 passed, 2 skipped; builds sim, `waveshare_amoled_216` (flash ~70.1 %) and `waveshare_amoled_216_c6` SUCCESS; gallery 16 screens, 21 GIFs. Board flashed with this build.
