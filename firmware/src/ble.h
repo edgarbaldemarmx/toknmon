@@ -30,11 +30,14 @@ void ble_clear_bonds(void);
 bool ble_has_bonds(void);
 // RX queue. The daemon writes one payload per provider back-to-back (~350 ms
 // apart), so received packets are queued instead of overwriting one buffer.
+// The ring keeps one slot free (full when head + 1 == tail), so it holds
+// DEPTH - 1 packets: 6 fits all four providers' payloads plus one spare
+// (3 KB of static RAM at 512 B per slot).
 // ble_next_packet() copies the oldest pending packet into `out` (NUL
 // terminated, truncated to cap) and returns false when the queue is empty;
 // callers drain it in a loop once per main-loop iteration.
 #define BLE_RX_ITEM_SIZE   512
-#define BLE_RX_QUEUE_DEPTH 4
+#define BLE_RX_QUEUE_DEPTH 6
 bool ble_has_data(void);
 bool ble_next_packet(char* out, size_t cap);
 void ble_send_ack(void);
