@@ -16,7 +16,8 @@ H0–H8); the entries below summarize them.
   with the token Grok keeps in `~/.grok/auth.json` (never refreshed by the
   daemon), falling back to the newest billing line in Grok's log. The
   firmware gets a fourth slot (`grok`, `slot 3`) with a silver dot grid, an
-  original ringed-orb mascot (idle, spin, bike) and a deeper BLE receive
+  original Grokbot-style mascot (a white ball with capsule eyes: idle, look,
+  bike) and a deeper BLE receive
   queue so four back-to-back payloads fit.
 
 - `tools/check_pii.sh` scans every tracked file for personal or hardware

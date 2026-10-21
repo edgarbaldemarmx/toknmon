@@ -62,8 +62,8 @@ void splash_mascot_set_visible(bool v);
 // PSRAM mascot.
 void splash_mascot_attention(bool on);
 // Swap the corner mascot for the given provider slot (PROVIDER_* in data.h):
-// Clawd for Claude, the dots for Codex, the moon for Kimi, the ringed orb for
-// Grok. Called by the UI whenever the carousel changes slot. No-op without
+// Clawd for Claude, the dots for Codex, the moon for Kimi, the white Grokbot-style
+// ball for Grok. Called by the UI whenever the carousel changes slot. No-op without
 // the PSRAM mascot.
 void splash_mascot_set_provider(int slot);
 // Allow or pause the walk-off / lurk / walk-back trips (the full-size lurk

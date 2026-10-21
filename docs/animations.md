@@ -71,8 +71,8 @@ Two things to keep in mind:
 - **Index 0 is opaque black on the full splash but transparent on the corner
   mascot.** Use `#141413` for visible ink; the bikes use ivory metal because a
   dark frame vanished on the splash. A large dark body needs a visible color
-  and an outline: the Grok orb's core is slate `#2B2F36` inside a violet rim,
-  because `#141413` would read as a hole on the black panel.
+  and an outline, because `#141413` would read as a hole on the black panel;
+  a light body (the white Grok ball) can carry `#141413` eyes directly.
 - **Keep idle and act files of one mascot at the same left edge (`origin_x`)
   and the same crop height.** The corner mascot is bottom-left anchored and
   ignores `origin`, so a different crop would make the character jump

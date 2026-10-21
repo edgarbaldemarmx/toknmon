@@ -57,7 +57,7 @@ through the whole catalog, custom animations included (`claude.bike`).
 - **Kimi**: Current and Weekly bars in blue; the moon in the corner.
 - **Grok**: the same 10×10 dot grid as Codex, filled to the weekly (or
   monthly) credit percentage, in silver; Grok has no 5-hour window, so there
-  is never a 5h row. The ringed orb sits in the corner.
+  is never a 5h row. The white Grokbot-style ball sits in the corner.
 - **Carousel**: with two or more providers fresh, the meter rotates every
   8 s; the provider name sits in the title in its accent color. A slot is
   fresh for 90 s after its last payload; stale slots are skipped. The status
@@ -75,7 +75,7 @@ through the whole catalog, custom animations included (`claude.bike`).
 Long-press the meter to pin the splash to the provider on screen. The
 provider's full-size set plays in order: for Codex idle → dots → think → bike
 → scene *wave* → scene *rain*; for Kimi idle → glow → sleep → bike → scene
-*night* → scene *orbit*; for Grok idle → spin → bike; Claude keeps the official set. Each entry plays
+*night* → scene *orbit*; for Grok idle → look → bike; Claude keeps the official set. Each entry plays
 intro → loop (6 s) → outro, then the next; a tap, a horizontal swipe or PWR
 steps manually. The provider name shows top-center in its accent (Claude has
 no label, to keep the official look). Swipe vertically to return to the meter.

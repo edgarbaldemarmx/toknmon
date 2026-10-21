@@ -1,0 +1,220 @@
+# Grok corner mascot: an original pixel character in the style of the
+# Grokbot avatars (not the xAI or Grok logo) -- a plain white ball with two
+# capsule eyes glancing to the side, shaded on the lower-left rim.
+# Act: blinks, glances left and back, two small hops, returns to idle.
+name: grok.look
+origin: 15 22
+palette:
+  . = transparent
+  w = #F4F4F2
+  e = #BFC4CC
+  k = #141413
+hold: 200
+--- hold=900 # rest, eyes right
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwwwwkkwkkw.
+.ewwwwwkkwkkw.
+eewwwwwkkwkkww
+eewwwwwkkwkkww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=120 # blink
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwwwwwwwwww.
+.ewwwwwwwwwww.
+eewwwwwkkwkkww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=500 # eyes right
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwwwwkkwkkw.
+.ewwwwwkkwkkw.
+eewwwwwkkwkkww
+eewwwwwkkwkkww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=160 # glance center
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwkkwwkkwww.
+.ewwkkwwkkwww.
+eewwkkwwkkwwww
+eewwkkwwkkwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=700 # eyes left
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ekkwkkwwwwww.
+.ekkwkkwwwwww.
+eekkwkkwwwwwww
+eekkwkkwwwwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=160 # back to center
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwkkwwkkwww.
+.ewwkkwwkkwww.
+eewwkkwwkkwwww
+eewwkkwwkkwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=140 # hop
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwkkwwkkwww.
+.ewwkkwwkkwww.
+eewwkkwwkkwwww
+eewwkkwwkkwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+..............
+--- hold=140 # land
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwkkwwkkwww.
+.ewwkkwwkkwww.
+eewwkkwwkkwwww
+eewwkkwwkkwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=140 # hop
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwkkwwkkwww.
+.ewwkkwwkkwww.
+eewwkkwwkkwwww
+eewwkkwwkkwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+..............
+--- hold=300 # land
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwkkwwkkwww.
+.ewwkkwwkkwww.
+eewwkkwwkkwwww
+eewwkkwwkkwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=120 # blink
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwwwwwwwwww.
+.ewwwwwwwwwww.
+eewwkkwwkkwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=300 # eyes center
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwkkwwkkwww.
+.ewwkkwwkkwww.
+eewwkkwwkkwwww
+eewwkkwwkkwwww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....
+--- hold=160 # eyes back right
+..............
+.....wwww.....
+...wwwwwwww...
+..wwwwwwwwww..
+.ewwwwwkkwkkw.
+.ewwwwwkkwkkw.
+eewwwwwkkwkkww
+eewwwwwkkwkkww
+eewwwwwwwwwwww
+eewwwwwwwwwwww
+.ewwwwwwwwwww.
+.eewwwwwwwwww.
+..eewwwwwwww..
+...eeeeeeee...
+.....eeee.....

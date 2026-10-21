@@ -139,7 +139,7 @@ static const char* const PROVIDER_SETS[PROVIDER_COUNT][SET_MAX] = {
     { NULL, NULL, NULL, NULL, NULL, NULL },                           // Claude: rate groups
     { "codex.idle", "codex.dots", "codex.think", "codex.bike", "codex.scene.wave",  "codex.scene.rain"  },
     { "kimi.idle",  "kimi.glow",  "kimi.sleep",  "kimi.bike",  "kimi.scene.night",  "kimi.scene.orbit"  },
-    { "grok.idle",  "grok.spin",  "grok.bike",   NULL,         NULL,                NULL                },   // scenes: later
+    { "grok.idle",  "grok.look",  "grok.bike",   NULL,         NULL,                NULL                },   // scenes: later
 };
 static int      provider_mode = -1;     // -1 = Claude default; else PROVIDER_* with a set
 static uint8_t  set_pos = 0;            // index into PROVIDER_SETS[provider_mode]
@@ -540,13 +540,13 @@ static const MascotSpec MASCOT_SPECS[PROVIDER_COUNT] = {
         { "kimi.bike", "kimi.glow", NULL,        NULL, NULL },
         { "kimi.bike", "kimi.glow", "kimi.bike", NULL, NULL } },
       NULL },
-    // Grok: the ringed black-hole orb spins its ring, and takes the bike at
-    // every pace. No walk gait, so no trips.
+    // Grok: the Grokbot-style ball blinks, glances and hops, and takes the
+    // bike at every pace. No walk gait, so no trips.
     { "grok.idle", NULL, WALK_NONE,
-      { { "grok.spin", "grok.bike", NULL,        NULL, NULL },
-        { "grok.spin", "grok.bike", NULL,        NULL, NULL },
-        { "grok.bike", "grok.spin", NULL,        NULL, NULL },
-        { "grok.bike", "grok.spin", "grok.bike", NULL, NULL } },
+      { { "grok.look", "grok.bike", NULL,        NULL, NULL },
+        { "grok.look", "grok.bike", NULL,        NULL, NULL },
+        { "grok.bike", "grok.look", NULL,        NULL, NULL },
+        { "grok.bike", "grok.look", "grok.bike", NULL, NULL } },
       NULL },
 };
 static const uint16_t MAS_STILL_MS_BY_RATE[4] = { 10000, 7000, 5000, 3500 };

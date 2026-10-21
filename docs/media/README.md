@@ -67,8 +67,8 @@ exactly as here). Each frame keeps its own `hold`; the clip loops forever.
 | `kimi.bike.gif` | Kimi | act: mountain bike |
 | `kimi.scene.night.gif` | Kimi | full-screen scene: night sky |
 | `kimi.scene.orbit.gif` | Kimi | full-screen scene: orbit |
-| `grok.idle.gif` | Grok | idle (single frame): the ringed black-hole orb, original art |
-| `grok.spin.gif` | Grok | act: a glint circles the ring, then the ring flips |
+| `grok.idle.gif` | Grok | idle (single frame): a white Grokbot-style ball with capsule eyes, original art |
+| `grok.look.gif` | Grok | act: blinks, glances left and back, two small hops |
 | `grok.bike.gif` | Grok | act: mountain bike |
 
 The official Claude (Clawd) splash set is not exported here; it is generated
