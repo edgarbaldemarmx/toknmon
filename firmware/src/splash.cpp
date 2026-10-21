@@ -33,6 +33,14 @@ static const splash_anim_def_t* anim_by_name(const char *n) {
     const int i = anim_index_by_name(n);
     return (i < 0) ? NULL : anim_at(i);
 }
+// `<provider>.icon` grids (H10) are corner-mascot art only: the usage
+// view's icon and its blink. Splash code that walks the catalog by index
+// (splash_step on the Claude default) skips them; the name-based lists
+// (GROUP_NAMES, PROVIDER_SETS) simply never name them.
+static bool anim_is_corner_icon(const splash_anim_def_t *a) {
+    const size_t n = strlen(a->name);
+    return n >= 5 && strcmp(a->name + n - 5, ".icon") == 0;
+}
 
 // 60×60 stage. CELL sized so the canvas fits the smaller display dimension —
 // the canvas is square and centered, so on portrait or letterboxed panels
@@ -524,29 +532,27 @@ static const MascotSpec MASCOT_SPECS[PROVIDER_COUNT] = {
         { "waving",   "dancing", "claude.bike", "lurking",     NULL          },   // active
         { "dancing",  "waving",  "claude.bike", "dancing",     "lurking"     } }, // heavy: can't sit still
       "lurking" },
-    // Codex: the three thinking dots, and the bike at every pace. No walk
-    // gait, so no trips.
-    { "codex.idle", NULL, WALK_NONE,
-      { { "codex.dots", "codex.bike", NULL,         NULL, NULL },
-        { "codex.dots", "codex.bike", NULL,         NULL, NULL },
-        { "codex.bike", "codex.dots", NULL,         NULL, NULL },
-        { "codex.bike", "codex.dots", "codex.bike", NULL, NULL } },
+    // Codex, Kimi and Grok hold their Clawd-sized corner icon (H10): the
+    // still pose is the icon's frame 0 and the only act, at every pace, is
+    // its blink. Their small per-rate acts (dots, glow, look, bike) stay on
+    // the splash only. No walk gait, so no trips.
+    { "codex.icon", NULL, WALK_NONE,
+      { { "codex.icon", NULL, NULL, NULL, NULL },
+        { "codex.icon", NULL, NULL, NULL, NULL },
+        { "codex.icon", NULL, NULL, NULL, NULL },
+        { "codex.icon", NULL, NULL, NULL, NULL } },
       NULL },
-    // Kimi: the crescent moon, and the bike at every pace. No walk gait, so
-    // no trips.
-    { "kimi.idle", NULL, WALK_NONE,
-      { { "kimi.glow", "kimi.bike", NULL,        NULL, NULL },
-        { "kimi.glow", "kimi.bike", NULL,        NULL, NULL },
-        { "kimi.bike", "kimi.glow", NULL,        NULL, NULL },
-        { "kimi.bike", "kimi.glow", "kimi.bike", NULL, NULL } },
+    { "kimi.icon", NULL, WALK_NONE,
+      { { "kimi.icon", NULL, NULL, NULL, NULL },
+        { "kimi.icon", NULL, NULL, NULL, NULL },
+        { "kimi.icon", NULL, NULL, NULL, NULL },
+        { "kimi.icon", NULL, NULL, NULL, NULL } },
       NULL },
-    // Grok: the Grokbot-style ball blinks, glances and hops, and takes the
-    // bike at every pace. No walk gait, so no trips.
-    { "grok.idle", NULL, WALK_NONE,
-      { { "grok.look", "grok.bike", NULL,        NULL, NULL },
-        { "grok.look", "grok.bike", NULL,        NULL, NULL },
-        { "grok.bike", "grok.look", NULL,        NULL, NULL },
-        { "grok.bike", "grok.look", "grok.bike", NULL, NULL } },
+    { "grok.icon", NULL, WALK_NONE,
+      { { "grok.icon", NULL, NULL, NULL, NULL },
+        { "grok.icon", NULL, NULL, NULL, NULL },
+        { "grok.icon", NULL, NULL, NULL, NULL },
+        { "grok.icon", NULL, NULL, NULL, NULL } },
       NULL },
 };
 static const uint16_t MAS_STILL_MS_BY_RATE[4] = { 10000, 7000, 5000, 3500 };
@@ -1208,7 +1214,11 @@ static void splash_step(int step) {
         set_step(step);
         return;
     }
-    cur_anim = (uint16_t)((cur_anim + anim_count() + step) % anim_count());
+    // Walk the whole catalog, skipping the corner-only icons.
+    for (int tries = 0; tries < anim_count(); tries++) {
+        cur_anim = (uint16_t)((cur_anim + anim_count() + step) % anim_count());
+        if (!anim_is_corner_icon(anim_at(cur_anim))) break;
+    }
     cur_frame = 0;
     frame_started_ms = millis();
     last_pick_ms = frame_started_ms;

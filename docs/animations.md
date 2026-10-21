@@ -6,7 +6,7 @@ corner mascots:
 | Catalog | Source | Generated header | Redistributed? |
 | --- | --- | --- | --- |
 | **Official Clawd set** (17 animations: core poses and persona scenes) | Anthropic's GIF/Lottie assets, fetched on demand | `firmware/src/splash_animations.h` | the header ships; the sources are not committed (see `NOTICE.md`) |
-| **Custom grid animations** (18: Codex, Kimi and Grok mascots, six scenes, the four bikes) | hand-authored text grids in `assets/animations/` | `firmware/src/custom_animations.h` | yes, original art (MIT) |
+| **Custom grid animations** (21: Codex, Kimi and Grok mascots and corner icons, six scenes, the four bikes) | hand-authored text grids in `assets/animations/` | `firmware/src/custom_animations.h` | yes, original art (MIT) |
 
 Both headers are generated: do not hand-edit them. The engine treats the two
 tables as one catalog (`anim_count()` / `anim_at()`), so a custom animation
@@ -78,6 +78,16 @@ Two things to keep in mind:
   ignores `origin`, so a different crop would make the character jump
   between idle and act.
 
+Corner icons are `<provider>.icon` grids (`codex.icon`, `kimi.icon`,
+`grok.icon`): Clawd-sized (24×18, 21×18 and 18×18 cells, feet on row 36)
+portraits of each mascot with two or three shade and highlight tones, a
+darker rim and `#141413` eyes. Frame 0 is the still pose with a long hold and
+frame 1 closes the eyes for 140 ms, so the file is both the usage view's
+corner idle and its only act (a blink). They are corner art only: the splash
+never plays them (`splash_next`/`splash_prev` on the Claude default skip any
+`*.icon` name, and the play-lists never name them), while the small
+`idle`/act grids and the bikes keep playing on the splash and in mascot mode.
+
 Full-screen scenes are optional `<provider>.scene.<name>` grids on the 53×37
 stage (`origin: 1 0`). The Codex and Kimi scenes loop the whole file; the
 Grok scenes add a short intro and outro that start and end on the exact
@@ -109,7 +119,7 @@ Everything is looked up **by name** in `firmware/src/splash.cpp`:
 
 | Where | What it controls |
 | --- | --- |
-| `MASCOT_SPECS[provider]` | the corner mascot: `idle`, optional walk gait, `acts[]` per usage-rate group, `lurk`. Codex, Kimi and Grok have no walk gait, so they act in place. |
+| `MASCOT_SPECS[provider]` | the corner mascot: `idle`, optional walk gait, `acts[]` per usage-rate group, `lurk`. Codex, Kimi and Grok use their `<provider>.icon` as idle and as the only act at every pace (the blink), with no walk gait. |
 | `PROVIDER_SETS[provider]` | the mascot-mode play-list (idle, acts, bike, scenes) used by long-press, the parade and `screen splash <provider>`. A name missing from the catalog is skipped and logged once. |
 | `GROUP_NAMES` | the mood groups the default Claude splash picks from by usage rate (`claude.bike` lives in the busy groups). |
 

@@ -1,0 +1,54 @@
+# Grok corner icon (usage view only, never a splash entry): the original
+# Grokbot-style white ball (not the xAI or Grok logo) with two capsule eyes
+# glancing to the side, lit from the upper right with a specular spot and
+# shaded on the lower-left rim in two steps down to a slate edge.
+# Frame 0 is the still pose (the corner idle); frame 1 is the blink act.
+name: grok.icon
+origin: 18 19
+palette:
+  . = transparent
+  s = #FFFFFF
+  w = #F4F4F2
+  m = #DADDE2
+  e = #BFC4CC
+  r = #8A94A3
+  k = #141413
+hold: 140
+--- hold=2400 # f0 still, eyes open
+......mwwwww......
+....mwwwwwwwww....
+...mwwwwwwwwssw...
+..emwwwwwwwwssww..
+.emwwwwwwwwwwwwww.
+.emwwwwwwkkwwkkww.
+emwwwwwwwkkwwkkwww
+emwwwwwwwkkwwkkwww
+emwwwwwwwkkwwkkwww
+remwwwwwwwwwwwwwww
+remmwwwwwwwwwwwwww
+reemmwwwwwwwwwwwww
+.reemmmwwwwwwwwwm.
+.rreemmmwwwwwwwmm.
+..rreeeemmmmmmme..
+...rrreeeeeeeee...
+....rrrreeeeer....
+......rrrrrr......
+--- hold=140 # f1 blink, eyes closed
+......mwwwww......
+....mwwwwwwwww....
+...mwwwwwwwwssw...
+..emwwwwwwwwssww..
+.emwwwwwwwwwwwwww.
+.emwwwwwwwwwwwwww.
+emwwwwwwwwwwwwwwww
+emwwwwwwwkkwwkkwww
+emwwwwwwwwwwwwwwww
+remwwwwwwwwwwwwwww
+remmwwwwwwwwwwwwww
+reemmwwwwwwwwwwwww
+.reemmmwwwwwwwwwm.
+.rreemmmwwwwwwwmm.
+..rreeeemmmmmmme..
+...rrreeeeeeeee...
+....rrrreeeeer....
+......rrrrrr......
