@@ -5,7 +5,7 @@ All notable changes to ToknMon are documented here. The format follows
 [Semantic Versioning](https://semver.org/).
 
 Milestones are tracked in `docs/odd/` (one feature document per milestone,
-H0–H8); the entries below summarize them.
+H0–H10); the entries below summarize them.
 
 ## [Unreleased]
 
@@ -27,7 +27,21 @@ H0–H8); the entries below summarize them.
   addresses, credential-looking strings, scratch paths) and runs in CI as the
   `pii-check` job.
 
+- **Fable view** (H10): Claude's model-scoped weekly limit gets its own page
+  after Claude, a 10×10 grid of small Clawds filled to the percentage, so
+  Claude's page keeps two full-size bars. The daemon sends the model name
+  as `fl`. Boards without the dot canvas keep the third bar.
+
+- **Corner icons** (H10): Codex, Kimi and Grok get Clawd-sized corner icons
+  with more detail, shading and a blink (`<provider>.icon`); the full-screen
+  animations and scenes are unchanged.
+
 ### Changed
+
+- The meter no longer rotates between providers every 8 s (H10): it stays
+  on the provider you picked, even when its data goes stale, and the pick
+  survives a reboot. Serial `slot` accepts `0-4` (4 = Fable) and the
+  simulator takes `SIM_SLOT=0-4`.
 
 - The parade no longer starts after 5 minutes without input: the meter stays
   on screen until you touch it, and the animations only play on a tap, swipe

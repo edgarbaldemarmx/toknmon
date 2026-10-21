@@ -120,7 +120,7 @@ daemon/                     — macOS host daemon (claude_usage_daemon.py + prov
 tools/                      — asset converters, fetch_official_clawd.sh, tests (see tools/README.md)
 docs/porting/               — adding-a-board.md, hal-contract.md, capability-flags.md
 docs/simulator.md           — desktop simulator usage (controls, scenarios, env hooks)
-docs/odd/                   — design log: one feature document per milestone (H0–H8)
+docs/odd/                   — design log: one feature document per milestone (H0–H10)
 ```
 
 Each board folder contains: `board.h` (pins, I2C addresses, `BOARD_HAS_*` flags),
@@ -287,18 +287,38 @@ the character between idle and act.
 
 The three `<provider>.bike` grids (H4) are the mascots on a mountain bike:
 frames 0/5 coast, 1-4 are one pedal revolution with the 4-spoke wheels
-stepping 45° per frame; they are wired both as corner acts and into the busy
-`GROUP_NAMES` slots, and the bike metal is ivory because a `#141413` frame
+stepping 45° per frame; they are wired into the busy `GROUP_NAMES` slots
+(Claude's bike is also a corner act), and the bike metal is ivory because a `#141413` frame
 would vanish into the splash's opaque-black index 0.
 
 Corner mascots are per provider (`MASCOT_SPECS` in `splash.cpp`: idle, walk
-gait, acts per usage-rate group, lurk). `ui.cpp` calls
-`splash_mascot_set_provider()` when the carousel changes slot, and
-`splash_mascot_set_trips(false)` while the dense three-panel layout is up,
-because the full-size lurk peeks in over the third panel; Codex and Kimi
-have no walk gait, so they only ever act in place. The corner buffer is sized
+gait, acts per usage-rate group, lurk). Since H10, Codex, Kimi and Grok hold
+a Clawd-sized corner icon (`<provider>.icon`, ~24×18 cells, frame 0 still,
+then a blink) whose only corner act is that blink; their small splash acts
+stay on the splash, and `splash_step()` skips `*.icon` entries when it walks
+the catalog. `ui.cpp` calls `splash_mascot_set_provider()` when the
+carousel changes view, and `splash_mascot_set_trips(false)` unless the
+two-bar layout is up, because the full-size lurk peeks in over the third
+panel or the dot grid; Codex, Kimi and Grok have no walk gait, so they only
+ever act in place. The corner buffer is sized
 from the largest frame across all specs at create time and `mas_render()`
 refuses (and logs once) any frame that would not fit.
+
+### Usage carousel and the Fable view (H10)
+
+The usage view pages *views*, not providers (`VIEW_ORDER` in `ui.cpp`:
+Claude, Fable, Codex, Kimi, Grok; `UI_VIEW_FABLE = PROVIDER_COUNT` in
+`ui.h`). It never moves on its own: tap, horizontal swipe and serial
+`next` / `slot 0-4` pick a view, which `pick_slot()` stores in NVS
+(`clawdmeter` / `slot`) and `ui_init()` restores; a picked view that goes
+stale or reports `ok:false` stays on screen with its last values. At boot,
+until the picked view has data, the first view with data stands in. The
+Fable view is Claude's model-scoped weekly limit (`f`/`fr`, label `fl`)
+drawn by `draw_clawds()` as a 10×10 grid of 12×8-cell Clawd glyphs written
+straight into the dot canvas buffer; it exists only while Claude's payload
+carries the limit and the board has the dot canvas, otherwise Claude keeps
+the dense three-bar layout (C6). `SIM_SLOT=0-4` seeds the pick in the
+simulator.
 
 ### Mascot mode and parade (H6)
 

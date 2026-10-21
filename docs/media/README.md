@@ -57,18 +57,21 @@ exactly as here). Each frame keeps its own `hold`; the clip loops forever.
 | File | Provider | Role |
 | --- | --- | --- |
 | `claude.bike.gif` | Claude | Clawd on the mountain bike (busy act) |
+| `codex.icon.gif` | Codex | corner icon on the usage view: the three-dots character, still pose and blink |
 | `codex.idle.gif` | Codex | idle (single frame) |
 | `codex.dots.gif` | Codex | act: the three dots bounce |
 | `codex.think.gif` | Codex | act: thinking |
 | `codex.bike.gif` | Codex | act: mountain bike |
 | `codex.scene.wave.gif` | Codex | full-screen scene: wave |
 | `codex.scene.rain.gif` | Codex | full-screen scene: rain |
+| `kimi.icon.gif` | Kimi | corner icon on the usage view: the crescent-moon character with a sparkle, still pose and blink |
 | `kimi.idle.gif` | Kimi | idle (single frame) |
 | `kimi.glow.gif` | Kimi | act: glow |
 | `kimi.sleep.gif` | Kimi | act: sleep |
 | `kimi.bike.gif` | Kimi | act: mountain bike |
 | `kimi.scene.night.gif` | Kimi | full-screen scene: night sky |
 | `kimi.scene.orbit.gif` | Kimi | full-screen scene: orbit |
+| `grok.icon.gif` | Grok | corner icon on the usage view: the shaded Grokbot-style ball, still pose and blink |
 | `grok.idle.gif` | Grok | idle (single frame): a white Grokbot-style ball with capsule eyes, original art |
 | `grok.look.gif` | Grok | act: blinks, glances left and back, two small hops |
 | `grok.bike.gif` | Grok | act: mountain bike |
