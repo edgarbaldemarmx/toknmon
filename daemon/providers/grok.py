@@ -1,8 +1,10 @@
 """Grok (Grok Build CLI, ``grok``) provider: ``GET ${base}/billing?format=credits``.
 
 Data dir: ``${GROK_HOME:-~/.grok}``. Base URL: ``${GROK_CLI_CHAT_PROXY_BASE_URL:-
-https://cli-chat-proxy.grok.com/v1}``. The request is the one the CLI makes
-for its own credits view (verified with a live call on 2026-10-21, HTTP 200):
+https://cli-chat-proxy.grok.com/v1}``; an override that is not ``https://`` is
+ignored (logged once) so the bearer never leaves over plain HTTP. The request
+is the one the CLI makes for its own credits view (verified with a live call
+on 2026-10-21, HTTP 200):
 
     GET /billing?format=credits
     Authorization: Bearer <key>
@@ -13,7 +15,7 @@ for its own credits view (verified with a live call on 2026-10-21, HTTP 200):
 The bearer is the ``key`` of the entry in ``$GROK_HOME/auth.json`` (a dict
 keyed like ``https://auth.x.ai::<uuid>``; ``auth_mode`` is ``oidc`` and
 ``expires_at`` is ISO-8601). With several entries the one with a non-empty
-``key`` and the latest ``expires_at`` wins. The token is never logged.
+``key`` and the latest ``expires_at`` wins. Tokens are never logged.
 
 Response: ``{"config": {"creditUsagePercent": 5.0, "currentPeriod": {"type":
 "USAGE_PERIOD_TYPE_WEEKLY", "start": ISO, "end": ISO}, "productUsage": [...],
@@ -24,23 +26,46 @@ reset = minutes until ``currentPeriod.end`` (a past end reads 0 %, see
 A monthly ``currentPeriod`` also lands on ``"Weekly"``: the firmware has one
 long-window slot and the countdown still comes from the real period end.
 
-No token refresh. The daemon never reads or sends ``refresh_token`` and never
-writes ``auth.json``: Grok refreshes its own token and re-reads the file, and a
-second refresher could rotate the refresh token out from under it. An expired
-``expires_at`` therefore skips the endpoint entirely.
+Token refresh (Grok's own protocol, so the slot stays live while Grok is
+closed): when the chosen entry expires within ``REFRESH_MARGIN_S`` (Grok's
+``GROK_AUTH_EARLY_INVALIDATION_SECS`` default), the daemon
 
-Fallback: when the token is missing or expired, or the endpoint fails (network
-error, HTTP error, malformed body), the newest ``"msg": "billing: fetched
-credits config"`` line in ``$GROK_HOME/logs/unified.jsonl`` supplies
-``ctx.config.creditUsagePercent`` and ``ctx.config.currentPeriod.end`` (the CLI
-logs that line each time it fetches credits, so it is only as fresh as the last
-Grok run). The log is read backwards in blocks so a large file stays cheap.
-Neither source -> ``ok=False``.
+1. takes Grok's cross-process lock, an exclusive non-blocking ``flock`` on
+   ``$GROK_HOME/auth.json.lock`` holding ``<pid>:<epoch>``; a busy lock means
+   Grok is refreshing right now, so this poll skips the refresh;
+2. re-reads ``auth.json`` under the lock and adopts a token another process
+   already stored (no request);
+3. POSTs ``grant_type=refresh_token``, ``refresh_token``,
+   ``client_id=<oidc_client_id>`` to the issuer's ``token_endpoint``
+   (discovered from ``<oidc_issuer>/.well-known/openid-configuration``, cached
+   per issuer; the ``grok_token_url`` config key overrides it; HTTPS only);
+4. writes ``key``, the rotated ``refresh_token`` (when returned) and
+   ``expires_at`` back atomically (temp file + rename, mode 0600), keeping
+   every other entry, field and key order.
+
+A 400/401 ``invalid_grant`` means the sign-in is gone: auth.json is left alone
+and that refresh token is not tried again until it changes (``grok login``).
+Any other failure also leaves auth.json untouched.
+
+Fallback: when there is no usable token or the endpoint fails (network error,
+HTTP error, malformed body), the newest ``"msg": "billing: fetched credits
+config"`` line in ``$GROK_HOME/logs/unified.jsonl`` supplies
+``ctx.config.creditUsagePercent`` and ``ctx.config.currentPeriod.end``, but
+only when its ``ts`` is newer than ``LOG_MAX_AGE_S`` (6 h); an older value
+yields ``ok=False`` so the slot drops out instead of showing it as live. The
+log is scanned off the event loop, backwards in blocks, over at most the last
+``LOG_MAX_BYTES`` (8 MiB). The live-endpoint failure is logged once per state
+change.
 """
 
+import asyncio
+import datetime
+import fcntl
+import hashlib
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -49,20 +74,74 @@ from .base import DetectResult, ProviderResult, iso_to_epoch, tilde, window_bar
 
 DEFAULT_BASE_URL = "https://cli-chat-proxy.grok.com/v1"
 BILLING_PATH = "/billing?format=credits"
+DEFAULT_ISSUER = "https://auth.x.ai"
+DISCOVERY_PATH = "/.well-known/openid-configuration"
 # Sent when $GROK_HOME/version.json is missing or unreadable (CLI version the
 # endpoint was verified against).
 DEFAULT_CLIENT_VERSION = "1.0.62"
 LOG_MSG = "billing: fetched credits config"
 LOG_BLOCK = 64 * 1024
+LOG_MAX_BYTES = 8 * 1024 * 1024
+LOG_MAX_AGE_S = 6 * 3600
 TIMEOUT = 10.0
+# Refresh when the token expires within this many seconds (Grok's own
+# GROK_AUTH_EARLY_INVALIDATION_SECS default).
+REFRESH_MARGIN_S = 300
+# Lifetime assumed when a successful refresh response carries no usable
+# ``expires_in``; the new tokens are still persisted so a rotated refresh
+# token is never lost.
+DEFAULT_TOKEN_LIFETIME_S = 3600
+SIGNIN_EXPIRED = "Grok sign-in expired; run `grok login`"
+USER_AGENT = "toknmon-daemon"
+
+# Config accessor injected by the main module (``read_config_value``), same
+# hook as kimi.py. Default: no config.
+read_config: Callable[[str], str | None] = lambda key: None
+
+
+def _default_log(msg: str) -> None:
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+# Log sink (same line format as the daemon's ``log``); tests capture it.
+log: Callable[[str], None] = _default_log
+
+# In-process state: discovered token endpoint per issuer, the last live-path
+# state that was logged, one-shot warnings, and fingerprints of refresh tokens
+# the issuer rejected with invalid_grant (never the tokens themselves).
+_token_endpoints: dict[str, str] = {}
+_live_state = ""
+_warned: set[str] = set()
+_dead_refresh_tokens: set[str] = set()
+
+
+class RefreshError(Exception):
+    """Token refresh did not happen or failed; auth.json was left untouched.
+    The message is a log-safe reason (never a token)."""
 
 
 def grok_home() -> Path:
     return Path(os.environ.get("GROK_HOME") or (Path.home() / ".grok")).expanduser()
 
 
+def _is_https(url) -> bool:
+    return isinstance(url, str) and url.lower().startswith("https://")
+
+
+def _warn_once(msg: str) -> None:
+    if msg not in _warned:
+        _warned.add(msg)
+        log(msg)
+
+
 def base_url() -> str:
-    return (os.environ.get("GROK_CLI_CHAT_PROXY_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    override = (os.environ.get("GROK_CLI_CHAT_PROXY_BASE_URL") or "").strip()
+    if override:
+        if _is_https(override):
+            return override.rstrip("/")
+        _warn_once(f"Grok: ignoring GROK_CLI_CHAT_PROXY_BASE_URL={override!r} (not https); "
+                   f"using {DEFAULT_BASE_URL}")
+    return DEFAULT_BASE_URL
 
 
 def client_version(home: Path) -> str:
@@ -73,17 +152,18 @@ def client_version(home: Path) -> str:
     return version.strip() if isinstance(version, str) and version.strip() else DEFAULT_CLIENT_VERSION
 
 
-def read_auth(home: Path | None = None) -> dict | None:
-    """The ``auth.json`` entry with a non-empty ``key`` and the latest
-    ``expires_at`` (expired or not), or None when there is none."""
+def _load_auth(home: Path) -> dict | None:
     try:
-        blob = json.loads(((home or grok_home()) / "auth.json").read_text())
+        blob = json.loads((home / "auth.json").read_text())
     except (OSError, ValueError):
         return None
-    if not isinstance(blob, dict):
-        return None
-    best: tuple[float, dict] | None = None
-    for entry in blob.values():
+    return blob if isinstance(blob, dict) else None
+
+
+def _select_entry(blob: dict) -> tuple[str, dict] | None:
+    """(name, entry) with a non-empty ``key`` and the latest ``expires_at``."""
+    best: tuple[float, str, dict] | None = None
+    for name, entry in blob.items():
         if not isinstance(entry, dict):
             continue
         key = entry.get("key")
@@ -92,13 +172,21 @@ def read_auth(home: Path | None = None) -> dict | None:
         exp = iso_to_epoch(entry.get("expires_at"))
         rank = exp if exp is not None else float("-inf")
         if best is None or rank > best[0]:
-            best = (rank, entry)
-    return best[1] if best else None
+            best = (rank, name, entry)
+    return (best[1], best[2]) if best else None
+
+
+def read_auth(home: Path | None = None) -> dict | None:
+    """The ``auth.json`` entry with a non-empty ``key`` and the latest
+    ``expires_at`` (expired or not), or None when there is none."""
+    blob = _load_auth(home or grok_home())
+    found = _select_entry(blob) if blob else None
+    return found[1] if found else None
 
 
 def read_token(now: float, home: Path | None = None) -> str | None:
     """The bearer key unless its ``expires_at`` is in the past (an entry
-    without ``expires_at`` is tried; the endpoint decides)."""
+    without ``expires_at`` is tried; the endpoint decides). No refresh."""
     entry = read_auth(home)
     if entry is None:
         return None
@@ -110,8 +198,8 @@ def read_token(now: float, home: Path | None = None) -> str | None:
 
 def detect() -> DetectResult:
     """The Grok CLI is usable when ``$GROK_HOME/auth.json`` holds an entry with
-    a non-empty ``key``; an expired one is fine because the log fallback still
-    works and Grok refreshes the token itself the next time it runs."""
+    a non-empty ``key``; an expired one is fine because the daemon refreshes it
+    with Grok's own protocol (and the log fallback still works)."""
     auth = grok_home() / "auth.json"
     shown = tilde(auth)
     if not auth.is_file():
@@ -123,15 +211,218 @@ def detect() -> DetectResult:
     return DetectResult(True, f"Grok credentials found ({shown})")
 
 
+# --- token refresh ----------------------------------------------------------
+
+def _grok_iso(epoch: float) -> str:
+    """``expires_at`` in Grok's format: UTC, microseconds, ``Z``."""
+    return datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _write_auth_atomic(path: Path, blob: dict) -> None:
+    """Write ``blob`` as ``<path>.tmp.<pid>`` then rename over ``path``, mode
+    0600 (same semantics as kimi.py's credential write). Grok's own layout:
+    two-space indent, no trailing newline."""
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    data = json.dumps(blob, indent=2, ensure_ascii=False)
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+class _AuthLock:
+    """Grok's cross-process refresh lock: exclusive non-blocking ``flock`` on
+    ``auth.json.lock`` with ``<pid>:<epoch>`` written while it is held."""
+
+    def __init__(self, home: Path):
+        self.path = home / "auth.json.lock"
+        self.fd: int | None = None
+
+    def __enter__(self):
+        try:
+            self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as e:
+            raise RefreshError(f"refresh skipped: cannot open auth.json.lock ({type(e).__name__})") from e
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as e:
+            os.close(self.fd)
+            self.fd = None
+            raise RefreshError("refresh skipped: auth.json.lock is held by another process") from e
+        try:
+            os.ftruncate(self.fd, 0)
+            os.pwrite(self.fd, f"{os.getpid()}:{int(time.time())}".encode(), 0)
+        except OSError:
+            pass   # the lock itself is what coordinates; the content is informational
+        return self
+
+    def __exit__(self, *_exc):
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_UN)
+        finally:
+            os.close(self.fd)
+            self.fd = None
+        return False
+
+
+async def _token_endpoint(client: httpx.AsyncClient, entry: dict) -> str:
+    """``grok_token_url`` config key, else the issuer's discovered
+    ``token_endpoint`` (cached per issuer). HTTPS only."""
+    configured = (read_config("grok_token_url") or "").strip()
+    if configured:
+        if not _is_https(configured):
+            raise RefreshError(f"refresh refused: grok_token_url is not https ({configured})")
+        return configured
+    issuer = (entry.get("oidc_issuer") or DEFAULT_ISSUER).rstrip("/")
+    if not _is_https(issuer):
+        raise RefreshError(f"refresh refused: oidc_issuer is not https ({issuer})")
+    if issuer in _token_endpoints:
+        return _token_endpoints[issuer]
+    try:
+        resp = await client.get(f"{issuer}{DISCOVERY_PATH}", headers={"Accept": "application/json"},
+                                timeout=TIMEOUT)
+    except httpx.HTTPError as e:
+        raise RefreshError(f"OIDC discovery failed: {type(e).__name__}") from e
+    if resp.status_code != 200:
+        raise RefreshError(f"OIDC discovery HTTP {resp.status_code}")
+    try:
+        body = resp.json()
+    except ValueError as e:
+        raise RefreshError("OIDC discovery response is not JSON") from e
+    endpoint = body.get("token_endpoint") if isinstance(body, dict) else None
+    if not isinstance(endpoint, str) or not endpoint:
+        raise RefreshError("OIDC discovery has no token_endpoint")
+    if not _is_https(endpoint):
+        raise RefreshError(f"refresh refused: token_endpoint is not https ({endpoint})")
+    _token_endpoints[issuer] = endpoint
+    return endpoint
+
+
+def _invalid_grant(resp: httpx.Response) -> bool:
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("error") == "invalid_grant"
+
+
+async def refresh_access_token(home: Path, name: str, entry: dict, client: httpx.AsyncClient,
+                               now: float) -> str:
+    """Refresh the ``name`` entry of ``auth.json`` under Grok's lock and return
+    the access token to use. Raises :class:`RefreshError` when no refresh
+    happened (busy lock, refused URL, network/HTTP failure, rejected grant);
+    auth.json is then untouched. At most one token request: never retried."""
+    refresh = entry.get("refresh_token")
+    if not isinstance(refresh, str) or not refresh:
+        raise RefreshError("no refresh_token in auth.json")
+    if _fingerprint(refresh) in _dead_refresh_tokens:
+        raise RefreshError(SIGNIN_EXPIRED)
+    # Discovery happens before the lock so Grok never waits on it.
+    url = await _token_endpoint(client, entry)
+    path = home / "auth.json"
+    with _AuthLock(home):
+        blob = _load_auth(home)
+        if blob is None:
+            raise RefreshError("cannot read auth.json")
+        current = blob.get(name)
+        if not isinstance(current, dict) or not isinstance(current.get("key"), str):
+            raise RefreshError("auth.json entry changed during refresh")
+        exp = iso_to_epoch(current.get("expires_at"))
+        if current["key"].strip() and (exp is None or exp > now + REFRESH_MARGIN_S):
+            return current["key"].strip()     # another process already refreshed
+        refresh = current.get("refresh_token")
+        client_id = current.get("oidc_client_id")
+        if not isinstance(refresh, str) or not refresh:
+            raise RefreshError("no refresh_token in auth.json")
+        if not isinstance(client_id, str) or not client_id:
+            raise RefreshError("no oidc_client_id in auth.json")
+        form = {"grant_type": "refresh_token", "refresh_token": refresh, "client_id": client_id}
+        headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
+        try:
+            resp = await client.post(url, data=form, headers=headers, timeout=TIMEOUT)
+        except httpx.HTTPError as e:
+            raise RefreshError(f"refresh request failed: {type(e).__name__}") from e
+        if resp.status_code in (400, 401) and _invalid_grant(resp):
+            _dead_refresh_tokens.add(_fingerprint(refresh))
+            raise RefreshError(SIGNIN_EXPIRED)
+        if resp.status_code != 200:
+            raise RefreshError(f"refresh HTTP {resp.status_code}")
+        try:
+            body = resp.json()
+        except ValueError as e:
+            raise RefreshError("refresh response is not JSON") from e
+        token = body.get("access_token") if isinstance(body, dict) else None
+        if not isinstance(token, str) or not token:
+            raise RefreshError("refresh response has no access_token")
+        try:
+            expires_in = int(float(body.get("expires_in")))
+        except (TypeError, ValueError):
+            expires_in = 0
+        if expires_in <= 0:
+            expires_in = DEFAULT_TOKEN_LIFETIME_S
+        updated = dict(current)   # same field order; only three values change
+        updated["key"] = token
+        if isinstance(body.get("refresh_token"), str) and body["refresh_token"]:
+            updated["refresh_token"] = body["refresh_token"]
+        updated["expires_at"] = _grok_iso(now + expires_in)
+        blob[name] = updated      # same entry position
+        try:
+            _write_auth_atomic(path, blob)
+        except OSError as e:
+            # The issuer may have rotated the refresh token already; use the
+            # new access token for this poll and say why it was not stored.
+            log(f"Grok: refreshed token could not be written to auth.json ({type(e).__name__})")
+        return token
+
+
+async def _resolve_token(client: httpx.AsyncClient, home: Path, now: float) -> tuple[str | None, str]:
+    """(bearer, failure reason). Refreshes the chosen entry when it expires
+    within ``REFRESH_MARGIN_S``; a token that is still valid is used even if
+    that refresh could not happen."""
+    blob = _load_auth(home)
+    found = _select_entry(blob) if blob else None
+    if found is None:
+        return None, "no Grok credentials"
+    name, entry = found
+    key = entry["key"].strip()
+    exp = iso_to_epoch(entry.get("expires_at"))
+    if exp is None or exp > now + REFRESH_MARGIN_S:
+        return key, ""
+    try:
+        return await refresh_access_token(home, name, entry, client, now), ""
+    except RefreshError as e:
+        if exp > now:
+            return key, ""
+        return None, f"token expired; {e}"
+
+
+# --- billing endpoint and log fallback --------------------------------------
+
 def _reverse_lines(path: Path):
     """Yield the lines of ``path`` last to first, reading ``LOG_BLOCK`` bytes
-    at a time from the end."""
+    at a time from the end and never more than ``LOG_MAX_BYTES`` in total (a
+    line cut by that limit is dropped)."""
     with path.open("rb") as fh:
         fh.seek(0, os.SEEK_END)
         pos = fh.tell()
+        floor = max(0, pos - LOG_MAX_BYTES)
         tail = b""
-        while pos > 0:
-            step = min(LOG_BLOCK, pos)
+        while pos > floor:
+            step = min(LOG_BLOCK, pos - floor)
             pos -= step
             fh.seek(pos)
             parts = (fh.read(step) + tail).split(b"\n")
@@ -139,13 +430,14 @@ def _reverse_lines(path: Path):
             for line in reversed(parts[1:]):
                 if line:
                     yield line
-        if tail:
+        if tail and floor == 0:
             yield tail
 
 
-def latest_log_config(home: Path | None = None) -> dict | None:
-    """``ctx.config`` of the newest "billing: fetched credits config" line in
-    ``logs/unified.jsonl``, or None."""
+def latest_log_entry(home: Path | None = None) -> tuple[float | None, dict] | None:
+    """(``ts`` epoch or None, ``ctx.config``) of the newest "billing: fetched
+    credits config" line in ``logs/unified.jsonl``, or None. Blocking: poll()
+    runs it in a worker thread."""
     path = (home or grok_home()) / "logs" / "unified.jsonl"
     needle = LOG_MSG.encode()
     try:
@@ -161,10 +453,16 @@ def latest_log_config(home: Path | None = None) -> dict | None:
             ctx = line.get("ctx")
             config = ctx.get("config") if isinstance(ctx, dict) else None
             if isinstance(config, dict) and "creditUsagePercent" in config:
-                return config
+                return iso_to_epoch(line.get("ts")), config
     except OSError:
         return None
     return None
+
+
+def latest_log_config(home: Path | None = None) -> dict | None:
+    """``ctx.config`` of the newest billing line (see :func:`latest_log_entry`)."""
+    found = latest_log_entry(home)
+    return found[1] if found else None
 
 
 def parse_config(config, now: float) -> ProviderResult | None:
@@ -206,25 +504,48 @@ async def _fetch(client: httpx.AsyncClient, token: str, home: Path, now: float) 
     return (res, "") if res else (None, "unexpected response shape")
 
 
+def _note_live_state(reason: str) -> None:
+    """Log the live-path outcome only when it changes (failure reason, or back
+    to healthy)."""
+    global _live_state
+    if reason == _live_state:
+        return
+    if reason:
+        log(f"Grok: live billing unavailable ({reason}); using the log fallback if it is fresh")
+    else:
+        log("Grok: live billing endpoint OK again")
+    _live_state = reason
+
+
 async def poll(client: httpx.AsyncClient | None = None, now: float | None = None) -> ProviderResult:
-    """Billing endpoint first, then the log fallback. ``reason`` lands in
-    ``extra`` only on failure (``to_payload`` drops it); it never holds the token."""
+    """Billing endpoint first (refreshing the token when needed), then the
+    log fallback when it is newer than 6 h. ``reason`` lands in ``extra`` only
+    on failure (``to_payload`` drops it); it never holds a token."""
     now = time.time() if now is None else now
     home = grok_home()
-    token = read_token(now, home)
-    reason = "no valid token" if token is None else ""
-    if token:
-        own_client = client is None
-        client = client or httpx.AsyncClient(timeout=TIMEOUT)
-        try:
+    own_client = client is None
+    client = client or httpx.AsyncClient(timeout=TIMEOUT)
+    res = None
+    try:
+        token, reason = await _resolve_token(client, home, now)
+        if token:
             res, reason = await _fetch(client, token, home, now)
-        finally:
-            if own_client:
-                await client.aclose()
-        if res:
-            return res
-    fallback = parse_config(latest_log_config(home), now)
-    if fallback:
-        return fallback
-    return ProviderResult(id="grok", bars=[], ok=False,
-                          extra={"reason": f"{reason}; no billing line in logs/unified.jsonl"})
+    finally:
+        if own_client:
+            await client.aclose()
+    _note_live_state(reason)
+    if res:
+        return res
+    found = await asyncio.to_thread(latest_log_entry, home)
+    if found is None:
+        detail = "no billing line in logs/unified.jsonl"
+    else:
+        ts, config = found
+        fallback = parse_config(config, now)
+        if ts is None or now - ts >= LOG_MAX_AGE_S:
+            detail = "last billing line in logs/unified.jsonl is older than 6 h"
+        elif fallback is None:
+            detail = "malformed billing line in logs/unified.jsonl"
+        else:
+            return fallback
+    return ProviderResult(id="grok", bars=[], ok=False, extra={"reason": f"{reason}; {detail}"})

@@ -14,14 +14,25 @@ Objective: keep the meter on screen until the user touches it, and add Grok Buil
   - **S2.6 Mascot**: an original character (no xAI/Grok logo): a white ball with capsule eyes in the style of the Grokbot avatars (L5). `grok.idle`, `grok.look` (act) and `grok.bike` grids; wired into `MASCOT_SPECS` and `PROVIDER_SETS` (idle, spin, bike; scenes are a later follow-up).
   - **S2.7 Docs**: README, CLAUDE.md, docs/providers.md, controls, install, troubleshooting, config.example, install-mac.sh, screenshot.sh, NOTICE (Grok/xAI trademark note), CHANGELOG.
 
+- **S3** — "Creas las escenas de pantalla completa y arregla lo que se requiera. Inclusive si tienes que re hacer un daemon nuevo. La idea es que quede listo y podamos hacer el update en el repositorio y quede funcionando completamente aqui en mi equipo"
+  - **S3.1 Grok scenes**: two full-screen scenes for the Grokbot-style ball, `grok.scene.stars` and `grok.scene.build`, appended to the Grok `PROVIDER_SETS` row (idle, look, bike, scene, scene), same pipeline and rules as `codex.scene.*` / `kimi.scene.*`.
+  - **S3.2 Live Grok data (token refresh)**: when the stored access token is expired or within 300 s of expiry, the daemon refreshes it with Grok's own protocol so the slot stays live while Grok is closed: take an exclusive `flock` on `$GROK_HOME/auth.json.lock` (write `<pid>:<epoch>` like Grok does; give up for this poll when the lock is busy), re-read `auth.json` under the lock and skip the refresh if another process already stored a fresh token, POST `grant_type=refresh_token`, `refresh_token`, `client_id=<oidc_client_id>` to the issuer's `token_endpoint` (discovered from `<oidc_issuer>/.well-known/openid-configuration`, HTTPS only; currently `https://auth.x.ai/oauth2/token`), then write `key`, the rotated `refresh_token` (when returned) and `expires_at` back atomically (temp file + rename, mode 0600, every other field preserved). Never log tokens. Supersedes S2.2 (L8).
+  - **S3.3 Honest fallback**: the endpoint failure is logged once per state change (R4-001); the log fallback is used only when its billing line is newer than 6 h, otherwise the result is `ok: false` so the slot drops out instead of showing an old value as live (R3).
+  - **S3.4 Hardening**: `GROK_CLI_CHAT_PROXY_BASE_URL` must be `https://` (R1-001); the log scan runs off the event loop (`asyncio.to_thread`) and reads at most 8 MiB from the end (R4-002).
+  - **S3.5 Delivery**: merge to `main`, push to `origin` (edgarbaldemarmx/toknmon) after `tools/check_pii.sh`, and leave the install clone `~/Downloads/toknmon` on `main` with the daemon running and the board flashed.
+
 ## Tasks
 
 | ID | Specs | Route | Status | Commit |
 | --- | --- | --- | --- | --- |
 | T1 | S1 | inline | done | `af8b6b9` |
-| T2 | S2.1–S2.4, S2.7 (daemon docs) | delegated writer (parallelism with T3) | done | see Log L4 |
-| T3 | S2.5, S2.6, S2.7 (firmware docs) | delegated writer (parallelism with T2) | pending | |
-| T4 | S2.7 shared docs (README, CLAUDE.md, CHANGELOG, NOTICE), seam check, flash | inline | pending | |
+| T2 | S2.1–S2.4, S2.7 (daemon docs) | delegated writer (parallelism with T3) | done | `5addd6c` |
+| T3 | S2.5, S2.6, S2.7 (firmware docs) | delegated writer (parallelism with T2) | done | `c19361f`, `e14247c` |
+| T4 | S2.7 shared docs (README, CLAUDE.md, CHANGELOG, NOTICE), seam check, flash | inline | done | `5f026e8`, `626b4fe` |
+| T5 | fix date-dependent Codex test (pre-existing) | inline | done | `902ac01` |
+| T6 | S3.2–S3.4 | delegated writer (parallelism with T7); Risk item 2 → independent verifier | pending | |
+| T7 | S3.1 | delegated writer (parallelism with T6) | pending | |
+| T8 | S3.5, shared docs, seam check, flash, install | inline | pending | |
 
 Route evidence: T2 and T3 are independent units with disjoint edit surfaces (daemon vs firmware/art), each several files and well over 100 changed lines → Writer trigger (a). Shared files (README.md, CLAUDE.md, CHANGELOG.md, NOTICE.md) are owned by the parent in T4.
 
@@ -34,3 +45,4 @@ Route evidence: T2 and T3 are independent units with disjoint edit surfaces (dae
 - **L5** (2026-10-21, user, verbatim): "Para la imagen de grok, puedes buscar los grokbots y ponerle algo así. El que tiene ahorita esta medio extraño". Reference: Grokbot-style avatars are a plain white ball with two vertical capsule eyes glancing to the side (grokbots.best `bot-white.png`; listing text "a tiny Grokbot-style icon with capsule eyes"). Redrawn as original pixel art: `grok.idle`, `grok.look` (blink, glance left and back, two hops; replaces `grok.spin`), `grok.bike` (same bike, white ball rider). Sim screens and GIFs regenerated; Codex/Kimi GIFs byte-identical.
 - **L6** Review `review-35e38413556f9bea` over `a76ca77..5f026e8` (risk, resilience, reliability): approved and acknowledged (authority burned). Non-blocking follow-ups: R1-001 require https for `GROK_CLI_CHAT_PROXY_BASE_URL`; R4-001/R3 the log fallback reports `ok: true` with no marker, so a stale value looks live; R4-002 the log scan is synchronous and uncapped inside the async poll.
 - **L7** Flashed `5f026e8` to the 2.16 over `/dev/cu.usbmodem211101`; install clone `~/Downloads/toknmon` switched to the feature branch and the launchd agent restarted: `Providers (auto): claude, codex, kimi, grok`, `Sending[grok]: {"p":"grok","w":5,"wr":7599,...}`; hardware screenshot shows the Grok slot at 5 %, weekly, "Resets in 5d 6h".
+- **L8** (2026-10-21, user, verbatim): "Creas las escenas de pantalla completa y arregla lo que se requiera. Inclusive si tienes que re hacer un daemon nuevo. La idea es que quede listo y podamos hacer el update en el repositorio y quede funcionando completamente aqui en mi equipo". Evidence for S3.2: Grok's binary coordinates refreshes across processes through `auth.json.lock` (content `<pid>:<epoch>`, strings "auth: refresh adopted sibling token after lock timeout", "auth recovery: disk has a different token, accepting", "returning transient to avoid refresh token reuse"); OIDC discovery at `https://auth.x.ai/.well-known/openid-configuration` lists `token_endpoint` `https://auth.x.ai/oauth2/token` and grant `refresh_token`; `GROK_AUTH_EARLY_INVALIDATION_SECS` defaults to 300. Without a daemon refresh the token lapses ~6 h after Grok last ran and the slot would only show a stale log value. T5: the Codex test aged the file from `time.time()` against a fixed `NOW`; suite now 255 passed.

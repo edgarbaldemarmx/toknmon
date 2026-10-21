@@ -58,17 +58,23 @@
 #            it when expired, exactly like the Kimi CLI; override the API with
 #            KIMI_CODE_BASE_URL)
 #   grok   = Grok Build CLI (weekly credit usage from the CLI's billing
-#            endpoint with the key in ${GROK_HOME:-~/.grok}/auth.json; never
-#            refreshes the token: when it has expired, or the endpoint fails,
-#            the last value the grok CLI logged in logs/unified.jsonl is used.
+#            endpoint with the key in ${GROK_HOME:-~/.grok}/auth.json, refreshed
+#            with Grok's own OIDC protocol under its auth.json.lock when it
+#            expires; when the endpoint fails, the last value the grok CLI
+#            logged in logs/unified.jsonl is used if it is newer than 6 h.
 #            Weekly only, there is no 5-hour window; override the API with
-#            GROK_CLI_CHAT_PROXY_BASE_URL)
+#            GROK_CLI_CHAT_PROXY_BASE_URL, https:// only)
 # providers = auto
 # providers = claude, codex, kimi, grok
 
 # Kimi OAuth token endpoint used to refresh an expired Kimi access token (HTTPS
 # only). Default: ${KIMI_CODE_OAUTH_HOST:-https://auth.kimi.com}/api/oauth/token.
 # kimi_token_url = https://auth.kimi.com/api/oauth/token
+
+# Grok OIDC token endpoint used to refresh an expired Grok access token (HTTPS
+# only). Default: the token_endpoint discovered from the oidc_issuer in
+# ${GROK_HOME:-~/.grok}/auth.json (currently https://auth.x.ai/oauth2/token).
+# grok_token_url = https://auth.x.ai/oauth2/token
 
 # Seconds between Anthropic API polls (Linux daemon). Default 60. Minimum 10.
 # The firmware marks data older than 90s as stale and only updates its "resets

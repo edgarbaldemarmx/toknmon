@@ -17,7 +17,7 @@ inherited from Clawdmeter, poll Claude only and are untested with ToknMon.
 | Claude Code logged in | the Claude provider reads the OAuth token from the Keychain (service `Claude Code-credentials`) | `claude` → `/login` |
 | Codex CLI with at least one session under `~/.codex/sessions` (optional) | the Codex provider reads local session logs; no network, no credentials | run `codex` once |
 | Kimi Code CLI logged in once (optional) | `~/.kimi-code/credentials/*.json`; the daemon refreshes the token itself afterwards | run `kimi` and log in |
-| Grok Build CLI logged in (optional) | `~/.grok/auth.json`; the daemon never refreshes the Grok token and falls back to the CLI's own log when it has expired | `grok login` |
+| Grok Build CLI logged in (optional) | `~/.grok/auth.json`; the daemon refreshes the Grok token itself with Grok's own protocol (under Grok's `auth.json.lock`), and falls back to the CLI's own log only while that value is newer than 6 h | `grok login` |
 | `blueutil` (optional) | automatic repair of a stale Bluetooth bond | `brew install blueutil` (the installer offers it) |
 
 A board already flashed with ToknMon and paired with this Mac

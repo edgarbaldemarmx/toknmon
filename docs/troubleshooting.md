@@ -46,9 +46,14 @@ console (115200 baud) prints every BLE event and payload.
 | Symptom | Fix |
 | --- | --- |
 | `grok: unavailable — Grok CLI not found` / `not logged in` (`--detect`, or `grok skipped` in the log) | Run `grok login`; `~/.grok/auth.json` needs an entry with a `key`. A custom `GROK_HOME` must be visible to the launchd agent (set it in the plist or symlink `~/.grok`) |
-| `Provider grok: no data (no valid token; no billing line in logs/unified.jsonl)` | The token has expired and Grok has not logged a credits fetch yet. Run `grok` once (or `grok login` if the token expired for good); the daemon never refreshes the Grok token itself |
-| Grok value does not move | The token has expired, so the value comes from the log fallback, which only refreshes when Grok runs and fetches its credits. Run `grok` once to renew the token; the daemon then reads the live endpoint again |
-| `Provider grok: no data (HTTP 4xx…)` with no fallback | The endpoint refused the request and the log has no credits line; run `grok` once so it logs one, and check that the CLI itself still works |
+| ``Provider grok: no data (token expired; Grok sign-in expired; run `grok login`; …)`` | The refresh token was rejected (`invalid_grant`), so the sign-in is gone. Run `grok login`; the daemon does not retry the rejected refresh token, and picks up the new one on the next poll |
+| `Provider grok: no data (token expired; refresh skipped: auth.json.lock is held by another process …)` | Grok itself is refreshing the token right now. Nothing to do: the next poll reads the token Grok stored |
+| `Provider grok: no data (token expired; refresh refused: … is not https …)` | `oidc_issuer` in `auth.json`, the discovered `token_endpoint` or the `grok_token_url` config key is not HTTPS. Remove the `grok_token_url` override, or run `grok login` to rewrite `auth.json` |
+| `Provider grok: no data (…; last billing line in logs/unified.jsonl is older than 6 h)` | The live endpoint failed and the logged value is too old to show as live, so the slot drops out. Fix the live path (see the line above it in the log); running `grok` once also logs a fresh value |
+| `Provider grok: no data (…; no billing line in logs/unified.jsonl)` | The live endpoint failed and Grok has not logged a credits fetch in the last 8 MiB of its log. Check the reason before the `;`; run `grok` once so it logs one |
+| `Grok: live billing unavailable (…)` in the log | The live endpoint failed (logged once per change, then `Grok: live billing endpoint OK again` when it recovers). While it lasts the slot shows the logged value if it is newer than 6 h |
+| `Grok: ignoring GROK_CLI_CHAT_PROXY_BASE_URL=… (not https)` | The override is not HTTPS, so the daemon uses the default endpoint. Use an `https://` URL or unset the variable |
+| `auth.json` permissions after a refresh | The daemon rewrites `~/.grok/auth.json` atomically with mode 0600 and keeps every other field; make sure `~/.grok` is writable by your user |
 | Grok shows 0 % with a 0 m countdown | The credit period in the last value has ended; the next live poll or Grok run brings the new period |
 
 ## Board

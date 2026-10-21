@@ -9,7 +9,7 @@ them as a carousel with a palette and a mascot of their own.
 | Claude Code | `claude` | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token (Keychain service `Claude Code-credentials`, or `~/.claude/.credentials.json`) | one GET per poll, **no token spend** | **Current** (5-hour session), **Weekly**, and the model-scoped weekly bar (**Fable**) when the subscription has one; reset countdowns; the Clawd corner mascot |
 | OpenAI Codex CLI | `codex` | newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` modified in the last 7 days | **none** (local files only) | a **10×10 dot grid** filled to the weekly percentage with the large percentage and reset time; a compact 5h bar only when the plan reports a short window; the three-dots mascot |
 | Kimi Code | `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest token in `~/.kimi-code/credentials/*.json` | one GET per poll, plus a token refresh when needed | **Current** (5h) and **Weekly** bars in blue; the crescent-moon mascot |
-| Grok Build CLI | `grok` | `GET ${GROK_CLI_CHAT_PROXY_BASE_URL:-https://cli-chat-proxy.grok.com/v1}/billing?format=credits` with the `key` in `${GROK_HOME:-~/.grok}/auth.json`; fallback: the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` | one GET per poll, **never a token refresh** | the **dot grid** filled to the weekly credit percentage (Grok has no 5-hour window); the black-hole Grokbot-style ball mascot |
+| Grok Build CLI | `grok` | `GET ${GROK_CLI_CHAT_PROXY_BASE_URL:-https://cli-chat-proxy.grok.com/v1}/billing?format=credits` with the `key` in `${GROK_HOME:-~/.grok}/auth.json`; fallback: the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` when it is newer than 6 h | one GET per poll, plus a token refresh (Grok's own OIDC protocol) when needed | the **dot grid** filled to the weekly credit percentage (Grok has no 5-hour window); the black-hole Grokbot-style ball mascot |
 
 Palettes: Claude clay (`#D97757`), Codex teal (`#10A37F`), Kimi blue
 (`#3B6CF6`), Grok: cool silver, dot grid, weekly only; each provider also has
@@ -35,7 +35,7 @@ providers = claude, grok         # Claude and Grok only
   | `claude` | an OAuth token exists in the macOS Keychain (`Claude Code-credentials`) or in `<config_dir>/.credentials.json` for any dir in `config_dirs` |
   | `codex` | at least one `rollout-*.jsonl` exists under `${CODEX_HOME:-~/.codex}/sessions` (any age; polling then reads the last 7 days) |
   | `kimi` | a credential file with an access token exists under `~/.kimi-code/credentials` (an expired token is fine, the daemon refreshes it) |
-  | `grok` | `${GROK_HOME:-~/.grok}/auth.json` has an entry with a non-empty `key` (an expired token is fine: the log fallback still works and Grok refreshes it itself) |
+  | `grok` | `${GROK_HOME:-~/.grok}/auth.json` has an entry with a non-empty `key` (an expired token is fine, the daemon refreshes it) |
 
   Logging in to a new tool or running it once is picked up within a minute,
   no reinstall and no restart. The daemon logs the resolved set whenever it
@@ -92,15 +92,41 @@ providers = claude, grok         # Claude and Grok only
 - **Grok**: run `grok login` once (Grok Build CLI). The daemon sends the `key`
   from `~/.grok/auth.json` as a bearer to the CLI's own credits endpoint with
   the headers `x-grok-client-version` (from `~/.grok/version.json`) and
-  `x-grok-client-mode: cli`. It never uses the `refresh_token` and never
-  writes `auth.json`: Grok refreshes its own token while it runs, and a second
-  refresher could invalidate Grok's copy. When the token has expired, or the
-  endpoint fails, the daemon reads the newest `billing: fetched credits
-  config` line that the CLI logged in `~/.grok/logs/unified.jsonl`, so the
-  value is only as fresh as the last Grok run. Neither source sends `ok:
-  false`. Grok reports one credit window (`currentPeriod`, weekly or monthly);
-  it lands on the weekly keys `w`/`wr` and the countdown runs to the real
-  period end. A period whose end has passed reads 0 %.
+  `x-grok-client-mode: cli`. A `GROK_CLI_CHAT_PROXY_BASE_URL` override must
+  be `https://`; any other value is ignored (logged once) and the default
+  endpoint is used.
+- **Grok token refresh**: when the token is expired or within 300 s of
+  expiring (Grok's own `GROK_AUTH_EARLY_INVALIDATION_SECS` default), the
+  daemon refreshes it the way Grok does, so the slot stays live while Grok is
+  closed:
+  1. It takes Grok's cross-process lock, an exclusive `flock` on
+     `~/.grok/auth.json.lock`, and writes `<pid>:<epoch>` into it like Grok.
+     If Grok holds the lock, the daemon skips the refresh for this poll.
+  2. Under the lock it re-reads `auth.json`; if another process already
+     stored a fresh token, it uses that one and sends nothing.
+  3. It posts `grant_type=refresh_token`, `refresh_token` and
+     `client_id=<oidc_client_id>` to the issuer's `token_endpoint`,
+     discovered from `<oidc_issuer>/.well-known/openid-configuration`
+     (currently `https://auth.x.ai/oauth2/token`) or set with the
+     `grok_token_url` config key. The issuer and the endpoint must be HTTPS.
+  4. It writes `key`, the rotated `refresh_token` (when the response has one)
+     and `expires_at` back atomically (temp file + rename, mode 0600); every
+     other entry and field stays as it was.
+
+  A rejected grant (`invalid_grant`) leaves `auth.json` untouched, reports
+  "Grok sign-in expired; run `grok login`" and is not retried until the
+  refresh token changes. Any other failure also leaves the file untouched.
+  Tokens never appear in the log.
+- **Grok fallback**: when there is no usable token or the endpoint fails, the
+  daemon reads the newest `billing: fetched credits config` line that the CLI
+  logged in `~/.grok/logs/unified.jsonl` (scanned off the event loop, at most
+  the last 8 MiB). That value is used only when the line is newer than 6 h;
+  an older one, or no line at all, sends `ok: false` so the slot drops out
+  instead of showing an old value as live. The endpoint failure is logged
+  once per change of state, not on every poll. Grok reports one credit window
+  (`currentPeriod`, weekly or monthly); it lands on the weekly keys `w`/`wr`
+  and the countdown runs to the real period end. A period whose end has
+  passed reads 0 %.
 
 ### Removing a provider
 
