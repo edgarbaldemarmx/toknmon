@@ -73,6 +73,7 @@ a small built-in state list is used.
 | `SIM_AUTOSHOT_PATH=<file>` | where the autoshot BMP goes (default `sim-autoshot.bmp`) |
 | `SIM_SPLASH_PROVIDER=claude\|codex\|kimi\|grok` | open mascot mode for that provider once the first payloads land (same as serial `screen splash <p>`) |
 | `SIM_PARADE=1` | start the ambient parade once a fresh slot exists (same as serial `parade on`); pair it with a multi-provider scenario |
+| `SIM_SLOT=0-3` | start with that usage slot picked (0 Claude, 1 Codex, 2 Kimi, 3 Grok), as if the user had swiped to it before a reboot; the carousel never moves on its own |
 | `SIM_NO_BATTERY=1` | start in "USB power only" mode (plug-zap icon) |
 | `SDL_VIDEODRIVER=dummy` | SDL's own switch: render off-screen, for CI and headless captures |
 
@@ -86,7 +87,7 @@ SDL_VIDEODRIVER=dummy SIM_AUTOSHOT_MS=8000 SIM_SPLASH_PROVIDER=codex \
 
 Saves `sim-autoshot.bmp` (override with `SIM_AUTOSHOT_PATH`) after the given
 delay and exits. Combine with `SIM_SCENARIO` pointing at a single-state file,
-or with `SIM_SPLASH_PROVIDER` / `SIM_PARADE`, to capture any specific screen.
+or with `SIM_SLOT` / `SIM_SPLASH_PROVIDER` / `SIM_PARADE`, to capture any specific screen.
 `*.bmp` and `sim-autoshot*` are git-ignored; `tools/make_gallery.sh` uses
 these hooks to regenerate the screenshots under `docs/media/`.
 

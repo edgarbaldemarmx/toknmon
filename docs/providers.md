@@ -156,10 +156,11 @@ payload.
 - **Grok**: the dot grid (one dot = 1 % of the credit window), the
   percentage in large type and the reset time, in cool silver. Grok has no
   5-hour window, so there is never a compact bar under the grid.
-- **Carousel**: with two or more fresh slots the meter rotates every 8 s; tap
-  or swipe left/right to page; the title shows the provider name in its
-  accent. Data older than 90 s is stale (the daemon polls every 60 s), and a
-  stale slot is skipped.
+- **Carousel**: the meter stays on the slot you picked (stored on the board,
+  restored after a reboot); tap or swipe left/right to page; the title shows
+  the provider name in its accent. Data older than 90 s is stale (the daemon
+  polls every 60 s); paging skips a stale slot, but the picked one stays on
+  screen with its last values.
 
 ## Payload format
 

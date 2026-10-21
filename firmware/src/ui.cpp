@@ -7,6 +7,7 @@
 #include "clawd_still.h"
 #include "icons.h"
 #include "hal/board_caps.h"
+#include <Preferences.h>
 
 // Custom fonts (scaled for 314 PPI, ~1.9x from original 165 PPI)
 LV_FONT_DECLARE(font_tiempos_56);
@@ -335,7 +336,10 @@ static const uint32_t DATA_FRESH_MS = 90000;  // usage counts as "live" within t
 // Freshness is tracked per provider: a {"ok":false} beat or a lapsed window on
 // one provider only drops that provider out of the rotation. The screen goes
 // idle only when no slot is fresh. The carousel shows one slot at a time and
-// advances every CAROUSEL_MS (or on tap) across the fresh slots.
+// only moves on a user action (tap, horizontal swipe, serial `next`/`slot`);
+// the slot the user picked is stored in NVS and stays on screen even when its
+// data lapses. At boot, until the picked slot has data, the first slot that
+// receives data stands in for it.
 struct SlotState {
     UsageData data;
     uint32_t  last_ms;    // lv_tick when the last ok payload landed
@@ -345,8 +349,7 @@ struct SlotState {
 static SlotState  slots[PROVIDER_COUNT] = {};
 static int        visible_slot = PROVIDER_CLAUDE;
 static bool       data_received = false;     // any ok payload on any slot since boot
-static lv_timer_t* carousel_timer = nullptr;
-static const uint32_t CAROUSEL_MS = 8000;
+static int        picked_slot = PROVIDER_CLAUDE;   // the user's choice (NVS)
 
 // ---- Parade ----
 // The splash parades the full-size mascots of every fresh provider. It never
@@ -476,7 +479,6 @@ static void apply_usage_layout(usage_layout_t mode);
 static void layout_dots(bool with_session);
 static void dots_geometry(bool with_session, int* pitch, int* dia, int* grid);
 static void style_pill_geometry(lv_obj_t* pill, const lv_font_t* font, int16_t px, int16_t py);
-static void carousel_timer_cb(lv_timer_t* t);
 
 static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_t* panel = lv_obj_create(parent);
@@ -927,6 +929,8 @@ static void init_alert(void) {
 
 // ======== Public API ========
 
+static int load_picked_slot(void);
+
 void ui_init(void) {
     compute_layout(board_caps());
 
@@ -980,7 +984,8 @@ void ui_init(void) {
 
     init_alert();
     apply_usage_layout(LAYOUT_BARS);
-    carousel_timer = lv_timer_create(carousel_timer_cb, CAROUSEL_MS, NULL);
+    picked_slot = load_picked_slot();
+    visible_slot = picked_slot;
 }
 
 // ---- Title area: clock + provider ----
@@ -1126,19 +1131,30 @@ static void render_dots(int idx, const UsageData* data) {
 // ---- Carousel ----
 static void show_slot(int idx);
 
-// Move to the next fresh slot (if there is another one) and restart the dwell.
+// The user picked `idx`: show it and remember it across reboots.
+static void pick_slot(int idx) {
+    show_slot(idx);
+    if (picked_slot == idx) return;
+    picked_slot = idx;
+    Preferences prefs;
+    prefs.begin(UI_SLOT_NVS_NAMESPACE, false);
+    prefs.putUChar(UI_SLOT_NVS_KEY, (uint8_t)idx);
+    prefs.end();
+}
+
+static int load_picked_slot(void) {
+    Preferences prefs;
+    prefs.begin(UI_SLOT_NVS_NAMESPACE, true);
+    int idx = prefs.getUChar(UI_SLOT_NVS_KEY, PROVIDER_CLAUDE);
+    prefs.end();
+    return (idx >= 0 && idx < PROVIDER_COUNT) ? idx : PROVIDER_CLAUDE;
+}
+
+// Move to the next fresh slot (if there is another one).
 static void carousel_advance(void) {
     int nxt = next_fresh_slot(visible_slot);
     if (nxt < 0 || nxt == visible_slot) return;
-    show_slot(nxt);
-    if (carousel_timer) lv_timer_reset(carousel_timer);
-}
-
-static void carousel_timer_cb(lv_timer_t* t) {
-    (void)t;
-    if (alert_active) return;          // the alert holds the slot it landed on
-    if (current_screen != SCREEN_USAGE || view_state != 2) return;
-    if (fresh_count() > 1) carousel_advance();
+    pick_slot(nxt);
 }
 
 bool ui_carousel_next(void) {
@@ -1151,15 +1167,13 @@ bool ui_carousel_prev(void) {
     if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_count() < 2) return false;
     int prv = prev_fresh_slot(visible_slot);
     if (prv < 0 || prv == visible_slot) return false;
-    show_slot(prv);
-    if (carousel_timer) lv_timer_reset(carousel_timer);
+    pick_slot(prv);
     return true;
 }
 
 bool ui_show_slot(int idx) {
     if (idx < 0 || idx >= PROVIDER_COUNT || !slot_fresh(idx)) return false;
-    show_slot(idx);
-    if (carousel_timer) lv_timer_reset(carousel_timer);
+    pick_slot(idx);
     return true;
 }
 
@@ -1171,18 +1185,14 @@ void ui_update(const UsageData* data) {
 void ui_update_slot(int idx, const UsageData* data) {
     if (idx < 0 || idx >= PROVIDER_COUNT || !data || !data->valid) return;
     SlotState& st = slots[idx];
-    st.data = *data;
     st.ok = data->ok;
     if (!data->ok) {
-        // {"ok":false} beat: the slot stores the payload (numbers reset to
-        // the parse defaults, last_ms untouched) and drops out of the rotation
-        // until a good payload lands. If it was on screen, move on to a fresh one.
-        if (idx == visible_slot) {
-            int nxt = next_fresh_slot(visible_slot);
-            if (nxt >= 0) show_slot(nxt);
-        }
+        // {"ok":false} beat: the slot keeps its last numbers (last_ms
+        // untouched) and drops out of paging until a good payload lands. If
+        // it is on screen it stays there: only the user changes the slot.
         return;
     }
+    st.data = *data;
     st.last_ms = lv_tick_get();   // a real usage update just landed
     st.received = true;
     bool first = !data_received;
@@ -1202,11 +1212,13 @@ void ui_update_slot(int idx, const UsageData* data) {
         refresh_title();
     }
 
-    // First live data, or the visible slot went stale while this one is fresh:
-    // bring this slot on screen. Otherwise only re-render if it is on screen.
-    if (first || !slot_fresh(visible_slot)) {
+    // The picked slot always comes (back) on screen. Until it has data since
+    // boot, the first slot with data stands in for it; otherwise only the
+    // slot on screen re-renders.
+    if (idx == picked_slot) {
         show_slot(idx);
-        if (carousel_timer) lv_timer_reset(carousel_timer);
+    } else if (!slots[picked_slot].received && (first || !slot_fresh(visible_slot))) {
+        show_slot(idx);
     } else if (idx == visible_slot) {
         show_slot(idx);
     }
@@ -1339,8 +1351,6 @@ void ui_tick_anim(void) {
     if (current_screen != SCREEN_USAGE) return;
     update_view_state();
     if (view_state == 1) splash_mini_tick();   // animate the sleeping creature on the idle screen
-    // The visible provider lapsed while another is still fresh → rotate to it.
-    if (view_state == 2 && !slot_fresh(visible_slot)) carousel_advance();
 
     uint32_t now = lv_tick_get();
 

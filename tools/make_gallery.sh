@@ -8,7 +8,8 @@
 #
 # Requires: PlatformIO (pio), SDL2, ImageMagick (magick or convert), Node >= 18.
 # Capture times come from the firmware constants (see firmware/sim/gallery.jsonl):
-# CAROUSEL_MS = 8 s for the usage views (Claude, Codex, Kimi, Grok at 4/12/20/28 s); mascot sets play intro -> 6 s loop ->
+# the usage views pick their slot with SIM_SLOT (the carousel never moves on
+# its own) and are captured at 4 s; mascot sets play intro -> 6 s loop ->
 # outro per entry, so the full-screen scenes land ~37 s (Codex rain, 6th entry),
 # ~31 s (Kimi night, 5th entry) and ~27 s (Grok stars, 4th entry, loop 24.5-30.5 s)
 # after the SIM_SPLASH_PROVIDER hook at 1 s.
@@ -49,10 +50,10 @@ shot() {
 echo "== capturing simulator screens"
 # Runs are independent processes; run them concurrently (timing is wall-clock
 # per process, so parallelism does not change what lands on screen).
-shot claude-usage      4000 &
-shot codex-dots       12000 &
-shot kimi-usage       20000 &
-shot grok-dots        28000 &
+shot claude-usage      4000 SIM_SLOT=0 &
+shot codex-dots        4000 SIM_SLOT=1 &
+shot kimi-usage        4000 SIM_SLOT=2 &
+shot grok-dots         4000 SIM_SLOT=3 &
 shot splash-claude     4000 SIM_SPLASH_PROVIDER=claude &
 shot mascot-codex      3000 SIM_SPLASH_PROVIDER=codex &
 shot mascot-kimi       3000 SIM_SPLASH_PROVIDER=kimi &

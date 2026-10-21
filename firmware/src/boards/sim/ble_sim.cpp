@@ -10,6 +10,7 @@
 #include "sim_platform.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,7 +110,19 @@ static void refresh_title(void) {
     sim_display_set_title(t);
 }
 
+// SIM_SLOT=0-3 (see board.h) seeds the picked usage slot in the in-memory
+// NVS before ui_init() restores it, the headless stand-in for a swipe.
+static void seed_picked_slot(void) {
+    const char* slot = getenv("SIM_SLOT");
+    if (!slot) return;
+    Preferences prefs;
+    prefs.begin(UI_SLOT_NVS_NAMESPACE, false);
+    prefs.putUChar(UI_SLOT_NVS_KEY, (uint8_t)atoi(slot));
+    prefs.end();
+}
+
 void ble_init(void) {
+    seed_picked_slot();
     load_scenario();
     enqueue_chain();
     refresh_title();

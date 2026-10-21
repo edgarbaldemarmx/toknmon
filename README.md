@@ -46,7 +46,7 @@ requests are welcome, support is best-effort.
 
 | | |
 | --- | --- |
-| <img src="docs/media/screens/claude-usage.png" width="240" alt="Claude usage view with Current, Weekly and Fable bars"> | **Four providers, one carousel.** Claude Code (5-hour session, weekly and the model-scoped **Fable** weekly window when your plan has one), Codex CLI, Kimi Code and Grok Build CLI each get a slot. Tap or swipe to page, or let it rotate every 8 s. Slots without fresh data are skipped. |
+| <img src="docs/media/screens/claude-usage.png" width="240" alt="Claude usage view with Current, Weekly and Fable bars"> | **Four providers, one carousel.** Claude Code (5-hour session, weekly and the model-scoped **Fable** weekly window when your plan has one), Codex CLI, Kimi Code and Grok Build CLI each get a slot. Tap or swipe to page; it stays on the provider you picked, even after a reboot. Paging skips slots without fresh data. |
 | <img src="docs/media/screens/hw-codex.png" width="240" alt="Codex dot grid at 91 percent on the real panel"> | **A screen per provider.** Codex shows a 10×10 dot grid filling to the weekly percentage (plus a compact 5h bar when the plan has one); Grok shows its weekly credit window on a silver dot grid; Kimi shows 5h and weekly bars in blue; Claude keeps its bars in clay. Palettes, bar tiers and status lines never bleed between providers. |
 | <img src="docs/media/screens/mascot-codex.png" width="240" alt="Mascot mode pinned to Codex"> | **Mascots and mascot mode.** Clawd for Claude (Anthropic's official set), original three-dots, crescent-moon and Grokbot-style ball characters for Codex, Kimi and Grok, each with idle, acts, a mountain-bike ride and two full-screen scenes. Long-press the meter to watch a provider's set full-size. |
 | <img src="docs/media/screens/parade.png" width="240" alt="Idle parade with the Codex mascot on stage"> | **The parade.** The device rotates every live provider's full-size mascot every 20 s, until you swipe back. It never starts on its own (serial `parade on`). |
@@ -189,8 +189,9 @@ The board boots on the **splash** (animations) and swipes to the **meter**
 | **BOOT button** (left) | hold: **Space** over Bluetooth HID (Claude Code push-to-talk) | same |
 | **Secondary button** (right) | **Shift+Tab** over Bluetooth HID (Claude Code mode toggle) | same |
 
-- **Carousel**: with two or more providers live the meter rotates every 8 s;
-  a slot is live for 90 s after its last payload and skipped otherwise.
+- **Carousel**: the meter stays on the provider you picked (tap or swipe to
+  page; the pick survives a reboot); a slot is live for 90 s after its last
+  payload and paging skips it otherwise.
 - **Mascot mode**: the provider's full-size set plays in order (Codex: idle,
   dots, think, bike, wave, rain; Kimi: idle, glow, sleep, bike, night, orbit;
   Grok: idle, look, bike, stars, build; Claude: the official set) with the provider's name on top; tap, swipe

@@ -28,7 +28,8 @@
 // provider at ~1 s; SIM_PARADE=1 starts the mascot parade as soon as a
 // provider slot is fresh (pair it with a multi-provider scenario to see the
 // hand-off). Both do what the serial `screen splash <p>` / `parade on`
-// commands do on hardware (ble_sim.cpp).
+// commands do on hardware (ble_sim.cpp). SIM_SLOT=0-3 starts with that
+// usage slot picked (as if the user had swiped to it before a reboot).
 
 #define BOARD_NAME  "Simulator 480x480"
 #define LCD_WIDTH   480

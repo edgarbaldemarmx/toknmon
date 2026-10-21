@@ -58,9 +58,13 @@ through the whole catalog, custom animations included (`claude.bike`).
 - **Grok**: the same 10×10 dot grid as Codex, filled to the weekly (or
   monthly) credit percentage, in silver; Grok has no 5-hour window, so there
   is never a 5h row. The white Grokbot-style ball sits in the corner.
-- **Carousel**: with two or more providers fresh, the meter rotates every
-  8 s; the provider name sits in the title in its accent color. A slot is
-  fresh for 90 s after its last payload; stale slots are skipped. The status
+- **Carousel**: the meter stays on the provider you picked; tap or swipe
+  left/right to page through the fresh slots. The pick is stored on the
+  board and restored after a reboot (until that provider's first payload
+  lands, the first provider with data stands in). The provider name sits in
+  the title in its accent color. A slot is fresh for 90 s after its last
+  payload; paging skips stale slots, but the slot you picked stays on screen
+  with its last values even when it goes stale. The status
   line reads "Waiting" while no host is connected and alternates "No data" /
   "Listening" when the connection is up but every slot has gone stale.
 - **Battery / power**: battery icon with charge state top-right (USB plug
