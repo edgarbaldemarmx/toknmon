@@ -54,6 +54,7 @@ shot claude-usage      4000 SIM_SLOT=0 &
 shot codex-dots        4000 SIM_SLOT=1 &
 shot kimi-usage        4000 SIM_SLOT=2 &
 shot grok-dots         4000 SIM_SLOT=3 &
+shot fable-clawds      4000 SIM_SLOT=4 &
 shot splash-claude     4000 SIM_SPLASH_PROVIDER=claude &
 shot mascot-codex      3000 SIM_SPLASH_PROVIDER=codex &
 shot mascot-kimi       3000 SIM_SPLASH_PROVIDER=kimi &

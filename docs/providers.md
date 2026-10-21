@@ -6,7 +6,7 @@ them as a carousel with a palette and a mascot of their own.
 
 | Provider | Config id | Data source | Network | What the board shows |
 | --- | --- | --- | --- | --- |
-| Claude Code | `claude` | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token (Keychain service `Claude Code-credentials`, or `~/.claude/.credentials.json`) | one GET per poll, **no token spend** | **Current** (5-hour session), **Weekly**, and the model-scoped weekly bar (**Fable**) when the subscription has one; reset countdowns; the Clawd corner mascot |
+| Claude Code | `claude` | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token (Keychain service `Claude Code-credentials`, or `~/.claude/.credentials.json`) | one GET per poll, **no token spend** | **Current** (5-hour session) and **Weekly** bars, plus a separate **Fable** view (the model-scoped weekly limit as a grid of small Clawds) when the subscription has one; reset countdowns; the Clawd corner mascot |
 | OpenAI Codex CLI | `codex` | newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` modified in the last 7 days | **none** (local files only) | a **10×10 dot grid** filled to the weekly percentage with the large percentage and reset time; a compact 5h bar only when the plan reports a short window; the three-dots mascot |
 | Kimi Code | `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest token in `~/.kimi-code/credentials/*.json` | one GET per poll, plus a token refresh when needed | **Current** (5h) and **Weekly** bars in blue; the crescent-moon mascot |
 | Grok Build CLI | `grok` | `GET ${GROK_CLI_CHAT_PROXY_BASE_URL:-https://cli-chat-proxy.grok.com/v1}/billing?format=credits` with the `key` in `${GROK_HOME:-~/.grok}/auth.json`; fallback: the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` when it is newer than 6 h | one GET per poll, plus a token refresh (Grok's own OIDC protocol) when needed | the **dot grid** filled to the weekly credit percentage (Grok has no 5-hour window); the black-hole Grokbot-style ball mascot |
@@ -143,8 +143,10 @@ payload.
 
 ## What the screens show
 
-- **Claude**: two or three horizontal bars (Current, Weekly, Fable) with
-  "Resets in …" labels, the status line, and the corner mascot that plays
+- **Claude**: two horizontal bars (Current, Weekly) with "Resets in …"
+  labels; the model-scoped weekly limit (Fable) gets its own view after it,
+  a 10×10 grid of small Clawds filled to the percentage (a third bar on the
+  C6 boards, which have no dot canvas); the status line, and the corner mascot that plays
   busier acts as your usage rate climbs. An attention alert from Claude Code
   (see [`install-macos.md`](install-macos.md#attention-alerts-from-claude-code-optional))
   rides on this payload only.
@@ -180,6 +182,7 @@ One JSON object per provider per poll, written to the BLE RX characteristic
 | `s`, `sr` | session (5h) percent used and minutes until it resets; omitted when the plan has no such window |
 | `w`, `wr` | weekly percent used and minutes until reset (Grok: its credit window, weekly or monthly) |
 | `f`, `fr` | model-scoped weekly window (Fable) percent and minutes; Claude only, only when present |
+| `fl` | that window's model name (printable ASCII, at most 11 characters; dropped after `m` when a write would overflow); the board shows "Fable" without it |
 | `st` | status string from the API (`allowed`, …) |
 | `ok` | `true` when the poll succeeded; `false` carries no numbers and marks the slot unavailable |
 | `t`, `tf` | host local time (epoch seconds with the UTC offset applied) and hour format (`12`/`24`) for the on-screen clock |

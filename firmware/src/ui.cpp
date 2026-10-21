@@ -286,9 +286,10 @@ static lv_obj_t* panel_session = nullptr;
 static lv_obj_t* panel_weekly = nullptr;
 static lv_obj_t* panel_third = nullptr;
 // Usage layouts. BARS is the historical two-panel view, DENSE stacks three
-// panels when the visible slot carries a third bar (Claude only), DOTS is
-// the Codex and Grok view: a 10×10 dot grid for the weekly window plus an optional
-// compact 5h bar. See apply_usage_layout().
+// panels when Claude carries a third bar on a board without the dot canvas,
+// DOTS is the Codex and Grok view (a 10×10 dot grid for the weekly window plus
+// an optional compact 5h bar) and the Fable view (the same grid drawn as small
+// Clawds). See apply_usage_layout().
 enum usage_layout_t { LAYOUT_BARS, LAYOUT_DENSE, LAYOUT_DOTS };
 static usage_layout_t layout_mode = LAYOUT_BARS;
 // Dot grid (LAYOUT_DOTS). The 10×10 dots are drawn into one canvas whose
@@ -307,6 +308,7 @@ static lv_obj_t* dots_canvas = nullptr;       // the grid itself
 static uint16_t* dots_buf = nullptr;          // RGB565 pixels, sized for the largest grid
 static int       dots_pitch = 0, dots_dia = 0, dots_grid = 0;   // current grid geometry (px)
 static int       dots_filled = -1;            // dots currently drawn in the accent color
+static int       dots_view = -1;              // view the grid was last drawn for
 static lv_obj_t* lbl_dots_pct;                // big weekly percentage
 static lv_obj_t* lbl_dots_pill;               // "Weekly" pill
 static lv_obj_t* lbl_dots_reset;              // "Resets in …" for the weekly window
@@ -350,6 +352,18 @@ static SlotState  slots[PROVIDER_COUNT] = {};
 static int        visible_slot = PROVIDER_CLAUDE;
 static bool       data_received = false;     // any ok payload on any slot since boot
 static int        picked_slot = PROVIDER_CLAUDE;   // the user's choice (NVS)
+static bool       fable_seen = false;        // a Claude payload carried the model limit since boot
+
+// ---- Views ----
+// The carousel pages views, not providers: one per provider slot plus the
+// Fable view (Claude's model-scoped weekly limit as a grid of small Clawds).
+// It follows Claude in paging order and exists only while Claude's payload
+// carries that limit and the board has the dot canvas. visible_slot and
+// picked_slot hold view ids (UI_VIEW_FABLE = PROVIDER_COUNT).
+static const int VIEW_ORDER[UI_VIEW_COUNT] = {
+    PROVIDER_CLAUDE, UI_VIEW_FABLE, PROVIDER_CODEX, PROVIDER_KIMI, PROVIDER_GROK };
+
+static int view_provider(int v) { return v == UI_VIEW_FABLE ? PROVIDER_CLAUDE : v; }
 
 // ---- Parade ----
 // The splash parades the full-size mascots of every fresh provider. It never
@@ -368,20 +382,48 @@ static int fresh_count(void) {
     return n;
 }
 
-// Next fresh slot after `from` in rotation order, or -1 when none is fresh.
+static bool fable_available(void) {
+    return DOTS_AVAILABLE && dots_canvas && slots[PROVIDER_CLAUDE].data.has_third;
+}
+
+static bool view_fresh(int v) {
+    if (v == UI_VIEW_FABLE) return fable_available() && slot_fresh(PROVIDER_CLAUDE);
+    return slot_fresh(v);
+}
+
+// Whether the view had data since boot (the boot stand-in ends when it does).
+static bool view_received(int v) {
+    if (v == UI_VIEW_FABLE) return fable_seen;
+    return slots[v].received;
+}
+
+static int fresh_view_count(void) {
+    int n = 0;
+    for (int v = 0; v < UI_VIEW_COUNT; v++) if (view_fresh(v)) n++;
+    return n;
+}
+
+static int view_pos(int v) {
+    for (int i = 0; i < UI_VIEW_COUNT; i++) if (VIEW_ORDER[i] == v) return i;
+    return 0;
+}
+
+// Next fresh view after `from` in paging order, or -1 when none is fresh.
 static int next_fresh_slot(int from) {
-    for (int k = 1; k <= PROVIDER_COUNT; k++) {
-        int i = (from + k) % PROVIDER_COUNT;
-        if (slot_fresh(i)) return i;
+    const int pos = view_pos(from);
+    for (int k = 1; k <= UI_VIEW_COUNT; k++) {
+        int v = VIEW_ORDER[(pos + k) % UI_VIEW_COUNT];
+        if (view_fresh(v)) return v;
     }
     return -1;
 }
 
-// Previous fresh slot before `from` in rotation order, or -1 when none is fresh.
+// Previous fresh view before `from` in paging order, or -1 when none is fresh.
 static int prev_fresh_slot(int from) {
-    for (int k = 1; k <= PROVIDER_COUNT; k++) {
-        int i = (from + PROVIDER_COUNT * k - k) % PROVIDER_COUNT;
-        if (slot_fresh(i)) return i;
+    const int pos = view_pos(from);
+    for (int k = 1; k <= UI_VIEW_COUNT; k++) {
+        int v = VIEW_ORDER[(pos + UI_VIEW_COUNT - k) % UI_VIEW_COUNT];
+        if (view_fresh(v)) return v;
     }
     return -1;
 }
@@ -731,6 +773,52 @@ static void draw_dots(int filled, const ProviderTheme& th) {
         lv_canvas_finish_layer(dots_canvas, &layer);
     }
     dots_filled = filled;
+    dots_view = visible_slot;
+}
+
+// Fable view: the same canvas drawn as a 10×10 grid of small Clawds, `filled`
+// in Claude's accent and the rest dim. The pixels go straight into the
+// canvas buffer (a few thousand rects would flood the LVGL draw pool).
+#define CLAWD_GLYPH_W 12
+#define CLAWD_GLYPH_H 8
+static const char* const CLAWD_GLYPH[CLAWD_GLYPH_H] = {
+    "..XXXXXXXX..",
+    "..X.XXXX.X..",   // eyes are holes, so they read as ink on black
+    "..X.XXXX.X..",
+    "XXXXXXXXXXXX",   // arms
+    "XXXXXXXXXXXX",
+    "..XXXXXXXX..",
+    "..X.X..X.X..",   // four legs
+    "..X.X..X.X..",
+};
+
+static void draw_clawds(int filled, const ProviderTheme& th) {
+    if (!dots_canvas) return;
+    lv_canvas_fill_bg(dots_canvas, COL_BG, LV_OPA_COVER);
+    lv_draw_buf_t* db = lv_canvas_get_draw_buf(dots_canvas);
+    const int cell = dots_grid / DOT_COLS;
+    int s = cell / CLAWD_GLYPH_W;
+    if (s < 1) s = 1;
+    const uint16_t on  = lv_color_to_u16(th.accent);
+    const uint16_t off = lv_color_to_u16(th.dot_empty);
+    for (int i = 0; i < DOT_COUNT; i++) {
+        const uint16_t px = (i < filled) ? on : off;
+        const int x0 = (i % DOT_COLS) * cell + (cell - CLAWD_GLYPH_W * s) / 2;
+        const int y0 = (i / DOT_COLS) * cell + (cell - CLAWD_GLYPH_H * s) / 2;
+        for (int gy = 0; gy < CLAWD_GLYPH_H * s; gy++) {
+            const int y = y0 + gy;
+            if (y < 0 || y >= dots_grid) continue;
+            uint16_t* row = (uint16_t*)(db->data + (size_t)y * db->header.stride);
+            const char* g = CLAWD_GLYPH[gy / s];
+            for (int gx = 0; gx < CLAWD_GLYPH_W * s; gx++) {
+                const int x = x0 + gx;
+                if (x >= 0 && x < dots_grid && g[gx / s] == 'X') row[x] = px;
+            }
+        }
+    }
+    lv_obj_invalidate(dots_canvas);
+    dots_filled = filled;
+    dots_view = UI_VIEW_FABLE;
 }
 
 // The compact 5h bar sits right of its label and takes the rest of the row,
@@ -1008,16 +1096,25 @@ static void layout_title(void) {
     lv_obj_align_to(lbl_provider_pill, lbl_title, LV_ALIGN_OUT_RIGHT_MID, L.prov_gap, 0);
 }
 
+// Title of the visible view: the provider name, or the model label on the
+// Fable view.
+static const char* view_title(int v) {
+    if (v != UI_VIEW_FABLE) return provider_name(v);
+    const char* label = slots[PROVIDER_CLAUDE].data.third_label;
+    return label[0] ? label : "Fable";
+}
+
 static void refresh_title(void) {
+    const int prov = view_provider(visible_slot);
     if (clock_base_epoch > 0) {
         lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
-        lv_label_set_text(lbl_provider_pill, provider_name(visible_slot));
-        lv_obj_set_style_bg_color(lbl_provider_pill, provider_color(visible_slot), 0);
-        lv_obj_set_style_text_color(lbl_provider_pill, provider_theme(visible_slot).pill_text, 0);
+        lv_label_set_text(lbl_provider_pill, view_title(visible_slot));
+        lv_obj_set_style_bg_color(lbl_provider_pill, provider_color(prov), 0);
+        lv_obj_set_style_text_color(lbl_provider_pill, provider_theme(prov).pill_text, 0);
         clock_last_min = -1;   // force the clock tick to rewrite + re-layout the title
     } else if (data_received) {
-        lv_label_set_text(lbl_title, provider_name(visible_slot));
-        lv_obj_set_style_text_color(lbl_title, provider_color(visible_slot), 0);
+        lv_label_set_text(lbl_title, view_title(visible_slot));
+        lv_obj_set_style_text_color(lbl_title, provider_color(prov), 0);
     } else {
         lv_label_set_text(lbl_title, "Usage");
         lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
@@ -1090,14 +1187,31 @@ static void apply_usage_layout(usage_layout_t mode) {
     splash_mascot_set_trips(mode == LAYOUT_BARS);
 }
 
-// Which layout a slot's payload wants. Dense is Claude-only (the third,
-// model-scoped bar); dots is for Codex and Grok (weekly-first plans) and
-// needs the dot objects.
+// Which layout a view wants. Dots is for Codex and Grok (weekly-first plans)
+// and the Fable view, and needs the dot objects. Claude's third, model-scoped
+// bar has its own Fable view when the grid exists; only boards without it
+// fall back to the dense three-panel layout.
 static usage_layout_t layout_for(int idx, const UsageData* data) {
-    const bool dots_provider = (idx == PROVIDER_CODEX || idx == PROVIDER_GROK);
-    if (dots_provider && DOTS_AVAILABLE && dots_group) return LAYOUT_DOTS;
-    if (data->has_third) return LAYOUT_DENSE;
+    const bool dots_ok = DOTS_AVAILABLE && dots_group;
+    const bool dots_view_id = (idx == PROVIDER_CODEX || idx == PROVIDER_GROK || idx == UI_VIEW_FABLE);
+    if (dots_view_id && dots_ok) return LAYOUT_DOTS;
+    if (data->has_third && !dots_ok) return LAYOUT_DENSE;
     return LAYOUT_BARS;
+}
+
+// Render Claude's model-scoped weekly limit into the dots view as Clawds.
+static void render_fable(const UsageData* data) {
+    const ProviderTheme th = provider_theme(PROVIDER_CLAUDE);
+    if (dots_with_session) layout_dots(false);
+    int f_pct = (int)(data->third_pct + 0.5f);
+    if (f_pct < 0) f_pct = 0;
+    if (f_pct > 100) f_pct = 100;
+    lv_label_set_text_fmt(lbl_dots_pct, "%d%%", f_pct);
+    char buf[48];
+    format_reset_time(data->third_reset_mins, buf, sizeof(buf));
+    lv_label_set_text(lbl_dots_reset, buf);
+    lv_obj_align(lbl_dots_pill, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top());
+    if (f_pct != dots_filled || dots_view != UI_VIEW_FABLE) draw_clawds(f_pct, th);
 }
 
 // Render a Codex or Grok payload into the dots view: weekly % as filled dots (one
@@ -1115,7 +1229,7 @@ static void render_dots(int idx, const UsageData* data) {
     format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
     lv_label_set_text(lbl_dots_reset, buf);
     lv_obj_align(lbl_dots_pill, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top());
-    if (w_pct != dots_filled) draw_dots(w_pct, th);
+    if (w_pct != dots_filled || dots_view != idx) draw_dots(w_pct, th);
 
     if (data->has_session) {
         int s_pct = (int)(data->session_pct + 0.5f);
@@ -1147,7 +1261,7 @@ static int load_picked_slot(void) {
     prefs.begin(UI_SLOT_NVS_NAMESPACE, true);
     int idx = prefs.getUChar(UI_SLOT_NVS_KEY, PROVIDER_CLAUDE);
     prefs.end();
-    return (idx >= 0 && idx < PROVIDER_COUNT) ? idx : PROVIDER_CLAUDE;
+    return (idx >= 0 && idx < UI_VIEW_COUNT) ? idx : PROVIDER_CLAUDE;
 }
 
 // Move to the next fresh slot (if there is another one).
@@ -1158,13 +1272,13 @@ static void carousel_advance(void) {
 }
 
 bool ui_carousel_next(void) {
-    if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_count() < 2) return false;
+    if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_view_count() < 2) return false;
     carousel_advance();
     return true;
 }
 
 bool ui_carousel_prev(void) {
-    if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_count() < 2) return false;
+    if (current_screen != SCREEN_USAGE || view_state != 2 || fresh_view_count() < 2) return false;
     int prv = prev_fresh_slot(visible_slot);
     if (prv < 0 || prv == visible_slot) return false;
     pick_slot(prv);
@@ -1172,7 +1286,7 @@ bool ui_carousel_prev(void) {
 }
 
 bool ui_show_slot(int idx) {
-    if (idx < 0 || idx >= PROVIDER_COUNT || !slot_fresh(idx)) return false;
+    if (idx < 0 || idx >= UI_VIEW_COUNT || !view_fresh(idx)) return false;
     pick_slot(idx);
     return true;
 }
@@ -1193,6 +1307,7 @@ void ui_update_slot(int idx, const UsageData* data) {
         return;
     }
     st.data = *data;
+    if (idx == PROVIDER_CLAUDE && data->has_third) fable_seen = true;
     st.last_ms = lv_tick_get();   // a real usage update just landed
     st.received = true;
     bool first = !data_received;
@@ -1212,33 +1327,36 @@ void ui_update_slot(int idx, const UsageData* data) {
         refresh_title();
     }
 
-    // The picked slot always comes (back) on screen. Until it has data since
-    // boot, the first slot with data stands in for it; otherwise only the
-    // slot on screen re-renders.
-    if (idx == picked_slot) {
+    // The picked view always comes (back) on screen. Until it has data since
+    // boot, the first view with data stands in for it; otherwise only the
+    // view on screen re-renders.
+    if (view_provider(picked_slot) == idx && view_fresh(picked_slot)) {
+        show_slot(picked_slot);
+    } else if (!view_received(picked_slot) && (first || !view_fresh(visible_slot))) {
         show_slot(idx);
-    } else if (!slots[picked_slot].received && (first || !slot_fresh(visible_slot))) {
-        show_slot(idx);
-    } else if (idx == visible_slot) {
-        show_slot(idx);
+    } else if (view_provider(visible_slot) == idx) {
+        show_slot(visible_slot);
     }
 }
 
 // Render one slot's data into the panels and make it the visible slot.
 static void show_slot(int idx) {
+    if (idx == UI_VIEW_FABLE && !fable_available()) idx = PROVIDER_CLAUDE;   // the limit went away
     visible_slot = idx;
-    const UsageData* data = &slots[idx].data;
+    const int prov = view_provider(idx);
+    const UsageData* data = &slots[prov].data;
     refresh_title();
-    splash_mascot_set_provider(idx);   // corner mascot follows the visible provider
+    splash_mascot_set_provider(prov);   // corner mascot follows the visible provider
 
     // Everything colored on this screen follows the provider's palette.
-    const ProviderTheme th = provider_theme(idx);
+    const ProviderTheme th = provider_theme(prov);
     lv_obj_set_style_text_color(lbl_anim, th.status_text, 0);
 
     const usage_layout_t mode = layout_for(idx, data);
     if (layout_mode != mode) apply_usage_layout(mode);
     if (mode == LAYOUT_DOTS) {
-        render_dots(idx, data);
+        if (idx == UI_VIEW_FABLE) render_fable(data);
+        else                      render_dots(idx, data);
         return;
     }
     const bool layout_dense = (mode == LAYOUT_DENSE);
@@ -1312,7 +1430,7 @@ static void show_slot(int idx) {
         lv_label_set_text(lbl_weekly_reset, buf);
     }
 
-    if (data->has_third) {
+    if (layout_dense) {
         int t_pct = (int)(data->third_pct + 0.5f);
         lv_label_set_text(lbl_third_label, data->third_label[0] ? data->third_label : "Fable");
         lv_obj_align(lbl_third_label, LV_ALIGN_TOP_RIGHT, 0, 1);
@@ -1431,7 +1549,7 @@ static void global_click_cb(lv_event_t* e) {
 static void usage_tap_cb(lv_event_t* e) {
     (void)e;
     if (gesture_seen || alert_active) return;
-    if (current_screen == SCREEN_USAGE && view_state == 2 && fresh_count() > 1) {
+    if (current_screen == SCREEN_USAGE && view_state == 2 && fresh_view_count() > 1) {
         carousel_advance();
         return;
     }
@@ -1442,7 +1560,7 @@ static void usage_tap_cb(lv_event_t* e) {
 static void usage_long_press_cb(lv_event_t* e) {
     (void)e;
     if (gesture_seen || alert_active) return;
-    if (current_screen == SCREEN_USAGE) ui_show_mascot(visible_slot);
+    if (current_screen == SCREEN_USAGE) ui_show_mascot(view_provider(visible_slot));
 }
 
 // Swipe on either view (fires once per press, when the finger has travelled

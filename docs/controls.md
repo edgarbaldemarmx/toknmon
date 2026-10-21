@@ -46,11 +46,17 @@ through the whole catalog, custom animations included (`claude.bike`).
 
 ### Meter
 
-- **Claude**: Current (5h), Weekly and, when the subscription has one, the
-  Fable weekly bar, each with "Resets in …"; title in clay; a status line
+- **Claude**: Current (5h) and Weekly bars, each with "Resets in …"; title
+  in clay; a status line
   with the spinner; the clock (`clock = auto|12|24`) in place of the "Usage"
   title; the Clawd corner mascot, which walks off and back, lurks and acts
   depending on the pace.
+- **Fable**: when the subscription has a model-scoped weekly limit, it gets
+  its own view right after Claude: a 10×10 grid of small Clawds, one per
+  percent, filled in clay; the title is the model name the daemon sends
+  (`fl`, "Fable" when absent), with the "Weekly" pill and "Resets in …".
+  Boards without the dot canvas (the C6 ports) keep it as a third bar on
+  the Claude view.
 - **Codex**: 10×10 dot grid filled to the weekly percentage, large percentage
   and reset time, a compact 5h bar only if the plan reports one; the three
   dots in the corner.
@@ -112,7 +118,7 @@ Open the USB serial console at **115200 baud**
 | `screen usage` | show the meter | `ok` |
 | `screen splash` | show the default (Claude) splash | `ok` |
 | `screen splash claude\|codex\|kimi\|grok` | mascot mode for that provider | `ok` / `err …` |
-| `slot 0-3` | show that provider's slot on the meter (0 Claude, 1 Codex, 2 Kimi, 3 Grok) | `ok` / `err slot not fresh` |
+| `slot 0-4` | show that view on the meter and make it the picked one (0 Claude, 1 Codex, 2 Kimi, 3 Grok, 4 Fable) | `ok` / `err slot not fresh` |
 | `next` | page the carousel | `ok` / `err need usage view with 2+ fresh slots` |
 | `splash next` / `splash prev` | step the animation (splash on screen) | `ok` / `err splash not on screen` |
 | `swipe up\|down\|left\|right` | inject a gesture through the same handlers as touch | `ok` |

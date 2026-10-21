@@ -53,6 +53,8 @@ def tilde(path: Path) -> str:
 SESSION_KEYS = ("s", "sr")
 WEEKLY_KEYS = ("w", "wr")
 MODEL_KEYS = ("f", "fr")
+MODEL_LABEL_KEY = "fl"
+MODEL_LABEL_MAX = 11   # the firmware's label buffer holds 11 chars + NUL
 _KEYS_BY_LABEL = {"5h": SESSION_KEYS, "Current": SESSION_KEYS, "Weekly": WEEKLY_KEYS}
 
 
@@ -61,10 +63,18 @@ def bar_keys(label: str) -> tuple[str, str]:
     return _KEYS_BY_LABEL.get(label, MODEL_KEYS)
 
 
+def model_label(label: str) -> str:
+    """The model bar's label as ``fl``: printable ASCII, whitespace collapsed,
+    at most MODEL_LABEL_MAX characters ("" when nothing is left)."""
+    ascii_only = "".join(c for c in label if 32 <= ord(c) < 127)
+    return " ".join(ascii_only.split())[:MODEL_LABEL_MAX].rstrip()
+
+
 def to_payload(res: ProviderResult) -> dict:
     """Map a result to the BLE payload. A failed result is the minimal
     ``{"p": id, "ok": false}`` so the device can mark that provider stale.
-    Only present bars emit keys; the first bar claiming a key pair wins."""
+    Only present bars emit keys; the first bar claiming a key pair wins. The
+    model-scoped bar also sends its label as ``fl``."""
     if not res.ok:
         return {"p": res.id, "ok": False}
     payload: dict = {"p": res.id}
@@ -74,6 +84,8 @@ def to_payload(res: ProviderResult) -> dict:
             continue
         payload[pct_key] = pct
         payload[reset_key] = reset_mins
+        if (pct_key, reset_key) == MODEL_KEYS and model_label(label):
+            payload[MODEL_LABEL_KEY] = model_label(label)
     payload["st"] = res.status
     payload.update(res.extra)
     payload["ok"] = True

@@ -971,16 +971,18 @@ def take_clears() -> dict[str, float]:
 
 def encode_payload(payload: dict, limit: int) -> bytes:
     """JSON-encode for one write-without-response of at most `limit` bytes.
-    Shortens the alert message, then drops it, until it fits."""
+    Shortens the alert message, then drops it, then drops the model label
+    (the board falls back to "Fable"), until it fits."""
     data = json.dumps(payload, separators=(",", ":")).encode()
     msg = payload.get("m", "")
     while len(data) > limit and msg:
         msg = msg[: max(0, len(msg) - (len(data) - limit) - 3)].rstrip()
         payload = {**payload, "m": msg + "..." if msg else ""}
         data = json.dumps(payload, separators=(",", ":")).encode()
-    if len(data) > limit:
-        payload = {k: v for k, v in payload.items() if k != "m"}
-        data = json.dumps(payload, separators=(",", ":")).encode()
+    for key in ("m", "fl"):
+        if len(data) > limit and key in payload:
+            payload = {k: v for k, v in payload.items() if k != key}
+            data = json.dumps(payload, separators=(",", ":")).encode()
     return data
 
 

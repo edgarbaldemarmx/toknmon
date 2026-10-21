@@ -22,7 +22,7 @@ def test_to_payload_maps_bars_in_contract_order():
     res = ProviderResult(id="claude", bars=[("Current", 17, 110), ("Weekly", 73, 860), ("Fable", 1, 860)],
                          extra={"acct": "pro"})
     assert to_payload(res) == {
-        "p": "claude", "s": 17, "sr": 110, "w": 73, "wr": 860, "f": 1, "fr": 860,
+        "p": "claude", "s": 17, "sr": 110, "w": 73, "wr": 860, "f": 1, "fr": 860, "fl": "Fable",
         "st": "allowed", "acct": "pro", "ok": True,
     }
 
@@ -37,9 +37,30 @@ def test_to_payload_maps_bars_by_label_not_position():
     payload = to_payload(ProviderResult(id="codex", bars=[("Weekly", 18, 5000)]))
     assert payload == {"p": "codex", "w": 18, "wr": 5000, "st": "allowed", "ok": True}
     payload = to_payload(ProviderResult(id="claude", bars=[("Fable", 1, 860)]))
-    assert payload == {"p": "claude", "f": 1, "fr": 860, "st": "allowed", "ok": True}
+    assert payload == {"p": "claude", "f": 1, "fr": 860, "fl": "Fable", "st": "allowed", "ok": True}
     payload = to_payload(ProviderResult(id="kimi", bars=[("5h", 3, 200)]))
     assert payload == {"p": "kimi", "s": 3, "sr": 200, "st": "allowed", "ok": True}
+
+
+def test_to_payload_model_label_is_short_ascii():
+    """fl fits the firmware's 12-byte label buffer: printable ASCII only,
+    whitespace collapsed, at most 11 characters."""
+    payload = to_payload(ProviderResult(id="claude", bars=[("Opus 5 \u00b7  extended thinking", 9, 600)]))
+    assert payload["fl"] == "Opus 5 exte"
+    assert payload["f"] == 9 and payload["fr"] == 600
+
+
+def test_to_payload_model_label_without_ascii_is_omitted():
+    payload = to_payload(ProviderResult(id="claude", bars=[("\u30d5\u30a7\u30a4\u30d6\u30eb", 9, 600)]))
+    assert payload == {"p": "claude", "f": 9, "fr": 600, "st": "allowed", "ok": True}
+
+
+def test_encode_payload_drops_the_model_label_before_overflowing():
+    payload = {"p": "claude", "s": 100, "sr": 99999, "f": 100, "fr": 99999, "fl": "Claude Fabl", "ok": True}
+    full = json.dumps(payload, separators=(",", ":")).encode()
+    assert mod.encode_payload(payload, len(full)) == full
+    short = mod.encode_payload(payload, len(full) - 1)
+    assert json.loads(short) == {k: v for k, v in payload.items() if k != "fl"}
 
 
 def test_to_payload_failure_is_minimal():
@@ -47,7 +68,7 @@ def test_to_payload_failure_is_minimal():
 
 
 def test_to_payload_fits_ble_write_budget():
-    res = ProviderResult(id="claude", bars=[("Current", 100, 99999), ("Weekly", 100, 99999), ("Fable", 100, 99999)],
+    res = ProviderResult(id="claude", bars=[("Current", 100, 99999), ("Weekly", 100, 99999), ("Claude Fable 5", 100, 99999)],
                          status="rejected", extra={"acct": "pro"})
     payload = {**to_payload(res), "c": 1, "t": 1791788329, "tf": 24}
     assert len(json.dumps(payload, separators=(",", ":"))) <= mod.DEFAULT_MAX_WRITE

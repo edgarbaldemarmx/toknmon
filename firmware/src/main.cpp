@@ -294,7 +294,7 @@ static void set_device_name(char* text) {
 
 // Hands-free QA: `screen usage|splash [claude|codex|kimi|grok]` (a provider name
 // opens mascot mode for it; bare `splash` is the default Claude splash),
-// `parade on|off`, `next` (page the carousel like a tap), `slot <0-3>` (show
+// `parade on|off`, `next` (page the carousel like a tap), `slot <0-4>` (show
 // that provider slot if fresh), `splash next|prev` (step the splash like a
 // tap / horizontal swipe), `swipe up|down|left|right` (the touch gesture
 // handler). Reply `ok` / `err <why>`.
@@ -330,8 +330,8 @@ static void cmd_parade(const char* arg) {
 static void cmd_slot(const char* arg) {
     char* end = NULL;
     long idx = strtol(arg, &end, 10);
-    if (end == arg || *end != '\0' || idx < 0 || idx >= PROVIDER_COUNT) {
-        qa_reply(false, "slot must be 0-3");
+    if (end == arg || *end != '\0' || idx < 0 || idx >= UI_VIEW_COUNT) {
+        qa_reply(false, "slot must be 0-4");
         return;
     }
     qa_reply(ui_show_slot((int)idx), "slot not fresh");

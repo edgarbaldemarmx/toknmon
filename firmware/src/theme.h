@@ -31,7 +31,7 @@ struct ProviderTheme {
     lv_color_t bar_warn;     // bar fill 50-79 %
     lv_color_t bar_danger;   // bar fill 80 % and above
     lv_color_t status_text;  // animated status line at the bottom
-    lv_color_t dot_empty;    // unfilled dot in the dot grid (Codex, Grok)
+    lv_color_t dot_empty;    // unfilled dot in the dot grid (Codex, Grok; Fable Clawds)
     lv_color_t pill_text;    // provider-name text on the accent pill beside the clock
 };
 
@@ -71,7 +71,7 @@ static inline ProviderTheme provider_theme(int provider) {
         t.bar_warn    = THEME_AMBER;
         t.bar_danger  = THEME_RED;
         t.status_text = THEME_CLAUDE;
-        t.dot_empty   = THEME_BAR_BG;
+        t.dot_empty   = lv_color_hex(0x3a2820);   // dim clay: the unfilled Clawds of the Fable view
         t.pill_text   = THEME_TEXT;
         break;
     }

@@ -110,7 +110,7 @@ static void refresh_title(void) {
     sim_display_set_title(t);
 }
 
-// SIM_SLOT=0-3 (see board.h) seeds the picked usage slot in the in-memory
+// SIM_SLOT=0-4 (see board.h) seeds the picked usage slot in the in-memory
 // NVS before ui_init() restores it, the headless stand-in for a swipe.
 static void seed_picked_slot(void) {
     const char* slot = getenv("SIM_SLOT");

@@ -24,7 +24,11 @@ void ui_tick_anim(void);
 bool ui_carousel_next(void);
 bool ui_carousel_prev(void);
 bool ui_show_slot(int idx);
-// NVS location of the slot the user picked (restored at boot).
+// Views the carousel pages: 0..PROVIDER_COUNT-1 are the provider slots,
+// UI_VIEW_FABLE is Claude's model-scoped weekly limit drawn as Clawds.
+#define UI_VIEW_FABLE PROVIDER_COUNT
+#define UI_VIEW_COUNT (PROVIDER_COUNT + 1)
+// NVS location of the view the user picked (restored at boot).
 #define UI_SLOT_NVS_NAMESPACE "clawdmeter"
 #define UI_SLOT_NVS_KEY       "slot"
 // Swipe handler shared by the LVGL gesture event and serial `swipe <dir>`:
