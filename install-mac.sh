@@ -7,6 +7,7 @@
 #   ./install-mac.sh --yes --no-prime      # non-interactive, defaults everywhere
 #   ./install-mac.sh --yes --providers auto --device-name "Desk 2"
 #   ./install-mac.sh --yes --providers claude,codex  # pin an explicit list
+#   ./install-mac.sh --yes --apps meter            # meter only, no Focus timer
 #
 # Options:
 #   --yes, -y             Accept the default answer for every prompt. Existing
@@ -21,6 +22,10 @@
 #                         installed shows "no data" on the device.
 #   --device-name <name>  Bluetooth name of the board, as set when flashing
 #                         (1-18 printable ASCII characters, no '#').
+#   --apps meter|suite    What the device offers: 'suite' (default) is the
+#                         usage meter plus the Focus timer in the app center;
+#                         'meter' hides Focus and the app center. Stored as the
+#                         `apps` config key and pushed to the board over BLE.
 #   --no-prime            Skip the Bluetooth permission-priming daemon run.
 #   -h, --help            Show this help and exit.
 #
@@ -57,6 +62,7 @@ ASSUME_YES=0
 NO_PRIME=0
 OPT_PROVIDERS=""
 OPT_DEVICE_NAME=""
+OPT_APPS=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --yes|-y) ASSUME_YES=1 ;;
@@ -71,6 +77,11 @@ while [ $# -gt 0 ]; do
             [ -n "${1:-}" ] || { echo "Error: --device-name needs a value" >&2; exit 2; }
             OPT_DEVICE_NAME="$1" ;;
         --device-name=*) OPT_DEVICE_NAME="${1#*=}" ;;
+        --apps)
+            shift
+            [ -n "${1:-}" ] || { echo "Error: --apps needs a value (meter or suite)" >&2; exit 2; }
+            OPT_APPS="$1" ;;
+        --apps=*) OPT_APPS="${1#*=}" ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; echo "" >&2; usage >&2; exit 2 ;;
     esac
@@ -375,6 +386,55 @@ configure_providers() {
     echo "  Set: providers = $valid"
 }
 
+# Pick what the device offers (`apps` key): `suite` = the usage meter plus the
+# Focus timer behind the app center (the daemon default when the key is unset),
+# `meter` = the meter alone (no app center). The daemon pushes the value to the
+# board over BLE whenever it changes. `--apps meter|suite` sets it without
+# asking (anything else is an error); `--yes` keeps an existing value, else
+# the default.
+configure_apps() {
+    local ans cur def_label="suite" value
+    cur=$(current_config_value apps)
+    if [ -n "$OPT_APPS" ]; then
+        ans="$OPT_APPS"
+    elif ! interactive; then
+        ans=""
+    else
+        local cur_label="$def_label"
+        case "$(echo "$cur" | tr -d ' ')" in
+            meter) cur_label="meter" ;;
+        esac
+        echo "  The board can run the usage meter alone, or the full suite:"
+        echo "  the meter plus a Focus timer (5-minute blocks) in an app center."
+        read -r -p "  Install meter only or the full suite? [suite/meter] [$cur_label]: " ans || ans=""
+        [ -z "$ans" ] && ans="$cur_label"
+    fi
+    case "$(echo "$ans" | tr '[:upper:]' '[:lower:]' | tr -d ' ')" in
+        "")      value="" ;;
+        suite)   value="meter,focus" ;;
+        meter)   value="meter" ;;
+        *)
+            echo "Error: --apps: unknown value '$ans' (use meter or suite)." >&2
+            if [ -n "$OPT_APPS" ]; then exit 2; fi
+            echo "  Leaving apps unchanged."
+            return 0 ;;
+    esac
+    if [ -z "$value" ]; then
+        if [ -n "$cur" ]; then
+            echo "  apps = $cur (unchanged)."
+        else
+            echo "  apps = meter,focus (default) — no config change needed."
+        fi
+        return 0
+    fi
+    if [ "$(echo "$cur" | tr -d ' ')" = "$value" ]; then
+        echo "  apps = $value (unchanged)."
+        return 0
+    fi
+    upsert_config_key apps "$value"
+    echo "  Set: apps = $value"
+}
+
 # Offer the optional attention beep (Claude Code hooks, see the README).
 configure_beep() {
     local ans cur
@@ -506,13 +566,15 @@ echo "  Installed: $PLIST_DST"
 echo ""
 
 # Interactive daemon configuration: the board's Bluetooth name, which plans and
-# providers to poll, plus the optional clock display, session-reset chime and
-# attention beep. All re-read by the daemon each poll.
+# providers to poll, which apps the board offers, plus the optional clock
+# display, session-reset chime and attention beep. All re-read by the daemon
+# each poll.
 echo "[4/6] Configuring the daemon..."
 migrate_legacy_config
 configure_device_name
 configure_config_dirs
 configure_providers
+configure_apps
 configure_clock
 configure_chime
 configure_beep

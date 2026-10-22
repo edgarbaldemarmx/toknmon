@@ -73,6 +73,9 @@ jobs:
       - name: Shell device-name validator tests
         run: bash tools/test/shell/test_device_name_validator.sh
 
+      - name: Shell installer --apps tests
+        run: bash tools/test/shell/test_install_apps.sh
+
       # The converter only needs ImageMagick for `--verify`; the plain run
       # regenerates firmware/src/custom_animations.h from assets/animations.
       # The committed header must match what the converter produces.
