@@ -9,6 +9,52 @@ H0–H10); the entries below summarize them.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-22
+
+### Added
+
+- **Codex reset credits** (H11): the daemon reads OpenAI's reset credits with
+  the Codex CLI login (`rc` held, `ru` used in the last 30 days, `rm` minutes
+  to the soonest expiry; one fetch per hour, `codex_credits = off` disables
+  it) and the Codex page shows them as a "Resets" ledger above the dot grid.
+- **Codex pets** (H11): the eight ChatGPT pets (Bsod, Codex, Dewey, Fireball,
+  Null Signal, Rocky, Seedy, Stacky) join Codex's full-screen splash set;
+  `tools/fetch_codex_pets.sh` + `tools/convert_pet_spritesheet.py` build the
+  grids from the sprite sheets (not committed, see `NOTICE.md`).
+- **App center and Focus timer** (H12): the side button opens an app center
+  with a tile per enabled app. Focus runs deep-work blocks of 5–120 minutes
+  in 5-minute steps (default 25), rings the bell three times at the end,
+  counts the blocks of the day (NVS, day from the daemon clock) and starts
+  the next block with one tap. Serial: `screen apps|focus`, `focus …`,
+  `apps`, `sidebtn apps|hid`; sim: `SIM_SCREEN`, `SIM_FOCUS`.
+- **BLE config packets** (H12/H13): the daemon sends `{"p":"cfg","ap":…,"n":…}`
+  when the `apps` or `device_name` config changes (and once per link); the
+  board stores the app list and renames itself without a USB cable.
+- **macOS menu-bar app** (H13): `ToknMon.app` (Python, rumps, built with
+  py2app) shows each provider's last numbers and the link state from the
+  daemon's new `~/.config/toknmon/status.json`, and edits the config in
+  place: device name, apps, providers, chime/beep, clock; restart daemon,
+  open config/logs. `install-mac.sh` builds and starts it (`--no-gui`
+  skips); CI publishes a DMG.
+- `install-mac.sh --apps meter|suite` and the `apps` config key choose
+  between the usage meter alone and the full suite (meter + Focus timer).
+
+- **Design system** (H14): usage pages, the app center and Focus follow one
+  visual system (dark `#0B0F14` background, Inter type, full-width usage
+  bars, a credit panel for Codex, `CURRENT · 5H` block for Claude and Kimi,
+  footer status dot) with the provider mascots kept in the header; Fable
+  shows its model-scoped window as a 5×4 grid of Clawds (one per 5 %); Focus
+  gets the amber ring, −5/+5 cards, Pause/Resume, a Paused state and
+  "Start next" back to setup. The Bsod pet is Codex's corner avatar and opens
+  its splash set. New Inter faces (OFL) in `firmware/src/font_inter_*.c`.
+
+### Changed
+
+- The side button (GPIO18 on the 2.16) now opens the app center; its
+  Shift+Tab HID key is opt-in (`sidebtn hid`).
+- A device name equal to the stored one is ignored instead of restarting the
+  board (the config packet is replayed on every link).
+
 ## [1.0.0] — 2026-10-21
 
 Four providers on one desk meter: Grok Build CLI joins Claude Code, Codex CLI
@@ -182,6 +228,7 @@ First public release of the fork. Everything below is relative to upstream
 - The attention-hook flags still live under `~/.config/claude-usage-monitor`
   (shared with `daemon/attention-hook.sh`).
 
-[Unreleased]: https://github.com/edgarbaldemarmx/toknmon/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/edgarbaldemarmx/toknmon/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/edgarbaldemarmx/toknmon/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/edgarbaldemarmx/toknmon/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/edgarbaldemarmx/toknmon/releases/tag/v0.1.0

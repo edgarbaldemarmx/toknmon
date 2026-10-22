@@ -22,7 +22,10 @@ __pycache__/
 
 # Official Clawd sources fetched on demand by tools/fetch_official_clawd.sh
 # (Anthropic assets; not redistributed — the generated header is committed)
+# and the ChatGPT pet sheets fetched by tools/fetch_codex_pets.sh into
+# research/codex-pets/ (OpenAI assets; only the converted grids are committed)
 research/
+research/codex-pets/
 
 # Simulator screenshots and other BMP dumps
 *.bmp

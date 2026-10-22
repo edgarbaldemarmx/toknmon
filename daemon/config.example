@@ -17,6 +17,15 @@
 #   Unset (default) = ToknMon
 # device_name = ToknMon
 
+# Apps enabled on the device (suite). The daemon pushes this and device_name to
+# the board as a config payload whenever they change (and once per connection),
+# so the board follows the config without reflashing. The menu-bar app edits
+# this key from its "Apps" submenu.
+#   meter        = the usage meter only
+#   meter,focus  = the meter plus the Focus timer (default)
+#   Unknown names are ignored with one log line; meter is always included.
+# apps = meter,focus
+
 # Poll more than one Claude config dir and show whichever plan is currently
 # active. Use this if you run separate plans from different config dirs (e.g. a
 # personal plan in ~/.claude and a work plan in ~/.claude-work, selected via
@@ -66,6 +75,17 @@
 #            GROK_CLI_CHAT_PROXY_BASE_URL, https:// only)
 # providers = auto
 # providers = claude, codex, kimi, grok
+
+# Codex reset credits ("banked resets"): the number of OpenAI reset credits the
+# account holds, how many it spent in the last 30 days and when the soonest one
+# expires, shown next to the Codex dot grid. This is the Codex provider's only
+# network call: it reads the Codex CLI's own ChatGPT sign-in from
+# ${CODEX_HOME:-~/.codex}/auth.json (read-only, never refreshed; an API-key
+# login has no credits) and asks chatgpt.com once an hour. Any failure keeps the
+# local usage and just hides the credits.
+#   on  = fetch the credits (default)
+#   off = never call the network; the Codex slot shows local usage only
+# codex_credits = on
 
 # Kimi OAuth token endpoint used to refresh an expired Kimi access token (HTTPS
 # only). Default: ${KIMI_CODE_OAUTH_HOST:-https://auth.kimi.com}/api/oauth/token.

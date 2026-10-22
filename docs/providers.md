@@ -6,15 +6,19 @@ them as a carousel with a palette and a mascot of their own.
 
 | Provider | Config id | Data source | Network | What the board shows |
 | --- | --- | --- | --- | --- |
-| Claude Code | `claude` | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token (Keychain service `Claude Code-credentials`, or `~/.claude/.credentials.json`) | one GET per poll, **no token spend** | **Current** (5-hour session) and **Weekly** bars, plus a separate **Fable** view (the model-scoped weekly limit as a grid of small Clawds) when the subscription has one; reset countdowns; the Clawd corner mascot |
-| OpenAI Codex CLI | `codex` | newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` modified in the last 7 days | **none** (local files only) | a **10×10 dot grid** filled to the weekly percentage with the large percentage and reset time; a compact 5h bar only when the plan reports a short window; the three-dots mascot |
-| Kimi Code | `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest token in `~/.kimi-code/credentials/*.json` | one GET per poll, plus a token refresh when needed | **Current** (5h) and **Weekly** bars in blue; the crescent-moon mascot |
-| Grok Build CLI | `grok` | `GET ${GROK_CLI_CHAT_PROXY_BASE_URL:-https://cli-chat-proxy.grok.com/v1}/billing?format=credits` with the `key` in `${GROK_HOME:-~/.grok}/auth.json`; fallback: the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` when it is newer than 6 h | one GET per poll, plus a token refresh (Grok's own OIDC protocol) when needed | the **dot grid** filled to the weekly credit percentage (Grok has no 5-hour window); the black-hole Grokbot-style ball mascot |
+| Claude Code | `claude` | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token (Keychain service `Claude Code-credentials`, or `~/.claude/.credentials.json`) | one GET per poll, **no token spend** | **Weekly** on top and a compact **Current · 5h** block, plus a separate **Fable** view (the model-scoped weekly limit as a grid of small Clawds) when the subscription has one; reset countdowns; the Clawd corner mascot |
+| OpenAI Codex CLI | `codex` | newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` modified in the last 7 days | **none** (local files only) | the weekly percentage in large type over a full-width track, the reset time, and the **RESET CREDITS** panel when the account has reset credits (otherwise "N% remaining"); the Bsod pet mascot |
+| Kimi Code | `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest token in `~/.kimi-code/credentials/*.json` | one GET per poll, plus a token refresh when needed | the same weekly + **Current · 5h** module in pastel blue; the crescent-moon mascot |
+| Grok Build CLI | `grok` | `GET ${GROK_CLI_CHAT_PROXY_BASE_URL:-https://cli-chat-proxy.grok.com/v1}/billing?format=credits` with the `key` in `${GROK_HOME:-~/.grok}/auth.json`; fallback: the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` when it is newer than 6 h | one GET per poll, plus a token refresh (Grok's own OIDC protocol) when needed | the weekly credit percentage in large type over a full-width track and "N% remaining" (Grok has no 5-hour window); the black-hole Grokbot-style ball mascot |
 
-Palettes: Claude clay (`#D97757`), Codex teal (`#10A37F`), Kimi blue
-(`#3B6CF6`), Grok: cool silver, dot grid, weekly only; each provider also has
-its own warning and danger tiers for the bars so nothing on a Codex, Kimi or
-Grok screen reads as Claude's orange.
+Palettes (H14 design tokens, `firmware/src/theme.h`): one dark background
+(`#0B0F14`), surface `#121A23`, track `#33414F`, text `#F2F5F7`, muted
+`#AAB5C0`; each provider contributes only its accent — Claude terracotta
+(`#E3A18B`), Codex monochrome (`#F2F5F7`; ice blue `#B8DDFF` is kept as a
+commented alternative), Kimi pastel blue (`#9DB7FF`), Grok silver
+(`#CDD5DF`) — applied to the title, the filled track, the credit segments,
+the remaining / 5h figures and the footer dot, so nothing on a Codex, Kimi
+or Grok screen reads as Claude's terracotta.
 
 ## Choosing providers
 
@@ -143,21 +147,42 @@ payload.
 
 ## What the screens show
 
-- **Claude**: two horizontal bars (Current, Weekly) with "Resets in …"
-  labels; the model-scoped weekly limit (Fable) gets its own view after it,
-  a 10×10 grid of small Clawds filled to the percentage (a third bar on the
-  C6 boards, which have no dot canvas); the status line, and the corner mascot that plays
-  busier acts as your usage rate climbs. An attention alert from Claude Code
-  (see [`install-macos.md`](install-macos.md#attention-alerts-from-claude-code-optional))
+Every provider page is the same module (the H14 design system, see
+`docs/odd/toknmon-h14-ui-redesign.md`): a header with the title in the
+provider's accent, the corner mascot right after it, the clock (when the
+daemon sends `t`) and the provider name in muted small caps, the battery and
+a hairline; then `WEEKLY USAGE`, the percentage **used** in large type, a
+full-width track filled to it, and "Resets in …" ("Reset unavailable" when
+the daemon sends no window). The lower third changes per provider, and the
+footer is a dot in the accent plus the status verb.
+
+- **Claude** (terracotta): the weekly window on top; under the reset line a
+  compact `CURRENT · 5H` block with its own track, percentage and reset time.
+  The corner Clawd plays busier acts as your usage rate climbs. An attention
+  alert from Claude Code (see
+  [`install-macos.md`](install-macos.md#attention-alerts-from-claude-code-optional))
   rides on this payload only.
-- **Codex**: the dot grid (one dot = 1 % of the weekly window), the percentage
-  in large type and the reset time; on plans with a 5-hour window a compact
-  bar sits under the grid. The grid needs PSRAM (all S3 boards); C6 boards
-  fall back to bars.
-- **Kimi**: Current and Weekly bars in the Kimi palette.
-- **Grok**: the dot grid (one dot = 1 % of the credit window), the
-  percentage in large type and the reset time, in cool silver. Grok has no
-  5-hour window, so there is never a compact bar under the grid.
+- **Fable**: the model-scoped weekly limit (`f`/`fr`, label `fl`) gets its
+  own view after Claude, titled with the model label and tagged `CLAUDE`.
+  The track gives way to a 5 × 4 grid of Clawds (48 × 32 px each) across the
+  working width, one per 5 % (`round(pct / 5)` filled, 0–20), filled in
+  terracotta with the rest in the track colour; the reset time sits under
+  the figure row, above the grid. On the C6 boards (no canvas) it stays a
+  third bar on the Claude view.
+- **Codex** (monochrome, the white accent): weekly track and, when the
+  payload carries reset credits (`rc`/`ru`, see
+  [Codex reset credits](#codex-reset-credits)), a `RESET CREDITS` panel:
+  "N available", one segment per credit (solid = held, outlined = used in
+  the last 30 days; six at most, then five plus "+N") and a metadata line
+  such as "1 used · Next expires in 13d", "Available" or "3 used" when
+  nothing is held. Without credits the lower third reads "63% remaining".
+  The panel also shows on the C6 boards (it needs no canvas). The Bsod pet
+  sits in the corner.
+- **Kimi** (pastel blue): the same two-window module as Claude; the moon in
+  the corner.
+- **Grok** (silver): weekly (or monthly) credit window on the track and
+  "95% remaining"; Grok has no 5-hour window. The Grokbot-style ball sits in
+  the corner.
 - **Carousel**: the meter stays on the slot you picked (stored on the board,
   restored after a reboot); tap or swipe left/right to page; the title shows
   the provider name in its accent. Data older than 90 s is stale (the daemon
@@ -184,14 +209,35 @@ One JSON object per provider per poll, written to the BLE RX characteristic
 | `f`, `fr` | model-scoped weekly window (Fable) percent and minutes; Claude only, only when present |
 | `fl` | that window's model name (printable ASCII, at most 11 characters; dropped after `m` when a write would overflow); the board shows "Fable" without it |
 | `st` | status string from the API (`allowed`, …) |
+| `rc` | Codex reset credits held (integer); Codex only, omitted when the credits are unavailable |
+| `ru` | Codex reset credits used in the trailing 30 days (integer); Codex only, omitted with `rc` |
+| `rm` | minutes until the soonest held Codex reset credit expires; omitted when nothing is held or the expiry is unknown |
 | `ok` | `true` when the poll succeeded; `false` carries no numbers and marks the slot unavailable |
 | `t`, `tf` | host local time (epoch seconds with the UTC offset applied) and hour format (`12`/`24`) for the on-screen clock |
 | `c` | chime on session reset (`chime = on`); Claude only |
 | `b`, `m`, `x` | attention alert: beep once, message text, end the alert; Claude only |
 | `acct` | account kind (`pro`, `ent`, …); Claude only |
 
-Payloads stay under 180 bytes. The firmware acks on the TX characteristic
-(`…0003`) and asks for a refresh on `…0004` once per connection.
+Payloads stay under 180 bytes; when one would still overflow a write, the
+daemon shortens `m`, then drops `m`, then `rc`/`ru`/`rm` together, then `fl`.
+The firmware acks on the TX characteristic (`…0003`) and asks for a refresh
+on `…0004` once per connection.
+
+### Codex reset credits
+
+OpenAI grants Codex users **reset credits** ("banked resets"): each one clears
+an exhausted rate limit early and expires 30 days after it was granted. The
+daemon reports them as `rc` (held), `ru` (used in the trailing 30 days) and
+`rm` (minutes until the soonest held credit expires). This is the Codex
+provider's only network call: it reads the Codex CLI's own ChatGPT sign-in from
+`${CODEX_HOME:-~/.codex}/auth.json` (`auth_mode: chatgpt`; the file is only
+read, the token is never refreshed, and an API-key login has no credits) and
+asks `https://chatgpt.com/backend-api/wham/usage`,
+`…/wham/rate-limit-reset-credits` and `…/wham/rate-limit-reset-credits/history`
+once an hour per daemon process. Any failure (sign-in missing, HTTP error,
+timeout, unexpected response) is logged once, the three keys are omitted and
+the local rollout usage still goes out. Set `codex_credits = off` in the config
+to never make the call.
 
 ## Adding a provider
 

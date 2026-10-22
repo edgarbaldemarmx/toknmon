@@ -8,8 +8,9 @@ unmodified. Only `ble.cpp`/`chime.cpp` are swapped for stubs. Sources live in
 scenario data in `firmware/sim/`.
 
 This is the fastest way to work on ToknMon's UI without a board: the meter,
-the carousel, mascot mode, the parade and the gestures all behave as on
-hardware ([`controls.md`](controls.md)). `tools/make_gallery.sh` uses the
+the carousel, mascot mode, the parade, the gestures, the app center and
+Focus all behave as on hardware ([`controls.md`](controls.md),
+[`apps.md`](apps.md)). `tools/make_gallery.sh` uses the
 headless hooks below to produce the screenshots in
 [`media/README.md`](media/README.md); the rest of the developer workflow is in
 [`development.md`](development.md).
@@ -35,7 +36,7 @@ Launch from the `firmware/` directory — the default scenario path
 | `1`–`9` | jump to scenario state N (pauses playback) |
 | `d` | toggle BLE connected/disconnected |
 | `b` (hold) | PRIMARY button (BOOT — HID Space PTT on hardware) |
-| `n` (hold) | SECONDARY button (HID Shift+Tab on hardware) |
+| `n` | SECONDARY / side button: app center ↔ last app (HID Shift+Tab when `side_btn = hid`, as on hardware) |
 | `p` | PWR button (short press; hold ~3s + release = pair gesture) |
 | `c` | toggle charging |
 | `u` | toggle no battery / USB power only (shows the plug-zap icon) |
@@ -74,6 +75,8 @@ a small built-in state list is used.
 | `SIM_SPLASH_PROVIDER=claude\|codex\|kimi\|grok` | open mascot mode for that provider once the first payloads land (same as serial `screen splash <p>`) |
 | `SIM_PARADE=1` | start the ambient parade once a fresh slot exists (same as serial `parade on`); pair it with a multi-provider scenario |
 | `SIM_SLOT=0-4` | start with that usage view picked (0 Claude, 1 Codex, 2 Kimi, 3 Grok, 4 Fable), as if the user had swiped to it before a reboot; the carousel never moves on its own |
+| `SIM_SCREEN=apps\|focus` | open the app center / Focus once the first payloads land (same as serial `screen apps\|focus`) |
+| `SIM_FOCUS=start\|paused\|done` | with `SIM_SCREEN=focus`: start a block (`focus start`), start and pause one (`focus pause`), or start one and finish it at once (`focus finish`), to capture the running / paused / done states |
 | `SIM_NO_BATTERY=1` | start in "USB power only" mode (plug-zap icon) |
 | `SDL_VIDEODRIVER=dummy` | SDL's own switch: render off-screen, for CI and headless captures |
 
@@ -87,7 +90,8 @@ SDL_VIDEODRIVER=dummy SIM_AUTOSHOT_MS=8000 SIM_SPLASH_PROVIDER=codex \
 
 Saves `sim-autoshot.bmp` (override with `SIM_AUTOSHOT_PATH`) after the given
 delay and exits. Combine with `SIM_SCENARIO` pointing at a single-state file,
-or with `SIM_SLOT` / `SIM_SPLASH_PROVIDER` / `SIM_PARADE`, to capture any specific screen.
+or with `SIM_SLOT` / `SIM_SPLASH_PROVIDER` / `SIM_PARADE` / `SIM_SCREEN` /
+`SIM_FOCUS`, to capture any specific screen.
 `*.bmp` and `sim-autoshot*` are git-ignored; `tools/make_gallery.sh` uses
 these hooks to regenerate the screenshots under `docs/media/`, and
 `tools/test/shell/test_sim_sticky_view.sh` uses `SIM_SLOT` with the serial log

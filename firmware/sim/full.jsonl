@@ -1,0 +1,11 @@
+# Three-digit figures (H14 L15 QA) — synthetic data only. The figure row reads
+# "100 %  WEEKLY USAGE … used": the inline label must fit the widest figure, and
+# "used" / "of budget" is dropped only when a long label would run into it.
+# Lines 1-2 open the usage view through an alert and clear it (see gallery.jsonl).
+# SIM_SLOT=0 Claude (both windows full), 1 Codex (credits at 100 %), 2 Kimi, 3 Grok
+# (enterprise "MONTHLY SPENDING", the label that drops "of budget"), 4 Fable (20 glyphs).
+{"name":"claude 100 + fable 100 (alert opens usage)","hold_ms":0,"p":"claude","s":100.0,"sr":5,"w":100.0,"wr":60,"f":100.0,"fr":60,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24,"m":"full"}
+{"name":"claude 100 + fable 100","hold_ms":0,"p":"claude","s":100.0,"sr":5,"w":100.0,"wr":60,"f":100.0,"fr":60,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24,"x":true}
+{"name":"codex 100 (credits)","hold_ms":0,"p":"codex","w":100,"wr":5000,"rc":2,"ru":1,"rm":20000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+{"name":"kimi 100","hold_ms":0,"p":"kimi","s":100.0,"sr":1,"w":100.0,"wr":1,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+{"name":"grok enterprise 100 (MONTHLY SPENDING)","hold_ms":600000,"p":"grok","s":100.0,"acct":"ent","tp":40,"rd":"Nov 1","st":"allowed","ok":true,"t":1785474000,"tf":24}

@@ -2,11 +2,16 @@
 #include "splash.h"
 #include <lvgl.h>
 #include <time.h>
+#include <ctype.h>
+#include <string.h>
 #include <esp_heap_caps.h>
 #include "logo.h"
 #include "clawd_still.h"
 #include "icons.h"
 #include "hal/board_caps.h"
+#include "hal/sound_hal.h"
+#include "apps.h"
+#include "focus_logic.h"
 #include <Preferences.h>
 
 // Custom fonts (scaled for 314 PPI, ~1.9x from original 165 PPI)
@@ -21,6 +26,18 @@ LV_FONT_DECLARE(font_styrene_14);
 LV_FONT_DECLARE(font_styrene_12);
 LV_FONT_DECLARE(font_mono_32);
 LV_FONT_DECLARE(font_mono_18);
+// Inter (H14 design system, docs/fonts.md "Inter"): the usage pages, the app
+// center and the status footer.
+LV_FONT_DECLARE(font_inter_80);
+LV_FONT_DECLARE(font_inter_60);
+LV_FONT_DECLARE(font_inter_29);
+LV_FONT_DECLARE(font_inter_26);
+LV_FONT_DECLARE(font_inter_22);
+LV_FONT_DECLARE(font_inter_20);
+LV_FONT_DECLARE(font_inter_17);
+LV_FONT_DECLARE(font_inter_16);
+LV_FONT_DECLARE(font_inter_15);
+LV_FONT_DECLARE(font_inter_13);
 
 // Layout values computed from the active board's geometry. Populated once
 // in ui_init() and treated as const for the rest of the program. Adding a
@@ -29,6 +46,17 @@ LV_FONT_DECLARE(font_mono_18);
 struct Layout {
     int16_t scr_w, scr_h;
     int16_t margin;
+    // Usage module (H14): the 480×480 design geometry (DESIGN.md §4) scales
+    // by these factors, x by sx and y by sy; fonts are picked per breakpoint.
+    float   sx, sy;
+    int16_t inset;                   // working inset (32 px on 480)
+    const lv_font_t* mod_title_font;   // screen title (29 px semibold)
+    const lv_font_t* mod_value_font;   // main usage number (80 px medium, digits only)
+    const lv_font_t* mod_sign_font;    // "%" after the number, remaining / 5h figures (29 px)
+    const lv_font_t* mod_label_font;   // WEEKLY USAGE, provider label, clock (16 px semibold)
+    const lv_font_t* mod_reset_font;   // "Resets in …", "used", "remaining", tile names (22 px)
+    const lv_font_t* mod_small_font;   // credit metadata, 5h reset (22 px on the 480 panel)
+    const lv_font_t* footer_font;      // status verb, "N blocks today", "Pick an app" (22 px; the user could not read 15 px on the panel)
     int16_t title_y;
     int16_t content_y;
     int16_t content_w;
@@ -53,21 +81,11 @@ struct Layout {
     const lv_font_t* dense_pct_font;
     const lv_font_t* dense_pill_font;
     const lv_font_t* dense_reset_font;
-    // Provider pill shown right of the clock in the title area.
-    const lv_font_t* prov_font;
-    int16_t prov_pad_x, prov_pad_y;
-    int16_t prov_gap;                // gap between the clock and the pill
-    const lv_font_t* title_font;     // screen title / clock
-    const lv_font_t* pct_font;       // big percentage number
-    const lv_font_t* ent_pct_font;   // enterprise spending number
+    const lv_font_t* title_font;     // pair / idle hint title (dense breakpoints)
+    const lv_font_t* pct_font;       // dense-layout percentage
     const lv_font_t* pill_font;      // "Current" / "Weekly" pill
     const lv_font_t* reset_font;     // "Resets in ..." line
-    const lv_font_t* pace_font;      // enterprise "Under/On/Over pace" line
-    const lv_font_t* anim_font;      // animated status line
-    int16_t anim_y;                  // status line offset from bottom
     bool    small_icons;             // 40px logo + 24px battery (vs 80/48) on small screens
-    int16_t title_nudge;             // title x-shift balancing the corner logo
-    int16_t logo_y;                  // logo top edge
     int16_t batt_y;                  // battery icon top edge
     int16_t batt_w;                  // battery icon width, for position math
 
@@ -83,6 +101,14 @@ struct Layout {
     const lv_font_t* bt_device_font;
     const lv_font_t* bt_credit_1_font;
     const lv_font_t* bt_credit_2_font;
+
+    // Focus screen (H14, DESIGN.md §6): one Inter face per element, picked per
+    // breakpoint; the geometry scales from the 480×480 design in
+    // init_focus_screen(). The header and footer reuse the mod_* faces.
+    const lv_font_t* focus_label_font;    // SET DURATION / IN PROGRESS / PAUSED / COMPLETE (13 px semibold)
+    const lv_font_t* focus_time_font;     // countdown (60 px medium)
+    const lv_font_t* focus_support_font;  // "minutes" / "remaining" / "N min completed" (15 px)
+    const lv_font_t* focus_ctrl_font;     // "-5" / "+5" cards and the action button (17 px)
 };
 static Layout L = {};
 
@@ -95,6 +121,19 @@ static void compute_layout(const BoardCaps& c) {
     L.scr_h = c.height;
     L.margin = 20;
     L.title_y = 30;
+    L.sx = (float)c.width / 480.0f;
+    L.sy = (float)c.height / 480.0f;
+    L.inset = (int16_t)(32.0f * L.sx + 0.5f);
+    // Sizes per the user's second device round (H14 L15): labels 16 px,
+    // every supporting line 22 px, the figure 80 px.
+    L.mod_title_font = &font_inter_29;
+    L.mod_value_font = &font_inter_80;
+    L.mod_sign_font  = &font_inter_29;
+    // Third device round (H14 L17): labels 20 px, supporting lines 26 px.
+    L.mod_label_font = &font_inter_20;
+    L.mod_reset_font = &font_inter_26;
+    L.mod_small_font = &font_inter_26;
+    L.footer_font    = &font_inter_26;
 
     // Values shared by the two original breakpoints; the small branch below
     // overrides them wholesale.
@@ -105,21 +144,23 @@ static void compute_layout(const BoardCaps& c) {
     L.pill_pad_y = 6;
     L.title_font   = &font_tiempos_56;
     L.pct_font     = &font_styrene_48;
-    L.ent_pct_font = &font_tiempos_56;
     L.pill_font    = &font_styrene_28;
     L.reset_font   = &font_styrene_28;
-    L.pace_font    = &font_styrene_16;
-    L.anim_font    = &font_mono_32;
-    L.anim_y = -15;
     L.small_icons = false;
-    L.title_nudge = 16;
-    L.logo_y = L.title_y - 10;
-    L.batt_y = L.title_y;
+    // Battery: right-aligned at the working inset, centred on the header's
+    // y 45 (DESIGN.md §4: body y 39–52).
     L.batt_w = ICON_BATTERY_W;
+    L.batt_y = (int16_t)(45.0f * L.sy + 0.5f) - L.batt_w / 2;
     L.pair_y1 = 40;
     L.pair_y2 = 120;
     L.pair_y3 = 160;
     L.idle_px = 160;
+    // Focus (H14 L15): the state label in the 16 px small caps, the
+    // supporting line, the −5/+5 cards and the button text in 22 px.
+    L.focus_label_font   = &font_inter_20;
+    L.focus_time_font    = &font_inter_60;
+    L.focus_support_font = &font_inter_26;
+    L.focus_ctrl_font    = &font_inter_26;
 
     if (c.height >= 460) {
         // Large layout — tuned for 480x480 (AMOLED-2.16).
@@ -140,10 +181,6 @@ static void compute_layout(const BoardCaps& c) {
         L.dense_pct_font   = &font_styrene_28;
         L.dense_pill_font  = &font_styrene_20;
         L.dense_reset_font = &font_styrene_20;
-        L.prov_font  = &font_styrene_20;
-        L.prov_pad_x = 10;
-        L.prov_pad_y = 3;
-        L.prov_gap   = 10;
         L.bt_info_panel_h = 160;
         L.bt_reset_zone_h = 110;
         L.bt_title_font    = &font_tiempos_56;
@@ -170,10 +207,6 @@ static void compute_layout(const BoardCaps& c) {
         L.dense_pct_font   = &font_styrene_28;
         L.dense_pill_font  = &font_styrene_20;
         L.dense_reset_font = &font_styrene_20;
-        L.prov_font  = &font_styrene_16;
-        L.prov_pad_x = 8;
-        L.prov_pad_y = 2;
-        L.prov_gap   = 8;
         L.bt_info_panel_h = 140;
         L.bt_reset_zone_h = 90;
         L.bt_title_font    = &font_tiempos_34;
@@ -181,6 +214,11 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_device_font   = &font_styrene_20;
         L.bt_credit_1_font = &font_styrene_16;
         L.bt_credit_2_font = &font_styrene_14;
+        // The header is narrower: a 34 px title keeps clear of the pill.
+        L.focus_label_font   = &font_inter_13;
+        L.focus_time_font    = &font_inter_60;
+        L.focus_support_font = &font_inter_15;
+        L.focus_ctrl_font    = &font_inter_17;
     } else {
         // Small layout — tuned for 240x240 (LCD-1.54 and similar square TFTs).
         // Everything shrinks: fonts two steps down, panels ~half height, and
@@ -204,10 +242,6 @@ static void compute_layout(const BoardCaps& c) {
         L.dense_pct_font   = &font_styrene_14;
         L.dense_pill_font  = &font_styrene_12;
         L.dense_reset_font = &font_styrene_12;
-        L.prov_font  = &font_styrene_12;
-        L.prov_pad_x = 5;
-        L.prov_pad_y = 1;
-        L.prov_gap   = 4;
         L.bar_h = 12;
         L.panel_pad_x = 10;
         L.panel_pad_y = 6;
@@ -215,19 +249,19 @@ static void compute_layout(const BoardCaps& c) {
         L.pill_pad_y = 2;
         L.title_font   = &font_tiempos_34;
         L.pct_font     = &font_styrene_24;
-        L.ent_pct_font = &font_tiempos_34;
         L.pill_font    = &font_styrene_14;
         L.reset_font   = &font_styrene_14;
-        L.pace_font    = &font_styrene_12;
-        L.anim_font    = &font_mono_18;
-        // Center the status line in the strip below the weekly panel; flush
-        // against the bottom edge it reads as unevenly spaced.
-        L.anim_y = -10;
+        // Half-size module: the 60 px figure and the 17/13 px faces.
+        L.mod_title_font = &font_inter_17;
+        L.mod_value_font = &font_inter_60;
+        L.mod_sign_font  = &font_inter_17;
+        L.mod_label_font = &font_inter_13;
+        L.mod_reset_font = &font_inter_13;
+        L.mod_small_font = &font_inter_13;
+        L.footer_font    = &font_inter_17;
         L.small_icons = true;
-        L.title_nudge = 8;
-        L.logo_y = 2;
-        L.batt_y = 10;
         L.batt_w = ICON_BATTERY_SMALL_W;
+        L.batt_y = (int16_t)(45.0f * L.sy + 0.5f) - L.batt_w / 2;
         L.pair_y1 = 12;
         L.pair_y2 = 56;
         L.pair_y3 = 80;
@@ -239,6 +273,10 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_device_font   = &font_styrene_14;
         L.bt_credit_1_font = &font_styrene_12;
         L.bt_credit_2_font = &font_styrene_12;
+        L.focus_label_font   = &font_inter_13;
+        L.focus_time_font    = &font_inter_29;
+        L.focus_support_font = &font_inter_13;
+        L.focus_ctrl_font    = &font_inter_13;
     }
 
     L.content_w = L.scr_w - 2 * L.margin;
@@ -246,28 +284,38 @@ static void compute_layout(const BoardCaps& c) {
 
 // Anthropic brand palette — design tokens live in theme.h
 #include "theme.h"
-#define COL_BG        THEME_BG
+#define COL_BG        UI_BG
+#define COL_SURFACE   UI_SURFACE
+#define COL_DIVIDER   UI_DIVIDER
 #define COL_PANEL     THEME_PANEL
-#define COL_TEXT      THEME_TEXT
-#define COL_DIM       THEME_DIM
+#define COL_TEXT      UI_TEXT
+#define COL_DIM       UI_MUTED
 #define COL_ACCENT    THEME_ACCENT
 #define COL_GREEN     THEME_GREEN
 #define COL_AMBER     THEME_AMBER
 #define COL_RED       THEME_RED
-#define COL_BAR_BG    THEME_BAR_BG
+#define COL_BAR_BG    UI_TRACK
 
 // ---- Usage screen widgets (single non-splash view) ----
 static lv_obj_t* usage_container;
+// Header (H14): title in the provider accent, the corner mascot after it,
+// the clock and the provider label in muted small caps, the battery at the
+// right inset, and a 1 px divider under all of it.
 static lv_obj_t* lbl_title;
-static lv_obj_t* lbl_provider_pill;   // provider name beside the clock (hidden while the clock is off)
+static lv_obj_t* lbl_provider;        // "CODEX" — right-aligned at design x 390
+static lv_obj_t* lbl_clock;           // "05:00" left of the provider label; hidden until the daemon sends `t`
+static lv_obj_t* header_divider;
 // Clock fed by the daemon: base epoch (local wall-clock seconds) + the lv_tick at
-// which it landed, so the title ticks forward locally between 60s payloads.
+// which it landed, so the clock ticks forward locally between 60s payloads.
 static long     clock_base_epoch = 0;
 static uint32_t clock_base_ms = 0;
 static int      clock_fmt = 24;   // 12 or 24, set from the daemon payload
-static int      clock_last_min = -1;   // last rendered minute; avoids redrawing the title every tick
-static lv_obj_t* usage_group;   // the two usage panels — shown when connected
+static int      clock_last_min = -1;   // last rendered minute; avoids redrawing the clock every tick
+static lv_obj_t* usage_group;   // the usage module and the dense panels — shown when connected
 static lv_obj_t* pair_group;    // pairing hint — shown when disconnected
+// Dense layout (C6: Claude carries the model-scoped limit and the board has
+// no canvas for the Fable grid): three stacked panels, session / weekly /
+// scoped weekly. Restyled with the design tokens, otherwise as before H14.
 static lv_obj_t* bar_session;
 static lv_obj_t* lbl_session_pct;
 static lv_obj_t* lbl_session_label;
@@ -276,8 +324,6 @@ static lv_obj_t* bar_weekly;
 static lv_obj_t* lbl_weekly_pct;
 static lv_obj_t* lbl_weekly_label;
 static lv_obj_t* lbl_weekly_reset;
-// Optional third panel: a model-scoped weekly limit (e.g. "Fable"). Shown
-// only while the visible slot carries one; the layout goes dense to fit.
 static lv_obj_t* bar_third;
 static lv_obj_t* lbl_third_pct;
 static lv_obj_t* lbl_third_label;
@@ -285,40 +331,58 @@ static lv_obj_t* lbl_third_reset;
 static lv_obj_t* panel_session = nullptr;
 static lv_obj_t* panel_weekly = nullptr;
 static lv_obj_t* panel_third = nullptr;
-// Usage layouts. BARS is the historical two-panel view, DENSE stacks three
-// panels when Claude carries a third bar on a board without the dot canvas,
-// DOTS is the Codex and Grok view (a 10×10 dot grid for the weekly window plus
-// an optional compact 5h bar) and the Fable view (the same grid drawn as small
-// Clawds). See apply_usage_layout().
-enum usage_layout_t { LAYOUT_BARS, LAYOUT_DENSE, LAYOUT_DOTS };
-static usage_layout_t layout_mode = LAYOUT_BARS;
-// Dot grid (LAYOUT_DOTS). The 10×10 dots are drawn into one canvas whose
-// pixel buffer lives in PSRAM (100 separate objects would overflow the
-// 64 KB LVGL pool through their draw tasks alone). The C6 boards have no
-// PSRAM to spare for the buffer, so there Codex and Grok keep the bar layout.
+// Usage layouts. MODULE is the H14 page (DESIGN.md §4): one header, the
+// WEEKLY USAGE figure over a 416×12 track, the reset line and one lower
+// module (credit panel, remaining line, the 5h block or the Fable grid).
+// DENSE stacks the three bar panels on boards without the canvas when Claude
+// carries the scoped limit. See apply_usage_layout().
+enum usage_layout_t { LAYOUT_MODULE, LAYOUT_DENSE };
+static usage_layout_t layout_mode = LAYOUT_MODULE;
+// Fable grid: 5×4 Clawd glyphs (5 % each) drawn into one canvas whose pixel
+// buffer lives in PSRAM. The C6 boards have none to spare, so there the
+// scoped limit is the third bar of the dense layout.
 #ifdef BOARD_HAS_PSRAM
-static const bool DOTS_AVAILABLE = true;
+static const bool GRID_AVAILABLE = true;
 #else
-static const bool DOTS_AVAILABLE = false;
+static const bool GRID_AVAILABLE = false;
 #endif
-#define DOT_COUNT 100
-#define DOT_COLS  10
-static lv_obj_t* dots_group = nullptr;        // transparent container for the whole dots view
-static lv_obj_t* dots_canvas = nullptr;       // the grid itself
-static uint16_t* dots_buf = nullptr;          // RGB565 pixels, sized for the largest grid
-static int       dots_pitch = 0, dots_dia = 0, dots_grid = 0;   // current grid geometry (px)
-static int       dots_filled = -1;            // dots currently drawn in the accent color
-static int       dots_view = -1;              // view the grid was last drawn for
-static lv_obj_t* lbl_dots_pct;                // big weekly percentage
-static lv_obj_t* lbl_dots_pill;               // "Weekly" pill
-static lv_obj_t* lbl_dots_reset;              // "Resets in …" for the weekly window
-static lv_obj_t* bar_dots_session;            // compact 5h bar under the grid
-static lv_obj_t* lbl_dots_session;            // "5h - 12% - Resets in …" beside the bar
-static bool      dots_with_session = false;   // geometry currently laid out for the 5h row
-// Enterprise-only widgets inside panel_session
-static lv_obj_t* lbl_session_pct_sym = nullptr;  // "%" in smaller font
-static lv_obj_t* lbl_spending_desc = nullptr;     // "of your monthly budget"
-static lv_obj_t* lbl_spending_status = nullptr;   // "Under pace" / "On pace" / "Over pace"
+#define GRID_COLS  5
+#define GRID_ROWS  4
+#define GRID_COUNT (GRID_COLS * GRID_ROWS)
+#define GRID_SCALE 4     // glyph cell size in design px (12×8 cells → 48×32)
+// ---- Usage module objects (built once by build_module(); shown and hidden
+// per view by render_module()). Geometry in design pixels, see MOD_* below.
+static lv_obj_t* module_group = nullptr;
+static lv_obj_t* lbl_mod_label;        // "WEEKLY USAGE" / "MONTHLY SPENDING"
+static lv_obj_t* lbl_mod_value;        // the big number, digits only
+static lv_obj_t* lbl_mod_sign;         // "%" after the measured numeric run
+static lv_obj_t* lbl_mod_used;         // "used", right-aligned
+static lv_obj_t* bar_mod;              // the usage track
+static lv_obj_t* lbl_mod_reset;        // "Resets in 5d 23h" / "Reset unavailable"
+// Lower module A: credit panel (Codex with reset credits)
+#define CREDIT_SEGMENTS_MAX 6
+static lv_obj_t* credit_panel;
+static lv_obj_t* lbl_credit_title;     // "RESET CREDITS"
+static lv_obj_t* lbl_credit_count;     // "2 available", accent, right-aligned
+static lv_obj_t* credit_segments[CREDIT_SEGMENTS_MAX];   // solid = held, outlined = used
+static lv_obj_t* lbl_credit_more;      // "+N" after the last visible segment
+static lv_obj_t* lbl_credit_meta;      // "1 used · Next expires in 13d"
+// Lower module B: remaining line (single-window providers without credits)
+static lv_obj_t* lbl_mod_remaining;    // "63%" in the accent
+static lv_obj_t* lbl_mod_remaining_word;   // "remaining"
+static lv_obj_t* module_divider;       // design y 404
+// Lower module C: the 5-hour window block (Claude, Kimi; enterprise: billing period)
+static lv_obj_t* lbl_win_label;        // "CURRENT · 5H"
+static lv_obj_t* lbl_win_pct;          // "17%" right-aligned, accent
+static lv_obj_t* bar_win;              // second 416×12 track
+static lv_obj_t* lbl_win_reset;        // "Resets in 1h 50m" / pace line
+// Lower module D: the Fable grid (Claude's scoped limit as Clawds)
+static lv_obj_t* grid_canvas = nullptr;
+static uint16_t* grid_buf = nullptr;   // RGB565 pixels, canvas-sized
+static int       grid_w = 0, grid_h = 0;
+static int       grid_filled = -1;     // glyphs currently drawn in the accent
+// Footer: status dot + verb
+static lv_obj_t* footer_dot;
 static lv_obj_t* lbl_anim;      // status line: connection state + whimsical idle
 
 // ---- Battery indicator (shared, on top) ----
@@ -385,7 +449,7 @@ static int fresh_count(void) {
 }
 
 static bool fable_available(void) {
-    return DOTS_AVAILABLE && dots_canvas && slots[PROVIDER_CLAUDE].data.has_third;
+    return GRID_AVAILABLE && grid_canvas && slots[PROVIDER_CLAUDE].data.has_third;
 }
 
 static bool view_fresh(int v) {
@@ -442,24 +506,10 @@ static screen_t current_screen = SCREEN_USAGE;
 static bool     s_ble_connected = false;   // cached BLE connection state
 static uint32_t connected_at_ms = 0;       // when we last entered CONNECTED ("Connected" dwell)
 
-// Animation state
-static uint32_t anim_last_ms = 0;
-static uint8_t anim_spinner_idx = 0;
-static uint8_t anim_phase = 0;
+// Animation state: the footer verb rotates every ANIM_MSG_MS.
 static uint8_t anim_msg_idx = 0;
 static uint32_t anim_msg_start = 0;
 #define ANIM_MSG_MS     4000
-
-static const char* const spinner_frames[] = {
-    "\xC2\xB7", "\xE2\x9C\xBB", "\xE2\x9C\xBD",
-    "\xE2\x9C\xB6", "\xE2\x9C\xB3", "\xE2\x9C\xA2",
-};
-#define SPINNER_COUNT 6
-#define SPINNER_PHASES (2 * (SPINNER_COUNT - 1))  // 10: ping-pong 0..5..0
-
-static const uint16_t spinner_ms[SPINNER_COUNT] = {
-    260, 130, 130, 130, 130, 260,
-};
 
 static const char* const anim_messages[] = {
     "Accomplishing", "Elucidating", "Perusing",
@@ -496,17 +546,11 @@ static const char* const anim_messages[] = {
 };
 #define ANIM_MSG_COUNT (sizeof(anim_messages) / sizeof(anim_messages[0]))
 
-// Bar fill tier for a percentage, in the given provider's palette.
-static lv_color_t pct_color(float pct, int provider) {
-    const ProviderTheme th = provider_theme(provider);
-    if (pct >= 80.0f) return th.bar_danger;
-    if (pct >= 50.0f) return th.bar_warn;
-    return th.bar_ok;
-}
-
+// "Resets in …" for the usage pages; an unknown window reads "Reset
+// unavailable" (DESIGN.md §7: never substitute "0h").
 static void format_reset_time(int mins, char* buf, size_t len) {
     if (mins < 0) {
-        snprintf(buf, len, "---");
+        snprintf(buf, len, "Reset unavailable");
     } else if (mins < 60) {
         snprintf(buf, len, "Resets in %dm", mins);
     } else if (mins < 1440) {
@@ -522,18 +566,102 @@ static void usage_tap_cb(lv_event_t* e);
 static void usage_long_press_cb(lv_event_t* e);
 static void gesture_cb(lv_event_t* e);
 static void apply_usage_layout(usage_layout_t mode);
-static void layout_dots(bool with_session);
-static void dots_geometry(bool with_session, int* pitch, int* dia, int* grid);
 static void style_pill_geometry(lv_obj_t* pill, const lv_font_t* font, int16_t px, int16_t py);
 
+// ---- Design-pixel helpers (H14). The usage page, the app center and the
+// footer are laid out in the 480×480 design's coordinates (DESIGN.md §4);
+// MX / MY scale them to the panel. Text y values are baselines.
+static inline int MX(int v) { return (int)((float)v * L.sx + 0.5f); }
+static inline int MY(int v) { return (int)((float)v * L.sy + 0.5f); }
+static inline int text_top(const lv_font_t* f, int baseline_design) {
+    return MY(baseline_design) - (lv_font_get_line_height(f) - f->base_line);
+}
+// Next code point of a UTF-8 string (the UI only carries ASCII plus "·",
+// "…" and "—"); advances *p.
+static uint32_t utf8_next(const char** p) {
+    const unsigned char* c = (const unsigned char*)*p;
+    uint32_t cp; int n;
+    if (c[0] < 0x80)        { cp = c[0];        n = 1; }
+    else if (c[0] < 0xE0)   { cp = c[0] & 0x1F; n = 2; }
+    else if (c[0] < 0xF0)   { cp = c[0] & 0x0F; n = 3; }
+    else                    { cp = c[0] & 0x07; n = 4; }
+    for (int i = 1; i < n; i++) {
+        if ((c[i] & 0xC0) != 0x80) { n = i; break; }
+        cp = (cp << 6) | (c[i] & 0x3F);
+    }
+    *p += n;
+    return cp;
+}
+// Rendered width of a string in a font, kerning included (same glyph
+// advances the label draws with).
+static int text_w(const lv_font_t* f, const char* t) {
+    int w = 0;
+    uint32_t cur = utf8_next(&t);
+    while (cur) {
+        const uint32_t nxt = utf8_next(&t);
+        w += lv_font_get_glyph_width(f, cur, nxt);
+        cur = nxt;
+    }
+    return w;
+}
+static int label_w(lv_obj_t* lbl) {
+    return text_w(lv_obj_get_style_text_font(lbl, LV_PART_MAIN), lv_label_get_text(lbl));
+}
+// Place a label with its left edge at design x and its baseline at design y.
+static void place_text(lv_obj_t* lbl, int x_design, int baseline_design) {
+    lv_obj_set_pos(lbl, MX(x_design), text_top(lv_obj_get_style_text_font(lbl, LV_PART_MAIN), baseline_design));
+}
+// Same, right-aligned: the right edge lands at design x.
+static void place_text_right(lv_obj_t* lbl, int right_design, int baseline_design) {
+    lv_obj_set_pos(lbl, MX(right_design) - label_w(lbl),
+                   text_top(lv_obj_get_style_text_font(lbl, LV_PART_MAIN), baseline_design));
+}
+static inline void set_shown(lv_obj_t* o, bool shown) {
+    if (!o) return;
+    if (shown) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+    else       lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+}
+
+static lv_obj_t* make_label(lv_obj_t* parent, const lv_font_t* font, lv_color_t color, const char* text) {
+    lv_obj_t* lbl = lv_label_create(parent);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_color(lbl, color, 0);
+    return lbl;
+}
+
+// A plain filled box (dividers, status dots, credit segments): no border,
+// no padding, no scrolling, taps fall through to the page.
+static lv_obj_t* make_box(lv_obj_t* parent, int x, int y, int w, int h, lv_color_t color, int radius) {
+    lv_obj_t* o = lv_obj_create(parent);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_bg_color(o, color, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(o, radius, 0);
+    lv_obj_set_style_border_width(o, 0, 0);
+    lv_obj_set_style_shadow_width(o, 0, 0);
+    lv_obj_set_style_pad_all(o, 0, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    return o;
+}
+
+// 1 px divider from design x1 to x2 at design y.
+static lv_obj_t* make_rule(lv_obj_t* parent, int x1_design, int x2_design, int y_design) {
+    return make_box(parent, MX(x1_design), MY(y_design), MX(x2_design) - MX(x1_design), 1, COL_DIVIDER, 0);
+}
+
+// Surface card (credit panel, app tiles, dense panels): radius 12.
 static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_t* panel = lv_obj_create(parent);
     lv_obj_set_pos(panel, x, y);
     lv_obj_set_size(panel, w, h);
-    lv_obj_set_style_bg_color(panel, COL_PANEL, 0);
+    lv_obj_set_style_bg_color(panel, COL_SURFACE, 0);
     lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(panel, 8, 0);
+    lv_obj_set_style_radius(panel, MX(12), 0);
     lv_obj_set_style_border_width(panel, 0, 0);
+    lv_obj_set_style_shadow_width(panel, 0, 0);
     lv_obj_set_style_pad_left(panel, L.panel_pad_x, 0);
     lv_obj_set_style_pad_right(panel, L.panel_pad_x, 0);
     lv_obj_set_style_pad_top(panel, L.panel_pad_y, 0);
@@ -543,6 +671,9 @@ static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
     return panel;
 }
 
+// Usage track: UI_TRACK, radius 6, the filled part in the view's accent (set
+// per render). The indicator is exactly w × pct / 100 wide: no minimum, so
+// 0 % draws nothing and 100 % fills the track.
 static lv_obj_t* make_bar(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_t* bar = lv_bar_create(parent);
     lv_obj_set_pos(bar, x, y);
@@ -551,10 +682,11 @@ static lv_obj_t* make_bar(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_bar_set_value(bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(bar, COL_BAR_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(bar, 6, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(bar, COL_GREEN, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar, h / 2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar, COL_ACCENT, LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(bar, 6, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar, h / 2, LV_PART_INDICATOR);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
     return bar;
 }
 
@@ -567,6 +699,7 @@ static void init_icon_dsc_rgb565a8(lv_image_dsc_t* dsc, int w, int h, const uint
     dsc->data_size = w * h * 3;
 }
 
+// Dense-layout pill ("Current" / "Weekly" / "Fable"): track-coloured capsule.
 static lv_obj_t* make_pill(lv_obj_t* parent, const char* text) {
     lv_obj_t* lbl = lv_label_create(parent);
     lv_label_set_text(lbl, text);
@@ -602,15 +735,14 @@ static void init_battery_icons(void) {
 
 // ======== Usage Screen ========
 
+// Dense-layout panel (C6 three-bar fallback): percentage left, pill right,
+// bar and reset line under them.
 static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text,
                                   lv_obj_t** out_pct, lv_obj_t** out_pill,
                                   lv_obj_t** out_bar, lv_obj_t** out_reset) {
     lv_obj_t* panel = make_panel(parent, L.margin, y, L.content_w, L.usage_panel_h);
 
-    *out_pct = lv_label_create(panel);
-    lv_label_set_text(*out_pct, "---%");
-    lv_obj_set_style_text_font(*out_pct, L.pct_font, 0);
-    lv_obj_set_style_text_color(*out_pct, COL_TEXT, 0);
+    *out_pct = make_label(panel, L.pct_font, COL_TEXT, "---%");
     lv_obj_set_pos(*out_pct, 0, 0);
 
     *out_pill = make_pill(panel, pill_text);
@@ -619,10 +751,7 @@ static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text
     *out_bar = make_bar(panel, 0, L.usage_bar_y,
                         L.content_w - 2 * L.panel_pad_x, L.bar_h);
 
-    *out_reset = lv_label_create(panel);
-    lv_label_set_text(*out_reset, "---");
-    lv_obj_set_style_text_font(*out_reset, L.reset_font, 0);
-    lv_obj_set_style_text_color(*out_reset, COL_DIM, 0);
+    *out_reset = make_label(panel, L.reset_font, COL_DIM, "---");
     lv_obj_set_pos(*out_reset, 0, L.usage_reset_y);
 
     return panel;
@@ -640,22 +769,11 @@ static void build_pair_group(lv_obj_t* parent) {
     lv_obj_clear_flag(pair_group, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(pair_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    lv_obj_t* l1 = lv_label_create(pair_group);
-    lv_label_set_text(l1, "To pair");
-    lv_obj_set_style_text_font(l1, L.bt_status_font, 0);
-    lv_obj_set_style_text_color(l1, COL_TEXT, 0);
+    lv_obj_t* l1 = make_label(pair_group, L.bt_status_font, COL_TEXT, "To pair");
     lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, L.pair_y1);
-
-    lv_obj_t* l2 = lv_label_create(pair_group);
-    lv_label_set_text(l2, "hold the power button");
-    lv_obj_set_style_text_font(l2, L.bt_device_font, 0);
-    lv_obj_set_style_text_color(l2, COL_DIM, 0);
+    lv_obj_t* l2 = make_label(pair_group, L.bt_device_font, COL_DIM, "hold the power button");
     lv_obj_align(l2, LV_ALIGN_TOP_MID, 0, L.pair_y2);
-
-    lv_obj_t* l3 = lv_label_create(pair_group);
-    lv_label_set_text(l3, "for 3 seconds, then release");
-    lv_obj_set_style_text_font(l3, L.bt_device_font, 0);
-    lv_obj_set_style_text_color(l3, COL_DIM, 0);
+    lv_obj_t* l3 = make_label(pair_group, L.bt_device_font, COL_DIM, "for 3 seconds, then release");
     lv_obj_align(l3, LV_ALIGN_TOP_MID, 0, L.pair_y3);
 
     lv_obj_add_flag(pair_group, LV_OBJ_FLAG_HIDDEN);  // ui_update_ble_status decides
@@ -675,7 +793,7 @@ static void build_idle_group(lv_obj_t* parent) {
     lv_obj_add_flag(idle_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     // A shrunk-down resting creature (the official cloud-ride animation)
-    // sits between the header and the status line; the animated "Listening…"
+    // sits between the header and the status line; the animated "Listening"
     // status line carries the words, so no extra text is needed here.
     lv_obj_t* creature = splash_mini_create(idle_group, "cloud", L.idle_px);
     if (creature) lv_obj_align(creature, LV_ALIGN_CENTER, 0, -20);
@@ -683,111 +801,136 @@ static void build_idle_group(lv_obj_t* parent) {
     lv_obj_add_flag(idle_group, LV_OBJ_FLAG_HIDDEN);  // update_view_state decides
 }
 
-// Codex / Grok dot grid (LAYOUT_DOTS). Everything lives in one transparent container
-// so the layout switch is a single show/hide. Objects are created once here;
-// layout_dots() places them and show_view() recolors the dots.
-static void build_dots_group(lv_obj_t* parent) {
-    dots_group = lv_obj_create(parent);
-    lv_obj_set_size(dots_group, L.scr_w, L.scr_h);
-    lv_obj_set_pos(dots_group, 0, 0);
-    lv_obj_set_style_bg_opa(dots_group, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(dots_group, 0, 0);
-    lv_obj_set_style_pad_all(dots_group, 0, 0);
-    lv_obj_clear_flag(dots_group, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(dots_group, LV_OBJ_FLAG_EVENT_BUBBLE);
+// ---- Usage module (H14, DESIGN.md §4) ----
+// Design geometry, in 480×480 pixels. Text values are baselines.
+// The figure row (L15): the 80 px figure, "%", then the WEEKLY USAGE label
+// inline on the "used" baseline, "used" right-aligned. The label's own row
+// (design baseline 123) is gone, so the figure sits 10 px higher than the
+// design's 210 and the bar keeps its place; the rest of the page is unchanged.
+#define MOD_VALUE_X        28    // big figure (its glyph box; the ink lands near x 32)
+#define MOD_VALUE_BASE     200
+#define MOD_SIGN_GAP       10    // between the measured numeric run and "%"
+#define MOD_SIGN_BASE      198
+#define MOD_LABEL_GAP      16    // between "%" and the inline label
+#define MOD_USED_BASE      192   // inline label and "used" (right-aligned at the inset)
+#define MOD_USED_MIN_GAP   16    // "used" is dropped when the label would get closer than this
+#define MOD_TRACK_Y        229   // design 234 with a 12 px track; 22 px keeps the same centre
+#define MOD_TRACK_H        22    // design 12; thicker per user feedback on the panel
+#define MOD_RESET_BASE     279
+#define MOD_PANEL_Y        308   // credit panel
+#define MOD_PANEL_H        108
+#define MOD_PANEL_PAD      16    // panel inner inset (x 48 / 432)
+#define MOD_CREDIT_BASE    337   // RESET CREDITS / N available
+#define MOD_SEG_Y          349   // design 351 (12 px) → 16 px, same centre
+#define MOD_SEG_W          56
+#define MOD_SEG_H          16    // design 12; thicker with the bars
+#define MOD_SEG_PITCH      64    // 56 + 8
+#define MOD_META_BASE      396
+#define MOD_REMAIN_BASE    351   // "63%"; "remaining" one px higher
+#define MOD_REMAIN_GAP     24
+#define MOD_LOWER_RULE_Y   404
+#define MOD_WIN_LABEL_BASE 337   // CURRENT · 5H
+#define MOD_WIN_PCT_BASE   340
+#define MOD_WIN_TRACK_Y    347   // design 352 (12 px) → 22 px, same centre
+#define MOD_WIN_RESET_BASE 392
+#define MOD_GRID_RESET_BASE 240  // Fable: "Resets in …" under the figure row (no bar on this page)
+#define MOD_GRID_Y         254   // Fable: the Clawd grid stands in for the track, down to the footer
+#define MOD_GRID_H         168
+#define MOD_FOOT_DOT_X     36    // status dot centre
+#define MOD_FOOT_DOT_Y     444
+#define MOD_FOOT_DOT_D     8     // design 6; scaled with the 22 px footer text
+#define MOD_FOOT_TEXT_X    48
+#define MOD_FOOT_TEXT_BASE 449
+#define HDR_TITLE_BASE     60
+#define HDR_LABEL_RIGHT    390
+#define HDR_LABEL_BASE     55
+#define HDR_CLOCK_GAP      12
+#define HDR_RULE_Y         87
+#define HDR_MASCOT_GAP     16
+#define HDR_MASCOT_FEET    77
 
-    lbl_dots_pct = lv_label_create(dots_group);
-    lv_label_set_text(lbl_dots_pct, "---%");
-    lv_obj_set_style_text_font(lbl_dots_pct, L.pct_font, 0);
-    lv_obj_set_style_text_color(lbl_dots_pct, COL_TEXT, 0);
+// Build the module once. Every piece is hidden or shown per view by
+// render_module(); the positions that depend on text (the "%" sign, the
+// "remaining" word, "+N") are set there too.
+static void build_module(lv_obj_t* parent) {
+    module_group = lv_obj_create(parent);
+    lv_obj_set_size(module_group, L.scr_w, L.scr_h);
+    lv_obj_set_pos(module_group, 0, 0);
+    lv_obj_set_style_bg_opa(module_group, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(module_group, 0, 0);
+    lv_obj_set_style_pad_all(module_group, 0, 0);
+    lv_obj_clear_flag(module_group, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(module_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    lbl_dots_pill = make_pill(dots_group, "Weekly");
-    style_pill_geometry(lbl_dots_pill, L.dense_pill_font, L.dense_pill_pad_x, L.dense_pill_pad_y);
+    const int inset = L.inset;
+    const int width = MX(448) - inset;
 
-    lbl_dots_reset = lv_label_create(dots_group);
-    lv_label_set_text(lbl_dots_reset, "---");
-    lv_obj_set_style_text_font(lbl_dots_reset, L.dense_reset_font, 0);
-    lv_obj_set_style_text_color(lbl_dots_reset, COL_DIM, 0);
+    lbl_mod_label = make_label(module_group, L.mod_label_font, COL_DIM, "WEEKLY USAGE");   // placed after "%" by render_module()
+    lbl_mod_value = make_label(module_group, L.mod_value_font, COL_TEXT, "\xE2\x80\x94");
+    place_text(lbl_mod_value, MOD_VALUE_X, MOD_VALUE_BASE);
+    lbl_mod_sign = make_label(module_group, L.mod_sign_font, COL_TEXT, "%");
+    lbl_mod_used = make_label(module_group, L.mod_reset_font, COL_DIM, "used");
+    place_text_right(lbl_mod_used, 448, MOD_USED_BASE);
+    bar_mod = make_bar(module_group, inset, MY(MOD_TRACK_Y), width, MY(MOD_TRACK_H));
+    lbl_mod_reset = make_label(module_group, L.mod_reset_font, COL_DIM, "Reset unavailable");
+    place_text(lbl_mod_reset, 32, MOD_RESET_BASE);
 
-    // The buffer is sized for the largest grid (no 5h row) and reused, with a
-    // smaller canvas size, when the row is present.
-    int pitch, dia, grid;
-    dots_geometry(false, &pitch, &dia, &grid);
-    dots_buf = (uint16_t*)heap_caps_malloc((size_t)grid * grid * 2, MALLOC_CAP_SPIRAM);
-    if (dots_buf) {
-        dots_canvas = lv_canvas_create(dots_group);
-        lv_canvas_set_buffer(dots_canvas, dots_buf, grid, grid, LV_COLOR_FORMAT_RGB565);
-        lv_obj_clear_flag(dots_canvas, LV_OBJ_FLAG_CLICKABLE);   // taps go to the carousel
+    // A: credit panel
+    credit_panel = make_panel(module_group, inset, MY(MOD_PANEL_Y), width, MY(MOD_PANEL_H));
+    lv_obj_set_style_pad_all(credit_panel, 0, 0);   // children are placed in page coordinates
+    lbl_credit_title = make_label(credit_panel, L.mod_label_font, COL_DIM, "RESET CREDITS");
+    lv_obj_set_pos(lbl_credit_title, MX(MOD_PANEL_PAD), text_top(L.mod_label_font, MOD_CREDIT_BASE) - MY(MOD_PANEL_Y));
+    lbl_credit_count = make_label(credit_panel, L.mod_reset_font, COL_TEXT, "0 available");
+    for (int i = 0; i < CREDIT_SEGMENTS_MAX; i++) {
+        credit_segments[i] = make_box(credit_panel, MX(MOD_PANEL_PAD + i * MOD_SEG_PITCH), MY(MOD_SEG_Y) - MY(MOD_PANEL_Y),
+                                      MX(MOD_SEG_W), MY(MOD_SEG_H), COL_TEXT, MY(MOD_SEG_H) / 2);
+        lv_obj_add_flag(credit_segments[i], LV_OBJ_FLAG_HIDDEN);
     }
+    lbl_credit_more = make_label(credit_panel, L.mod_label_font, COL_DIM, "");
+    lbl_credit_meta = make_label(credit_panel, L.mod_small_font, COL_DIM, "");
+    lv_obj_set_pos(lbl_credit_meta, MX(MOD_PANEL_PAD), text_top(L.mod_small_font, MOD_META_BASE) - MY(MOD_PANEL_Y));
+    lv_obj_add_flag(credit_panel, LV_OBJ_FLAG_HIDDEN);
 
-    bar_dots_session = make_bar(dots_group, 0, 0, 10, L.dense_bar_h);
-    lbl_dots_session = lv_label_create(dots_group);
-    lv_label_set_text(lbl_dots_session, "");
-    lv_obj_set_style_text_font(lbl_dots_session, L.dense_reset_font, 0);
-    lv_obj_set_style_text_color(lbl_dots_session, COL_DIM, 0);
+    // B: remaining line + divider
+    lbl_mod_remaining = make_label(module_group, L.mod_sign_font, COL_TEXT, "0%");
+    place_text(lbl_mod_remaining, 32, MOD_REMAIN_BASE);
+    lbl_mod_remaining_word = make_label(module_group, L.mod_reset_font, COL_DIM, "remaining");
+    module_divider = make_rule(module_group, 32, 448, MOD_LOWER_RULE_Y);
 
-    layout_dots(false);
-    lv_obj_add_flag(dots_group, LV_OBJ_FLAG_HIDDEN);   // apply_usage_layout decides
-}
+    // C: 5-hour window block
+    lbl_win_label = make_label(module_group, L.mod_label_font, COL_DIM, "CURRENT \xC2\xB7 5H");
+    place_text(lbl_win_label, 32, MOD_WIN_LABEL_BASE);
+    lbl_win_pct = make_label(module_group, L.mod_sign_font, COL_TEXT, "0%");
+    bar_win = make_bar(module_group, inset, MY(MOD_WIN_TRACK_Y), width, MY(MOD_TRACK_H));
+    lbl_win_reset = make_label(module_group, L.mod_small_font, COL_DIM, "");
+    place_text(lbl_win_reset, 32, MOD_WIN_RESET_BASE);
 
-// Vertical budget of the dots view: from the top of the percentage row to
-// just above the status line (which is bottom-aligned at L.anim_y).
-static int dots_row_top(void)  { return L.content_y; }
-static int dots_grid_top(void) { return L.content_y + lv_font_get_line_height(L.pct_font) + L.usage_panel_gap / 2; }
-static int dots_bottom(void)   { return L.scr_h + L.anim_y - lv_font_get_line_height(L.anim_font) - L.panel_pad_y; }
-
-// Grid geometry for the available height: the largest 10×10 square that fits
-// between the percentage row and the status line, less the compact 5h row
-// when the slot has a session window. Dots are 3/4 of the pitch.
-static void dots_geometry(bool with_session, int* pitch, int* dia, int* grid) {
-    const int reset_h = lv_font_get_line_height(L.dense_reset_font);
-    const int sess_h  = with_session ? (reset_h + L.usage_panel_gap / 2) : 0;
-    int avail = dots_bottom() - dots_grid_top() - sess_h;
-    if (avail > L.content_w) avail = L.content_w;
-    if (avail < DOT_COLS) avail = DOT_COLS;
-    *pitch = avail / DOT_COLS;
-    *dia   = (*pitch * 3 + 2) / 4;
-    *grid  = (DOT_COLS - 1) * *pitch + *dia;
-}
-
-// Draw the grid: `filled` dots in the accent, the rest in dot_empty, left to
-// right then top to bottom. Drawn one row per layer so the transient draw
-// tasks stay small on the LVGL pool.
-static void draw_dots(int filled, const ProviderTheme& th) {
-    if (!dots_canvas) return;
-    lv_canvas_fill_bg(dots_canvas, COL_BG, LV_OPA_COVER);
-    lv_draw_rect_dsc_t dsc;
-    lv_draw_rect_dsc_init(&dsc);
-    dsc.bg_opa = LV_OPA_COVER;
-    dsc.radius = LV_RADIUS_CIRCLE;
-    dsc.border_width = 0;
-    for (int row = 0; row < DOT_COLS; row++) {
-        lv_layer_t layer;
-        lv_canvas_init_layer(dots_canvas, &layer);
-        for (int col = 0; col < DOT_COLS; col++) {
-            const int i = row * DOT_COLS + col;
-            dsc.bg_color = (i < filled) ? th.accent : th.dot_empty;
-            lv_area_t a;
-            a.x1 = col * dots_pitch;
-            a.y1 = row * dots_pitch;
-            a.x2 = a.x1 + dots_dia - 1;
-            a.y2 = a.y1 + dots_dia - 1;
-            lv_draw_rect(&layer, &dsc, &a);
+    // D: the Fable grid canvas (PSRAM boards)
+    if (GRID_AVAILABLE) {
+        grid_w = width;
+        grid_h = MY(MOD_GRID_H);
+        grid_buf = (uint16_t*)heap_caps_malloc((size_t)grid_w * grid_h * 2, MALLOC_CAP_SPIRAM);
+        if (grid_buf) {
+            grid_canvas = lv_canvas_create(module_group);
+            lv_canvas_set_buffer(grid_canvas, grid_buf, grid_w, grid_h, LV_COLOR_FORMAT_RGB565);
+            lv_obj_set_pos(grid_canvas, inset, MY(MOD_GRID_Y));
+            lv_obj_clear_flag(grid_canvas, LV_OBJ_FLAG_CLICKABLE);   // taps go to the carousel
+            lv_obj_add_flag(grid_canvas, LV_OBJ_FLAG_HIDDEN);
         }
-        lv_canvas_finish_layer(dots_canvas, &layer);
     }
-    dots_filled = filled;
-    dots_view = visible_view;
 }
 
-// Fable view: the same canvas drawn as a 10×10 grid of small Clawds, `filled`
-// in Claude's accent and the rest dim. The pixels go straight into the
-// canvas buffer (a few thousand rects would flood the LVGL draw pool).
+// Fable view: 5×4 grid of Clawds, one per 5 %, `filled` in Claude's accent
+// and the rest in the track colour. The pixels go straight into the canvas
+// buffer (hundreds of rects would flood the LVGL draw pool). Glyphs are 12×8
+// cells at GRID_SCALE design px per cell (shrunk only if a smaller panel
+// cannot fit them); columns spread evenly across the working width and rows
+// across the canvas height.
 #define CLAWD_GLYPH_W 12
 #define CLAWD_GLYPH_H 8
 static const char* const CLAWD_GLYPH[CLAWD_GLYPH_H] = {
     "..XXXXXXXX..",
-    "..X.XXXX.X..",   // eyes are holes, so they read as ink on black
+    "..X.XXXX.X..",   // eyes are holes, so they read as ink on the background
     "..X.XXXX.X..",
     "XXXXXXXXXXXX",   // arms
     "XXXXXXXXXXXX",
@@ -797,89 +940,33 @@ static const char* const CLAWD_GLYPH[CLAWD_GLYPH_H] = {
 };
 
 static void draw_clawds(int filled, const ProviderTheme& th) {
-    if (!dots_canvas) return;
-    lv_canvas_fill_bg(dots_canvas, COL_BG, LV_OPA_COVER);
-    lv_draw_buf_t* db = lv_canvas_get_draw_buf(dots_canvas);
-    const int cell = dots_grid / DOT_COLS;
-    int s = cell / CLAWD_GLYPH_W;
-    if (s < 1) s = 1;
+    if (!grid_canvas) return;
+    lv_canvas_fill_bg(grid_canvas, COL_BG, LV_OPA_COVER);
+    lv_draw_buf_t* db = lv_canvas_get_draw_buf(grid_canvas);
+    const int pitch_y = grid_h / GRID_ROWS;
+    int s = MY(GRID_SCALE);
+    while (s > 1 && (CLAWD_GLYPH_H * s > pitch_y || CLAWD_GLYPH_W * s * GRID_COLS > grid_w)) s--;
+    const int gw = CLAWD_GLYPH_W * s, gh = CLAWD_GLYPH_H * s;
     const uint16_t on  = lv_color_to_u16(th.accent);
     const uint16_t off = lv_color_to_u16(th.dot_empty);
-    for (int i = 0; i < DOT_COUNT; i++) {
+    for (int i = 0; i < GRID_COUNT; i++) {
         const uint16_t px = (i < filled) ? on : off;
-        const int x0 = (i % DOT_COLS) * cell + (cell - CLAWD_GLYPH_W * s) / 2;
-        const int y0 = (i / DOT_COLS) * cell + (cell - CLAWD_GLYPH_H * s) / 2;
-        for (int gy = 0; gy < CLAWD_GLYPH_H * s; gy++) {
+        const int col = i % GRID_COLS, row = i / GRID_COLS;
+        const int x0 = (grid_w - gw) * col / (GRID_COLS - 1);
+        const int y0 = row * pitch_y + (pitch_y - gh) / 2;
+        for (int gy = 0; gy < gh; gy++) {
             const int y = y0 + gy;
-            if (y < 0 || y >= dots_grid) continue;
-            uint16_t* row = (uint16_t*)(db->data + (size_t)y * db->header.stride);
+            if (y < 0 || y >= grid_h) continue;
+            uint16_t* line = (uint16_t*)(db->data + (size_t)y * db->header.stride);
             const char* g = CLAWD_GLYPH[gy / s];
-            for (int gx = 0; gx < CLAWD_GLYPH_W * s; gx++) {
+            for (int gx = 0; gx < gw; gx++) {
                 const int x = x0 + gx;
-                if (x >= 0 && x < dots_grid && g[gx / s] == 'X') row[x] = px;
+                if (x >= 0 && x < grid_w && g[gx / s] == 'X') line[x] = px;
             }
         }
     }
-    lv_obj_invalidate(dots_canvas);
-    dots_filled = filled;
-    dots_view = UI_VIEW_FABLE;
-}
-
-// The compact 5h bar sits right of its label and takes the rest of the row,
-// so it is re-placed whenever the label text changes.
-static void place_dots_session_bar(void) {
-    const int reset_h = lv_font_get_line_height(L.dense_reset_font);
-    const int sess_y  = dots_bottom() - reset_h;
-    lv_obj_update_layout(lbl_dots_session);
-    const int gap   = L.panel_pad_x;
-    int bar_x = L.margin + lv_obj_get_width(lbl_dots_session) + gap;
-    int bar_w = L.margin + L.content_w - bar_x;
-    if (bar_w < L.content_w / 5) {   // label too long for the row: keep a minimum bar
-        bar_w = L.content_w / 5;
-        bar_x = L.margin + L.content_w - bar_w;
-    }
-    lv_obj_set_size(bar_dots_session, bar_w, L.dense_bar_h);
-    lv_obj_set_pos(bar_dots_session, bar_x, sess_y + (reset_h - L.dense_bar_h) / 2);
-}
-
-// Place the dots view. Top row: big weekly percentage left, "Weekly" pill +
-// reset time right. Grid centered in the remaining height; 5h row at the bottom.
-static void layout_dots(bool with_session) {
-    if (!dots_group) return;
-    dots_with_session = with_session;
-    const int row_gap = L.usage_panel_gap / 2;
-    const int pill_h  = lv_font_get_line_height(L.dense_pill_font) + 2 * L.dense_pill_pad_y;
-    const int reset_h = lv_font_get_line_height(L.dense_reset_font);
-    const int bottom  = dots_bottom();
-    const int grid_top = dots_grid_top();
-
-    lv_obj_set_pos(lbl_dots_pct, L.margin, dots_row_top());
-    lv_obj_align(lbl_dots_pill, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top());
-    lv_obj_align(lbl_dots_reset, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top() + pill_h + 4);
-
-    const int sess_h = with_session ? (reset_h + row_gap) : 0;
-    const int avail  = bottom - grid_top - sess_h;
-    dots_geometry(with_session, &dots_pitch, &dots_dia, &dots_grid);
-    if (dots_canvas) {
-        // Same buffer, possibly a smaller canvas: the buffer was sized for
-        // the no-session grid, which is the larger of the two.
-        lv_canvas_set_buffer(dots_canvas, dots_buf, dots_grid, dots_grid, LV_COLOR_FORMAT_RGB565);
-        lv_obj_set_pos(dots_canvas, L.margin + (L.content_w - dots_grid) / 2,
-                       grid_top + (avail - dots_grid) / 2);
-        dots_filled = -1;   // geometry changed → redraw on the next render
-    }
-
-    // 5h row: label left, bar filling the rest of the row; see
-    // place_dots_session_bar() for the bar, which follows the label width.
-    lv_obj_set_pos(lbl_dots_session, L.margin, bottom - reset_h);
-    place_dots_session_bar();
-    if (with_session) {
-        lv_obj_clear_flag(bar_dots_session, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(lbl_dots_session, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(bar_dots_session, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(lbl_dots_session, LV_OBJ_FLAG_HIDDEN);
-    }
+    lv_obj_invalidate(grid_canvas);
+    grid_filled = filled;
 }
 
 static void init_usage_screen(lv_obj_t* scr) {
@@ -896,30 +983,19 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_add_event_cb(usage_container, usage_tap_cb, LV_EVENT_SHORT_CLICKED, NULL);
     lv_obj_add_event_cb(usage_container, usage_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
 
-    lbl_title = lv_label_create(usage_container);
-    lv_label_set_text(lbl_title, "Usage");
-    lv_obj_set_style_text_font(lbl_title, L.title_font, 0);
-    lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
-    // The nudge balances the corner logo on the left; smaller on small
-    // screens where the logo is 40px and the battery icon sits closer.
-    lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, L.title_nudge, L.title_y);
+    // Header: title (accent), provider label and clock (muted small caps),
+    // divider. The corner mascot and the battery live on the screen object
+    // (ui_init) so they also serve the other screens.
+    lbl_title = make_label(usage_container, L.mod_title_font, COL_TEXT, "Usage");
+    place_text(lbl_title, 32, HDR_TITLE_BASE);
+    lbl_provider = make_label(usage_container, L.mod_label_font, COL_DIM, "");
+    place_text_right(lbl_provider, HDR_LABEL_RIGHT, HDR_LABEL_BASE);
+    lv_obj_add_flag(lbl_provider, LV_OBJ_FLAG_HIDDEN);
+    lbl_clock = make_label(usage_container, L.mod_label_font, COL_DIM, "");
+    lv_obj_add_flag(lbl_clock, LV_OBJ_FLAG_HIDDEN);
+    header_divider = make_rule(usage_container, 32, 448, HDR_RULE_Y);
 
-    // Provider pill: sits right of the clock once the daemon drives the title
-    // clock; while the clock is off the title text itself names the provider.
-    lbl_provider_pill = lv_label_create(usage_container);
-    lv_label_set_text(lbl_provider_pill, provider_name(PROVIDER_CLAUDE));
-    lv_obj_set_style_text_font(lbl_provider_pill, L.prov_font, 0);
-    lv_obj_set_style_text_color(lbl_provider_pill, COL_TEXT, 0);
-    lv_obj_set_style_bg_color(lbl_provider_pill, provider_color(PROVIDER_CLAUDE), 0);
-    lv_obj_set_style_bg_opa(lbl_provider_pill, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(lbl_provider_pill, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_pad_left(lbl_provider_pill, L.prov_pad_x, 0);
-    lv_obj_set_style_pad_right(lbl_provider_pill, L.prov_pad_x, 0);
-    lv_obj_set_style_pad_top(lbl_provider_pill, L.prov_pad_y, 0);
-    lv_obj_set_style_pad_bottom(lbl_provider_pill, L.prov_pad_y, 0);
-    lv_obj_add_flag(lbl_provider_pill, LV_OBJ_FLAG_HIDDEN);
-
-    // Usage panels (shown when connected) live in a transparent full-size group
+    // Usage views (shown when connected) live in a transparent full-size group
     // so they can be toggled against the pairing hint as one unit.
     usage_group = lv_obj_create(usage_container);
     lv_obj_set_size(usage_group, L.scr_w, L.scr_h);
@@ -930,56 +1006,32 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_clear_flag(usage_group, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(usage_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
+    build_module(usage_group);
+
+    // Dense panels (C6 fallback), positioned by apply_usage_layout(); hidden
+    // while the module is up.
     panel_session = make_usage_panel(usage_group, L.content_y, "Current",
                      &lbl_session_pct, &lbl_session_label,
                      &bar_session, &lbl_session_reset);
-
-    // Enterprise-only overlays inside panel_session — hidden until enterprise data arrives
-    lbl_session_pct_sym = lv_label_create(panel_session);
-    lv_label_set_text(lbl_session_pct_sym, "%");
-    lv_obj_set_style_text_font(lbl_session_pct_sym, L.reset_font, 0);
-    lv_obj_set_style_text_color(lbl_session_pct_sym, COL_TEXT, 0);
-    lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
-
-    lbl_spending_desc = lv_label_create(panel_session);
-    lv_label_set_text(lbl_spending_desc, "of your monthly budget");
-    lv_obj_set_style_text_font(lbl_spending_desc, L.reset_font, 0);
-    lv_obj_set_style_text_color(lbl_spending_desc, COL_DIM, 0);
-    lv_obj_set_pos(lbl_spending_desc, 0, L.usage_reset_y);
-    lv_obj_add_flag(lbl_spending_desc, LV_OBJ_FLAG_HIDDEN);
-
-    lbl_spending_status = lv_label_create(panel_session);
-    lv_label_set_text(lbl_spending_status, "");
-    lv_obj_set_style_text_font(lbl_spending_status, L.pace_font, 0);
-    lv_obj_set_pos(lbl_spending_status, 0, L.usage_reset_y + 20);
-    lv_obj_add_flag(lbl_spending_status, LV_OBJ_FLAG_HIDDEN);
-
     panel_weekly = make_usage_panel(usage_group,
                      L.content_y + L.usage_panel_h + L.usage_panel_gap, "Weekly",
                      &lbl_weekly_pct, &lbl_weekly_label,
                      &bar_weekly, &lbl_weekly_reset);
-    // Recolor enabled so enterprise period box can color pace and reset separately
-    lv_label_set_recolor(lbl_weekly_reset, true);
-
-    // Third panel (scoped weekly limit). Positioned by apply_usage_layout();
-    // hidden until a payload with has_third is visible.
     panel_third = make_usage_panel(usage_group,
                      L.content_y + 2 * (L.usage_panel_h + L.usage_panel_gap), "Fable",
                      &lbl_third_pct, &lbl_third_label,
                      &bar_third, &lbl_third_reset);
-    lv_obj_add_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
-
-    if (DOTS_AVAILABLE) build_dots_group(usage_group);
 
     build_pair_group(usage_container);
     build_idle_group(usage_container);
 
-    // Status line — always visible on the usage view. Driven by ui_tick_anim().
-    lbl_anim = lv_label_create(usage_container);
-    lv_label_set_text(lbl_anim, "");
-    lv_obj_set_style_text_font(lbl_anim, L.anim_font, 0);
-    lv_obj_set_style_text_color(lbl_anim, COL_ACCENT, 0);
-    lv_obj_align(lbl_anim, LV_ALIGN_BOTTOM_MID, 0, L.anim_y);
+    // Status footer — always visible on the usage view: the dot in the
+    // provider accent, the verb driven by ui_tick_anim().
+    const int d = MX(MOD_FOOT_DOT_D) < 4 ? 4 : MX(MOD_FOOT_DOT_D);
+    footer_dot = make_box(usage_container, MX(MOD_FOOT_DOT_X) - d / 2, MY(MOD_FOOT_DOT_Y) - d / 2, d, d,
+                          COL_ACCENT, LV_RADIUS_CIRCLE);
+    lbl_anim = make_label(usage_container, L.footer_font, COL_DIM, "");
+    place_text(lbl_anim, MOD_FOOT_TEXT_X, MOD_FOOT_TEXT_BASE);
 }
 
 // ---- Attention: the mascot walk-on (splash_mascot_attention) plus the
@@ -1016,7 +1068,496 @@ static void init_alert(void) {
     lv_indev_t* indev = lv_indev_get_next(NULL);
     if (indev) lv_indev_add_event_cb(indev, alert_tap_cb, LV_EVENT_CLICKED, indev);
     if (indev) lv_indev_add_event_cb(indev, activity_press_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
+}
+
+// ======== App center and Focus (H12) ========
+// Two more screens beside the splash and the meter. The app center is a row
+// of tiles, one per enabled app (apps.cpp); Focus is a block timer whose
+// state machine lives in focus_logic.cpp and only gets millis()-backed
+// lv_tick deltas, touch/PWR events and the daemon clock's day from here.
+
+static lv_obj_t* apps_container = nullptr;
+static lv_obj_t* app_tiles[APP_COUNT] = {};
+static lv_image_dsc_t tile_clawd_dsc;           // the still Clawd on the Meter tile
+
+// Focus layout (H14, DESIGN.md §6): the header and footer of the usage pages,
+// a ring of radius 120 centred at (240, 233) with the state label, the
+// countdown and a supporting line stacked on its centre, "-5" / "+5" surface
+// cards beside it while setting up, and one amber action button under it.
+// Design pixels scale by MX / MY; the ring takes the smaller of the two
+// factors so it stays round on non-square panels.
+#define FX_RING_CX       240
+#define FX_RING_CY       233
+#define FX_RING_D        248   // outer diameter: radius 120 on the stroke's centre line + 8 px stroke
+#define FX_RING_STROKE   8
+#define FX_LABEL_BASE    187   // SET DURATION / IN PROGRESS / PAUSED / COMPLETE
+#define FX_TIME_BASE     252   // countdown
+#define FX_SUPPORT_BASE  285   // minutes / remaining / N min completed
+#define FX_CARD_Y        207   // "-5" at x 32, "+5" at x 392, 56 × 52
+#define FX_CARD_W        56
+#define FX_CARD_H        52
+#define FX_CARD_MINUS_X  32
+#define FX_CARD_PLUS_X   392
+#define FX_BTN_X         96    // the action button, 288 × 48, text baseline 407
+#define FX_BTN_Y         376
+#define FX_BTN_W         288
+#define FX_BTN_H         48
+#define FX_BTN_BASE      407
+#define FX_HOLD_RIGHT    448   // "Hold timer to cancel", right-aligned in the footer
+
+static lv_obj_t* focus_container = nullptr;
+static lv_obj_t* focus_arc;                     // full in setup, the remaining share while counting, track only when done
+static lv_obj_t* lbl_focus_label;               // SET DURATION / IN PROGRESS / PAUSED / COMPLETE
+static lv_obj_t* lbl_focus_time;                // MM:SS (MM:00 in setup)
+static lv_obj_t* lbl_focus_support;             // "minutes" / "remaining" / "N min completed"
+static lv_obj_t* focus_card_minus;              // setup only
+static lv_obj_t* focus_card_plus;
+static lv_obj_t* lbl_focus_minus;
+static lv_obj_t* lbl_focus_plus;
+static lv_obj_t* btn_focus;                     // Start focus / Pause / Resume / Start next
+static lv_obj_t* lbl_focus_btn;
+static lv_obj_t* lbl_focus_blocks;              // footer: "N blocks today" / "Block N today"
+static lv_obj_t* lbl_focus_hold;                // footer, right: "Hold timer to cancel" while counting
+static FocusState focus;
+static int        focus_shown_sec = -1;         // last rendered remaining second
+static screen_t   last_app_screen = SCREEN_USAGE;   // what the side button returns to
+
+// Bell: the reset clip (bell_pcm.h, 2.4 s at 44.1 kHz stereo) three times
+// with 400 ms gaps. chime_play() ignores calls while a clip plays, so the
+// repeats are spaced by an lv_timer instead of being queued.
+#define FOCUS_BELL_CLIP_MS 2400
+#define FOCUS_BELL_GAP_MS  400
+#define FOCUS_BELL_TIMES   3
+static lv_timer_t* focus_bell_timer = nullptr;
+static int         focus_bells_left = 0;
+
+// Alert text for the app center and Focus screens: the usage status line is
+// hidden there, so the message rides on this screen-level label instead.
+static lv_obj_t* lbl_overlay_alert = nullptr;
+
+// YYYYMMDD from the daemon clock, advanced locally like the title clock; 0
+// until a payload with `t` has landed.
+static uint32_t clock_day_now(void) {
+    if (clock_base_epoch <= 0) return 0;
+    time_t cur = (time_t)(clock_base_epoch + (lv_tick_get() - clock_base_ms) / 1000);
+    struct tm tmv;
+    gmtime_r(&cur, &tmv);
+    return (uint32_t)(tmv.tm_year + 1900) * 10000u + (uint32_t)(tmv.tm_mon + 1) * 100u + (uint32_t)tmv.tm_mday;
+}
+
+static void focus_bell_cb(lv_timer_t* t) {
+    (void)t;
+    sound_hal_play_reset();
+    if (--focus_bells_left <= 0) lv_timer_pause(focus_bell_timer);
+}
+
+static void focus_bell_start(void) {
+    sound_hal_play_reset();
+    focus_bells_left = FOCUS_BELL_TIMES - 1;
+    lv_timer_reset(focus_bell_timer);
+    lv_timer_resume(focus_bell_timer);
+}
+
+static void render_focus(void) {
+    if (!focus_container) return;
+    const uint32_t total_ms = (uint32_t)focus.length_min * 60000u;
+    const bool counting = focus.phase == FOCUS_RUNNING || focus.phase == FOCUS_PAUSED;
+    uint32_t shown_ms = (focus.phase == FOCUS_SETUP) ? total_ms : focus_remaining_ms(&focus);
+    // Ceil to the second while counting so 24:59.4 reads 25:00 → 24:59 → …
+    uint32_t sec = counting ? (shown_ms + 999) / 1000 : shown_ms / 1000;
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)(sec / 60), (unsigned)(sec % 60));
+    lv_label_set_text(lbl_focus_time, buf);
+    focus_shown_sec = (int)sec;
+
+    // Ring: a full amber preview in setup, remaining / selected length while
+    // counting (frozen and muted when paused), the bare track when done.
+    int32_t v = (focus.phase == FOCUS_SETUP) ? 1000
+              : (focus.phase == FOCUS_DONE) ? 0
+              : (int32_t)((uint64_t)shown_ms * 1000u / total_ms);
+    lv_arc_set_value(focus_arc, v);
+    lv_obj_set_style_arc_color(focus_arc, focus.phase == FOCUS_PAUSED ? COL_DIM : THEME_FOCUS, LV_PART_INDICATOR);
+
+    const char* label;
+    const char* action;
+    switch (focus.phase) {
+    case FOCUS_RUNNING: label = "IN PROGRESS";  action = "Pause";       break;
+    case FOCUS_PAUSED:  label = "PAUSED";       action = "Resume";      break;
+    case FOCUS_DONE:    label = "COMPLETE";     action = "Start next";  break;
+    default:            label = "SET DURATION"; action = "Start focus"; break;
+    }
+    lv_label_set_text(lbl_focus_label, label);
+    // The paused label is muted like its arc (render 07-focus-paused).
+    lv_obj_set_style_text_color(lbl_focus_label, focus.phase == FOCUS_PAUSED ? COL_DIM : THEME_FOCUS, 0);
+    lv_label_set_text(lbl_focus_btn, action);
+
+    if (focus.phase == FOCUS_DONE) {
+        snprintf(buf, sizeof(buf), "%u min completed", (unsigned)focus.length_min);
+        lv_label_set_text(lbl_focus_support, buf);
+    } else {
+        lv_label_set_text(lbl_focus_support, counting ? "remaining" : "minutes");
+    }
+
+    // Footer: the block being counted while running / paused, the finished
+    // count otherwise; the cancel hint only while a block can be cancelled.
+    const uint8_t today = focus_blocks_today(&focus, clock_day_now());
+    if (counting) snprintf(buf, sizeof(buf), "Block %u today", today + 1);
+    else          snprintf(buf, sizeof(buf), "%u block%s today", today, today == 1 ? "" : "s");
+    lv_label_set_text(lbl_focus_blocks, buf);
+    set_shown(lbl_focus_hold, counting);
+
+    // "-5" / "+5" cards: setup only, muted at the 5 / 120 minute bounds.
+    set_shown(focus_card_minus, focus.phase == FOCUS_SETUP);
+    set_shown(focus_card_plus, focus.phase == FOCUS_SETUP);
+    lv_obj_set_style_text_color(lbl_focus_minus, focus.length_min > FOCUS_MIN_MINUTES ? COL_TEXT : COL_DIM, 0);
+    lv_obj_set_style_text_color(lbl_focus_plus, focus.length_min < FOCUS_MAX_MINUTES ? COL_TEXT : COL_DIM, 0);
+}
+
+// Start the block with the selected length. Shared by the action button,
+// PWR and serial `focus start`.
+static bool focus_do_start(void) {
+    if (!focus_start(&focus, lv_tick_get())) return false;
+    Serial.printf("focus: block started (%u min)\n", focus.length_min);
+    render_focus();
+    return true;
+}
+
+// "Start next" (DESIGN.md §6): back to setup with the previous length; the
+// next block only starts on another "Start focus". The counter and its day
+// are kept; the state machine's own DONE → RUNNING edge stays reachable
+// through serial `focus start`.
+static void focus_next_setup(void) {
+    const uint16_t length = focus.length_min;
+    focus_init(&focus, focus.blocks, focus.blocks_day);
+    focus.length_min = length;
+    Serial.println("focus: ready for the next block");
+    render_focus();
+}
+
+// The primary action for the current state — Start focus / Pause / Resume /
+// Start next — shared by the button, PWR and serial `focus next`.
+static bool focus_action(void) {
+    switch (focus.phase) {
+    case FOCUS_SETUP:
+        return focus_do_start();
+    case FOCUS_RUNNING:
+    case FOCUS_PAUSED:
+        if (!focus_toggle_pause(&focus, lv_tick_get())) return false;
+        render_focus();
+        return true;
+    case FOCUS_DONE:
+        focus_next_setup();
+        return true;
+    }
+    return false;
+}
+
+static void focus_finished(void) {
+    apps_focus_counter_store(focus.blocks, focus.blocks_day);
+    Serial.printf("focus: block done — %u today (day %lu)\n", focus.blocks, (unsigned long)focus.blocks_day);
+    focus_bell_start();
+    render_focus();
+}
+
+// Called every loop from ui_tick_anim(), whatever screen is up: a block keeps
+// counting in the background and rings when it ends.
+static void focus_tick_ui(void) {
+    if (focus.phase != FOCUS_RUNNING) return;
+    if (focus_tick(&focus, lv_tick_get(), clock_day_now())) {
+        focus_finished();
+        return;
+    }
+    if (current_screen != SCREEN_FOCUS) return;
+    int sec = (int)((focus_remaining_ms(&focus) + 999) / 1000);
+    if (sec != focus_shown_sec) render_focus();
+}
+
+static void focus_btn_cb(lv_event_t* e) {
+    (void)e;
+    if (gesture_seen || alert_active) return;
+    focus_action();
+}
+
+// "-5" / "+5" cards (user data: the step sign). They do not bubble, so a tap
+// on a card never doubles with the half-screen tap below.
+static void focus_card_cb(lv_event_t* e) {
+    if (gesture_seen || alert_active) return;
+    if (focus_adjust(&focus, (int)(intptr_t)lv_event_get_user_data(e))) render_focus();
+}
+
+// Tap elsewhere on the Focus screen: setup → ±5 by half (right +, left −);
+// running or paused → pause / resume. Done is handled by the button only.
+static void focus_tap_cb(lv_event_t* e) {
+    (void)e;
+    if (gesture_seen || alert_active) return;
+    if (focus.phase == FOCUS_SETUP) {
+        lv_point_t p = { L.scr_w / 2, 0 };
+        lv_indev_t* indev = lv_indev_active();
+        if (indev) lv_indev_get_point(indev, &p);
+        if (focus_adjust(&focus, p.x >= L.scr_w / 2 ? +1 : -1)) render_focus();
+        return;
+    }
+    if (focus_toggle_pause(&focus, lv_tick_get())) render_focus();
+}
+
+// Long press while running or paused: cancel back to setup without counting.
+// (DESIGN.md §6 asks for a 1.2 s hold with feedback and a confirmation
+// dialog; this is LVGL's plain long press, as in H12.)
+static void focus_long_press_cb(lv_event_t* e) {
+    (void)e;
+    if (gesture_seen || alert_active) return;
+    if (focus_cancel(&focus)) {
+        Serial.println("focus: block cancelled");
+        render_focus();
+    }
+}
+
+// A "-5" / "+5" surface card (radius 10) with its own tap handler.
+static lv_obj_t* make_focus_card(lv_obj_t* parent, int x_design, const char* text, int step, lv_obj_t** lbl_out) {
+    lv_obj_t* card = make_box(parent, MX(x_design), MY(FX_CARD_Y), MX(FX_CARD_W), MY(FX_CARD_H), COL_SURFACE, MX(10));
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(card, focus_card_cb, LV_EVENT_SHORT_CLICKED, (void*)(intptr_t)step);
+    *lbl_out = make_label(card, L.focus_ctrl_font, COL_TEXT, text);
+    lv_obj_center(*lbl_out);
+    return card;
+}
+
+static void init_focus_screen(lv_obj_t* scr) {
+    focus_container = lv_obj_create(scr);
+    lv_obj_set_size(focus_container, L.scr_w, L.scr_h);
+    lv_obj_set_pos(focus_container, 0, 0);
+    lv_obj_set_style_bg_opa(focus_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(focus_container, 0, 0);
+    lv_obj_set_style_pad_all(focus_container, 0, 0);
+    lv_obj_clear_flag(focus_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(focus_container, focus_tap_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(focus_container, focus_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
+    lv_obj_add_flag(focus_container, LV_OBJ_FLAG_HIDDEN);
+
+    // Header as on the usage pages: the title in the app's amber, TIMER in
+    // the provider-label slot, the rule. The battery lives on the screen
+    // object; the corner mascot stays hidden here (ui_show_screen).
+    lv_obj_t* title = make_label(focus_container, L.mod_title_font, THEME_FOCUS, "Focus");
+    place_text(title, 32, HDR_TITLE_BASE);
+    lv_obj_t* kind = make_label(focus_container, L.mod_label_font, COL_DIM, "TIMER");
+    place_text_right(kind, HDR_LABEL_RIGHT, HDR_LABEL_BASE);
+    make_rule(focus_container, 32, 448, HDR_RULE_Y);
+
+    // Ring: 248 px outer, the 8 px stroke drawn inward, from 12 o'clock
+    // clockwise.
+    const float s = L.sx < L.sy ? L.sx : L.sy;
+    const int ring = (int)(FX_RING_D * s + 0.5f);
+    int stroke = (int)(FX_RING_STROKE * s + 0.5f);
+    if (stroke < 4) stroke = 4;
+    focus_arc = lv_arc_create(focus_container);
+    lv_obj_set_size(focus_arc, ring, ring);
+    lv_obj_set_pos(focus_arc, MX(FX_RING_CX) - ring / 2, MY(FX_RING_CY) - ring / 2);
+    lv_arc_set_rotation(focus_arc, 270);
+    lv_arc_set_bg_angles(focus_arc, 0, 360);
+    lv_arc_set_range(focus_arc, 0, 1000);
+    lv_arc_set_value(focus_arc, 1000);
+    lv_arc_set_mode(focus_arc, LV_ARC_MODE_NORMAL);
+    lv_obj_remove_style(focus_arc, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(focus_arc, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the container
+    lv_obj_set_style_pad_all(focus_arc, 0, 0);
+    lv_obj_set_style_border_width(focus_arc, 0, 0);
+    lv_obj_set_style_shadow_width(focus_arc, 0, 0);
+    lv_obj_set_style_arc_width(focus_arc, stroke, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(focus_arc, stroke, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(focus_arc, COL_BAR_BG, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(focus_arc, THEME_FOCUS, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(focus_arc, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(focus_arc, false, LV_PART_INDICATOR);
+
+    // Three centred lines on the ring's centre, each on its design baseline.
+    // lv_obj_align() is persistent, so they stay centred as their text changes.
+    lbl_focus_label = make_label(focus_container, L.focus_label_font, THEME_FOCUS, "");
+    lv_obj_align(lbl_focus_label, LV_ALIGN_TOP_MID, 0, text_top(L.focus_label_font, FX_LABEL_BASE));
+    lbl_focus_time = make_label(focus_container, L.focus_time_font, COL_TEXT, "");
+    lv_obj_align(lbl_focus_time, LV_ALIGN_TOP_MID, 0, text_top(L.focus_time_font, FX_TIME_BASE));
+    lbl_focus_support = make_label(focus_container, L.focus_support_font, COL_DIM, "");
+    lv_obj_align(lbl_focus_support, LV_ALIGN_TOP_MID, 0, text_top(L.focus_support_font, FX_SUPPORT_BASE));
+
+    focus_card_minus = make_focus_card(focus_container, FX_CARD_MINUS_X, "-5", -1, &lbl_focus_minus);
+    focus_card_plus  = make_focus_card(focus_container, FX_CARD_PLUS_X,  "+5", +1, &lbl_focus_plus);
+
+    // Action button: amber, radius 10, dark ink.
+    btn_focus = lv_button_create(focus_container);
+    lv_obj_set_size(btn_focus, MX(FX_BTN_W), MY(FX_BTN_H));
+    lv_obj_set_pos(btn_focus, MX(FX_BTN_X), MY(FX_BTN_Y));
+    lv_obj_set_style_bg_color(btn_focus, THEME_FOCUS, 0);
+    lv_obj_set_style_bg_opa(btn_focus, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(btn_focus, MX(10), 0);
+    lv_obj_set_style_shadow_width(btn_focus, 0, 0);
+    lv_obj_set_style_pad_all(btn_focus, 0, 0);
+    lv_obj_add_event_cb(btn_focus, focus_btn_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lbl_focus_btn = make_label(btn_focus, L.focus_ctrl_font, COL_BG, "");
+    lv_obj_align(lbl_focus_btn, LV_ALIGN_TOP_MID, 0, text_top(L.focus_ctrl_font, FX_BTN_BASE) - MY(FX_BTN_Y));
+
+    // Footer like the usage status line: amber dot, the blocks line, and the
+    // cancel hint right-aligned while a block is counting.
+    const int d = MX(MOD_FOOT_DOT_D) < 4 ? 4 : MX(MOD_FOOT_DOT_D);
+    make_box(focus_container, MX(MOD_FOOT_DOT_X) - d / 2, MY(MOD_FOOT_DOT_Y) - d / 2, d, d, THEME_FOCUS, LV_RADIUS_CIRCLE);
+    lbl_focus_blocks = make_label(focus_container, L.footer_font, COL_DIM, "");
+    place_text(lbl_focus_blocks, MOD_FOOT_TEXT_X, MOD_FOOT_TEXT_BASE);
+    lbl_focus_hold = make_label(focus_container, L.mod_label_font, COL_DIM, "Hold timer to cancel");
+    place_text_right(lbl_focus_hold, FX_HOLD_RIGHT, MOD_FOOT_TEXT_BASE);
+
+    focus_bell_timer = lv_timer_create(focus_bell_cb, FOCUS_BELL_CLIP_MS + FOCUS_BELL_GAP_MS, NULL);
+    lv_timer_pause(focus_bell_timer);
+
+    uint8_t blocks; uint32_t day;
+    apps_focus_counter_load(&blocks, &day);
+    focus_init(&focus, blocks, day);
+    render_focus();
+}
+
+// ---- App center ----
+
+static lv_obj_t* lbl_apps_footer = nullptr;
+
+static void app_tile_cb(lv_event_t* e) {
+    if (gesture_seen || alert_active) return;
+    int app = (int)(intptr_t)lv_event_get_user_data(e);
+    ui_show_screen(app == APP_FOCUS ? SCREEN_FOCUS : SCREEN_USAGE);
+}
+
+// Tile geometry: square surface cards side by side on the working width,
+// centred as a group between the header divider and the footer; hidden
+// tiles (disabled apps) leave the row and the rest re-center.
+#define APPS_TOP_Y     104   // design px, under the header rule
+#define APPS_BOTTOM_Y  420   // above the footer
+#define APPS_GAP       16
+static void layout_apps(void) {
+    if (!apps_container) return;
+    const int width = MX(448) - L.inset;
+    const int gap = MX(APPS_GAP);
+    int tile = (width - gap) / 2;
+    const int avail_h = MY(APPS_BOTTOM_Y) - MY(APPS_TOP_Y);
+    if (tile > avail_h) tile = avail_h;
+    const int n = apps_enabled_count();
+    const int row_w = n * tile + (n - 1) * gap;
+    int x = L.inset + (width - row_w) / 2;
+    const int y = MY(APPS_TOP_Y) + (avail_h - tile) / 2;
+    for (int i = 0; i < APP_COUNT; i++) {
+        if (!app_tiles[i]) continue;
+        if (!apps_enabled((app_id_t)i)) { lv_obj_add_flag(app_tiles[i], LV_OBJ_FLAG_HIDDEN); continue; }
+        lv_obj_clear_flag(app_tiles[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(app_tiles[i], x, y);
+        lv_obj_set_size(app_tiles[i], tile, tile);
+        x += tile + gap;
+    }
+}
+
+// The Focus glyph: an amber ring with two hands, drawn with LVGL primitives
+// (no bitmap). `px` is the glyph box.
+static void make_timer_glyph(lv_obj_t* parent, int px) {
+    lv_obj_t* ring = lv_arc_create(parent);
+    lv_obj_set_size(ring, px, px);
+    lv_obj_align(ring, LV_ALIGN_TOP_MID, 0, 0);
+    lv_arc_set_rotation(ring, 270);
+    lv_arc_set_bg_angles(ring, 0, 360);
+    lv_arc_set_range(ring, 0, 360);
+    lv_arc_set_value(ring, 300);                    // a few minutes gone
+    lv_obj_remove_style(ring, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+    const int w = px >= 60 ? 6 : 4;
+    lv_obj_set_style_arc_width(ring, w, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(ring, w, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(ring, COL_BAR_BG, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(ring, THEME_FOCUS, LV_PART_INDICATOR);
+
+    static lv_point_precise_t hands[APP_COUNT][3];   // one hand set per tile that asks
+    static int used = 0;
+    lv_point_precise_t* h = hands[used < APP_COUNT ? used++ : 0];
+    const lv_value_precise_t c = px / 2;
+    h[0] = { c + (lv_value_precise_t)(px * 0.22f), c - (lv_value_precise_t)(px * 0.12f) };  // minute hand (~2 o'clock)
+    h[1] = { c, c };
+    h[2] = { c, c - (lv_value_precise_t)(px * 0.32f) };                                       // hour hand (12 o'clock)
+    lv_obj_t* line = lv_line_create(parent);
+    lv_obj_set_size(line, px, px);
+    lv_obj_align(line, LV_ALIGN_TOP_MID, 0, 0);
+    lv_line_set_points(line, h, 3);
+    lv_obj_set_style_line_width(line, w, 0);
+    lv_obj_set_style_line_color(line, COL_TEXT, 0);
+    lv_obj_set_style_line_rounded(line, true, 0);
+    lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE);
+}
+
+static void init_apps_screen(lv_obj_t* scr) {
+    apps_container = lv_obj_create(scr);
+    lv_obj_set_size(apps_container, L.scr_w, L.scr_h);
+    lv_obj_set_pos(apps_container, 0, 0);
+    lv_obj_set_style_bg_opa(apps_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(apps_container, 0, 0);
+    lv_obj_set_style_pad_all(apps_container, 0, 0);
+    lv_obj_clear_flag(apps_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(apps_container, LV_OBJ_FLAG_HIDDEN);
+
+    // Header like the usage pages: title, divider (the battery is shared).
+    lv_obj_t* title = make_label(apps_container, L.mod_title_font, COL_TEXT, "Apps");
+    place_text(title, 32, HDR_TITLE_BASE);
+    make_rule(apps_container, 32, 448, HDR_RULE_Y);
+
+    if (L.small_icons) init_icon_dsc_rgb565a8(&tile_clawd_dsc, CLAWD_STILL_SMALL_W, CLAWD_STILL_SMALL_H, clawd_still_small_data);
+    else               init_icon_dsc_rgb565a8(&tile_clawd_dsc, CLAWD_STILL_W, CLAWD_STILL_H, clawd_still_data);
+    const int glyph = L.small_icons ? CLAWD_STILL_SMALL_H + 8 : CLAWD_STILL_H + 24;
+
+    for (int i = 0; i < APP_COUNT; i++) {
+        lv_obj_t* tile = make_panel(apps_container, 0, 0, 10, 10);
+        lv_obj_set_style_pad_all(tile, MX(MOD_PANEL_PAD), 0);
+        lv_obj_clear_flag(tile, LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(tile, app_tile_cb, LV_EVENT_SHORT_CLICKED, (void*)(intptr_t)i);
+        // Icon box: fixed height so the label lands at the same y on both tiles.
+        lv_obj_t* box = lv_obj_create(tile);
+        lv_obj_set_size(box, glyph, glyph);
+        lv_obj_align(box, LV_ALIGN_TOP_MID, 0, MY(12));
+        lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(box, 0, 0);
+        lv_obj_set_style_pad_all(box, 0, 0);
+        lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+        if (i == APP_METER) {
+            lv_obj_t* img = lv_image_create(box);
+            lv_image_set_src(img, &tile_clawd_dsc);
+            lv_obj_center(img);
+            lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
+        } else {
+            make_timer_glyph(box, glyph);
+        }
+        // Meter in primary text, Focus in its amber: the app's own accent.
+        lv_obj_t* name = make_label(tile, L.mod_reset_font, i == APP_FOCUS ? THEME_FOCUS : COL_TEXT, apps_name((app_id_t)i));
+        lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, 0);
+        app_tiles[i] = tile;
+    }
+
+    // Footer: dot + hint, like the usage status line.
+    const int d = MX(MOD_FOOT_DOT_D) < 4 ? 4 : MX(MOD_FOOT_DOT_D);
+    make_box(apps_container, MX(MOD_FOOT_DOT_X) - d / 2, MY(MOD_FOOT_DOT_Y) - d / 2, d, d, COL_DIM, LV_RADIUS_CIRCLE);
+    lbl_apps_footer = make_label(apps_container, L.footer_font, COL_DIM, "Pick an app");
+    place_text(lbl_apps_footer, MOD_FOOT_TEXT_X, MOD_FOOT_TEXT_BASE);
+    layout_apps();
+}
+
+// Alert text on the app center / Focus screens (the usage status line is
+// hidden there). Shown only while an alert is active on one of them.
+static void apply_alert_overlay(void) {
+    if (!lbl_overlay_alert) return;
+    const bool show = alert_active && (current_screen == SCREEN_APPS || current_screen == SCREEN_FOCUS);
+    if (show) lv_obj_clear_flag(lbl_overlay_alert, LV_OBJ_FLAG_HIDDEN);
+    else      lv_obj_add_flag(lbl_overlay_alert, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void init_alert_overlay(lv_obj_t* scr) {
+    lbl_overlay_alert = make_label(scr, L.mod_reset_font, COL_ACCENT, "");
+    lv_obj_set_style_bg_color(lbl_overlay_alert, COL_BG, 0);
+    lv_obj_set_style_bg_opa(lbl_overlay_alert, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_align(lbl_overlay_alert, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_long_mode(lbl_overlay_alert, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_width(lbl_overlay_alert, MX(448) - MX(MOD_FOOT_TEXT_X));
+    place_text(lbl_overlay_alert, MOD_FOOT_TEXT_X, MOD_FOOT_TEXT_BASE);
+    lv_obj_add_flag(lbl_overlay_alert, LV_OBJ_FLAG_HIDDEN);
 }
 
 // ======== Public API ========
@@ -1038,6 +1579,9 @@ void ui_init(void) {
     init_battery_icons();
 
     init_usage_screen(scr);
+    apps_init();
+    init_apps_screen(scr);
+    init_focus_screen(scr);
     splash_init(scr);
 
     if (splash_get_root()) {
@@ -1048,25 +1592,33 @@ void ui_init(void) {
     // covers both views; it dispatches on current_screen.
     lv_obj_add_event_cb(scr, gesture_cb, LV_EVENT_GESTURE, NULL);
 
-    // Corner mascot in the old logo slot. The still Clawd is shorter than the
-    // 80/40 px slot the spark logo used; center it vertically in that slot.
+    // Corner mascot in the header, right after the title (H14): the slot
+    // starts past the widest title so it never moves between views, and the
+    // art's feet sit at design y 77 so the character is centred on the title.
     {
-        const int slot  = L.small_icons ? LOGO_SMALL_HEIGHT : LOGO_HEIGHT;
-        const int art_h = L.small_icons ? CLAWD_STILL_SMALL_H : CLAWD_STILL_H;
-        const int top   = L.logo_y + (slot - art_h) / 2;
+        int title_w = 0;
+        const char* titles[] = { provider_name(PROVIDER_CLAUDE), provider_name(PROVIDER_CODEX),
+                                 provider_name(PROVIDER_KIMI), provider_name(PROVIDER_GROK), "Fable" };
+        for (const char* t : titles) {
+            const int w = text_w(L.mod_title_font, t);
+            if (w > title_w) title_w = w;
+        }
+        const int slot_x = L.inset + title_w + MX(HDR_MASCOT_GAP);
+        const int feet_y = MY(HDR_MASCOT_FEET);
 #ifdef BOARD_HAS_PSRAM
         // Animated: idles, does acts, and takes walk-off/lurk trips.
-        splash_mascot_create(scr, L.margin, top + art_h, L.small_icons ? 2 : 3);
+        splash_mascot_create(scr, slot_x, feet_y, L.small_icons ? 2 : 3);
 #else
+        const int art_h = L.small_icons ? CLAWD_STILL_SMALL_H : CLAWD_STILL_H;
         logo_img = lv_image_create(scr);
         lv_image_set_src(logo_img, &logo_dsc);
-        lv_obj_set_pos(logo_img, L.margin, top);
+        lv_obj_set_pos(logo_img, slot_x, feet_y - art_h);
 #endif
     }
 
     battery_img = lv_image_create(scr);
     lv_image_set_src(battery_img, &battery_dscs[0]);
-    lv_obj_set_pos(battery_img, L.scr_w - L.batt_w - L.margin, L.batt_y);
+    lv_obj_set_pos(battery_img, MX(448) - L.batt_w, L.batt_y);
     // Boards without battery telemetry never show the indicator (per the HAL
     // contract; previously every board drew the empty-battery glyph).
     if (!board_caps().has_battery) {
@@ -1075,29 +1627,26 @@ void ui_init(void) {
     }
 
     init_alert();
-    apply_usage_layout(LAYOUT_BARS);
+    init_alert_overlay(scr);
+    apply_usage_layout(LAYOUT_MODULE);
     picked_view = load_picked_view();
     visible_view = picked_view;
 }
 
-// ---- Title area: clock + provider ----
-// With the clock off, the title text is the provider name in its accent color
-// ("Usage" until the first payload). With the clock on, the title is the time
-// and the provider rides in a small accent pill to its right; both are
-// re-centered as one unit so the pair stays balanced against the corner logo.
+// ---- Title area: title, clock, provider label ----
+// The title is the provider name (or the Fable label) in the provider accent,
+// "Usage" in primary text until the first payload. The provider label sits in
+// muted small caps right-aligned at design x 390; the clock, once the daemon
+// sends `t`, rides to its left and ticks forward locally.
 static void layout_title(void) {
-    bool pill = (clock_base_epoch > 0) && data_received;
-    if (!pill) {
-        lv_obj_add_flag(lbl_provider_pill, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, L.title_nudge, L.title_y);
-        return;
-    }
-    lv_obj_clear_flag(lbl_provider_pill, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_update_layout(lbl_provider_pill);
-    int32_t pw = lv_obj_get_width(lbl_provider_pill);
-    lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, L.title_nudge - (pw + L.prov_gap) / 2, L.title_y);
-    lv_obj_update_layout(lbl_title);
-    lv_obj_align_to(lbl_provider_pill, lbl_title, LV_ALIGN_OUT_RIGHT_MID, L.prov_gap, 0);
+    place_text(lbl_title, 32, HDR_TITLE_BASE);
+    place_text_right(lbl_provider, HDR_LABEL_RIGHT, HDR_LABEL_BASE);
+    const bool clock = (clock_base_epoch > 0) && data_received;
+    set_shown(lbl_provider, data_received);
+    set_shown(lbl_clock, clock);
+    if (!clock) return;
+    const int right = MX(HDR_LABEL_RIGHT) - label_w(lbl_provider) - MX(HDR_CLOCK_GAP);
+    lv_obj_set_pos(lbl_clock, right - label_w(lbl_clock), text_top(L.mod_label_font, HDR_LABEL_BASE));
 }
 
 // Title of the visible view: the provider name, or the model label on the
@@ -1110,15 +1659,15 @@ static const char* view_title(int v) {
 
 static void refresh_title(void) {
     const int prov = view_provider(visible_view);
-    if (clock_base_epoch > 0) {
-        lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
-        lv_label_set_text(lbl_provider_pill, view_title(visible_view));
-        lv_obj_set_style_bg_color(lbl_provider_pill, provider_color(prov), 0);
-        lv_obj_set_style_text_color(lbl_provider_pill, provider_theme(prov).pill_text, 0);
-        clock_last_min = -1;   // force the clock tick to rewrite + re-layout the title
-    } else if (data_received) {
+    if (data_received) {
         lv_label_set_text(lbl_title, view_title(visible_view));
         lv_obj_set_style_text_color(lbl_title, provider_color(prov), 0);
+        char up[16];
+        const char* name = provider_name(prov);
+        size_t i = 0;
+        for (; name[i] && i < sizeof(up) - 1; i++) up[i] = (char)toupper((unsigned char)name[i]);
+        up[i] = '\0';
+        lv_label_set_text(lbl_provider, up);
     } else {
         lv_label_set_text(lbl_title, "Usage");
         lv_obj_set_style_text_color(lbl_title, COL_TEXT, 0);
@@ -1126,7 +1675,7 @@ static void refresh_title(void) {
     layout_title();
 }
 
-// ---- Panel layout: normal (2 panels) vs dense (3 panels) ----
+// ---- Layouts: the module vs the dense three-panel fallback ----
 static void style_pill_geometry(lv_obj_t* pill, const lv_font_t* font, int16_t px, int16_t py) {
     lv_obj_set_style_text_font(pill, font, 0);
     lv_obj_set_style_pad_left(pill, px, 0);
@@ -1138,112 +1687,236 @@ static void style_pill_geometry(lv_obj_t* pill, const lv_font_t* font, int16_t p
 static void apply_usage_layout(usage_layout_t mode) {
     layout_mode = mode;
     const bool dense = (mode == LAYOUT_DENSE);
-    const bool dots  = (mode == LAYOUT_DOTS);
-    lv_obj_t* bar_panels[2] = { panel_session, panel_weekly };
-    for (lv_obj_t* p : bar_panels) {
-        if (dots) lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
-        else      lv_obj_clear_flag(p, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (dots_group) {
-        if (dots) lv_obj_clear_flag(dots_group, LV_OBJ_FLAG_HIDDEN);
-        else      lv_obj_add_flag(dots_group, LV_OBJ_FLAG_HIDDEN);
-    }
-    const int16_t ph      = dense ? L.dense_panel_h   : L.usage_panel_h;
-    const int16_t gap     = dense ? L.dense_panel_gap : L.usage_panel_gap;
-    const int16_t bar_y   = dense ? L.dense_bar_y     : L.usage_bar_y;
-    const int16_t reset_y = dense ? L.dense_reset_y   : L.usage_reset_y;
-    const int16_t bar_h   = dense ? L.dense_bar_h     : L.bar_h;
-    const int16_t pad_y   = dense ? L.dense_pad_y     : L.panel_pad_y;
-    const lv_font_t* pct_font   = dense ? L.dense_pct_font   : L.pct_font;
-    const lv_font_t* pill_font  = dense ? L.dense_pill_font  : L.pill_font;
-    const lv_font_t* reset_font = dense ? L.dense_reset_font : L.reset_font;
-    const int16_t pill_px = dense ? L.dense_pill_pad_x : L.pill_pad_x;
-    const int16_t pill_py = dense ? L.dense_pill_pad_y : L.pill_pad_y;
-
+    set_shown(module_group, !dense);
     lv_obj_t* panels[3] = { panel_session, panel_weekly, panel_third };
     lv_obj_t* pcts[3]   = { lbl_session_pct, lbl_weekly_pct, lbl_third_pct };
     lv_obj_t* pills[3]  = { lbl_session_label, lbl_weekly_label, lbl_third_label };
     lv_obj_t* bars[3]   = { bar_session, bar_weekly, bar_third };
     lv_obj_t* resets[3] = { lbl_session_reset, lbl_weekly_reset, lbl_third_reset };
     for (int i = 0; i < 3; i++) {
-        lv_obj_set_pos(panels[i], L.margin, L.content_y + i * (ph + gap));
-        lv_obj_set_height(panels[i], ph);
-        lv_obj_set_style_pad_top(panels[i], pad_y, 0);
-        lv_obj_set_style_pad_bottom(panels[i], pad_y, 0);
-        lv_obj_set_style_text_font(pcts[i], pct_font, 0);
-        style_pill_geometry(pills[i], pill_font, pill_px, pill_py);
+        set_shown(panels[i], dense);
+        if (!dense) continue;
+        lv_obj_set_pos(panels[i], L.margin, L.content_y + i * (L.dense_panel_h + L.dense_panel_gap));
+        lv_obj_set_height(panels[i], L.dense_panel_h);
+        lv_obj_set_style_pad_top(panels[i], L.dense_pad_y, 0);
+        lv_obj_set_style_pad_bottom(panels[i], L.dense_pad_y, 0);
+        lv_obj_set_style_text_font(pcts[i], L.dense_pct_font, 0);
+        style_pill_geometry(pills[i], L.dense_pill_font, L.dense_pill_pad_x, L.dense_pill_pad_y);
         lv_obj_align(pills[i], LV_ALIGN_TOP_RIGHT, 0, 1);
-        lv_obj_set_y(bars[i], bar_y);
-        lv_obj_set_height(bars[i], bar_h);
-        lv_obj_set_style_text_font(resets[i], reset_font, 0);
-        lv_obj_set_y(resets[i], reset_y);
+        lv_obj_set_y(bars[i], L.dense_bar_y);
+        lv_obj_set_height(bars[i], L.dense_bar_h);
+        lv_obj_set_style_text_font(resets[i], L.dense_reset_font, 0);
+        lv_obj_set_y(resets[i], L.dense_reset_y);
     }
-    // Enterprise overlays follow the session panel's reset line.
-    lv_obj_set_style_text_font(lbl_spending_desc, reset_font, 0);
-    lv_obj_set_y(lbl_spending_desc, reset_y);
-    lv_obj_set_y(lbl_spending_status, reset_y + (dense ? 16 : 20));
-
-    if (dense) lv_obj_clear_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
-    else       lv_obj_add_flag(panel_third, LV_OBJ_FLAG_HIDDEN);
-    // The mascot's full-size lurk peeks in over the lower panel area, which
-    // the dense layout fills with the third panel and the dots layout with
-    // the grid: pause trips on both.
-    splash_mascot_set_trips(mode == LAYOUT_BARS);
 }
 
-// Which layout a view wants. Dots is for Codex and Grok (weekly-first plans)
-// and the Fable view, and needs the dot objects. Claude's third, model-scoped
-// bar has its own Fable view when the grid exists; only boards without it
-// fall back to the dense three-panel layout.
+// Which layout a view wants: the module everywhere, except Claude carrying
+// the scoped limit on a board without the Fable grid, which stacks the
+// three panels instead.
 static usage_layout_t layout_for(int idx, const UsageData* data) {
-    const bool dots_ok = DOTS_AVAILABLE && dots_group;
-    const bool dots_view_id = (idx == PROVIDER_CODEX || idx == PROVIDER_GROK || idx == UI_VIEW_FABLE);
-    if (dots_view_id && dots_ok) return LAYOUT_DOTS;
-    if (data->has_third && !dots_ok) return LAYOUT_DENSE;
-    return LAYOUT_BARS;
+    if (idx == PROVIDER_CLAUDE && data->has_third && !grid_canvas) return LAYOUT_DENSE;
+    return LAYOUT_MODULE;
 }
 
-// Render Claude's model-scoped weekly limit into the dots view as Clawds.
-static void render_fable(const UsageData* data) {
-    const ProviderTheme th = provider_theme(PROVIDER_CLAUDE);
-    if (dots_with_session) layout_dots(false);
-    int f_pct = (int)(data->third_pct + 0.5f);
-    if (f_pct < 0) f_pct = 0;
-    if (f_pct > 100) f_pct = 100;
-    lv_label_set_text_fmt(lbl_dots_pct, "%d%%", f_pct);
-    char buf[48];
-    format_reset_time(data->third_reset_mins, buf, sizeof(buf));
-    lv_label_set_text(lbl_dots_reset, buf);
-    lv_obj_align(lbl_dots_pill, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top());
-    if (f_pct != dots_filled || dots_view != UI_VIEW_FABLE) draw_clawds(f_pct, th);
+static int pct_round(float v) {
+    int p = (int)(v + 0.5f);
+    if (p < 0) p = 0;
+    if (p > 100) p = 100;
+    return p;
 }
 
-// Render a Codex or Grok payload into the dots view: weekly % as filled dots (one
-// per percent, left→right then top→bottom), plus the compact 5h row when
-// the plan has a session window.
-static void render_dots(int idx, const UsageData* data) {
-    const ProviderTheme th = provider_theme(idx);
-    if (dots_with_session != data->has_session) layout_dots(data->has_session);
+// Expiry of the soonest held credit, in whole days from 48 h up and in
+// hours (rounded up, so a held credit never reads "0h") below.
+static void format_credit_expiry(int mins, char* buf, size_t len) {
+    if (mins < 0)            snprintf(buf, len, "Available");
+    else if (mins >= 48 * 60) snprintf(buf, len, "Next expires in %dd", mins / 1440);
+    else                     snprintf(buf, len, "Next expires in %dh", (mins + 59) / 60);
+}
 
-    int w_pct = (int)(data->weekly_pct + 0.5f);
-    if (w_pct < 0) w_pct = 0;
-    if (w_pct > 100) w_pct = 100;
-    lv_label_set_text_fmt(lbl_dots_pct, "%d%%", w_pct);
-    char buf[48];
-    format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
-    lv_label_set_text(lbl_dots_reset, buf);
-    lv_obj_align(lbl_dots_pill, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top());
-    if (w_pct != dots_filled || dots_view != idx) draw_dots(w_pct, th);
+// Credit panel: "N available" in the accent, one segment per credit (solid =
+// held, outlined = used; up to six, then five plus "+N"), and the metadata
+// line "1 used · Next expires in 13d". An account with nothing held keeps the
+// panel with "0 available" and only its used segments (DESIGN.md §4).
+static void render_credits(const UsageData* data, const ProviderTheme& th) {
+    const int held = data->reset_credits < 0 ? 0 : data->reset_credits;
+    const int used = data->reset_credits_used < 0 ? 0 : data->reset_credits_used;
+    const int total = held + used;
+    lv_label_set_text_fmt(lbl_credit_count, "%d available", held);
+    lv_obj_set_style_text_color(lbl_credit_count, th.accent, 0);
+    lv_obj_set_pos(lbl_credit_count, MX(448 - MOD_PANEL_PAD) - MX(32) - label_w(lbl_credit_count),
+                   text_top(L.mod_reset_font, MOD_CREDIT_BASE) - MY(MOD_PANEL_Y));
 
-    if (data->has_session) {
-        int s_pct = (int)(data->session_pct + 0.5f);
-        char when[32];
-        format_reset_time(data->session_reset_mins, when, sizeof(when));
-        lv_label_set_text_fmt(lbl_dots_session, "5h - %d%% - %s", s_pct, when);
-        place_dots_session_bar();
-        lv_bar_set_value(bar_dots_session, s_pct, LV_ANIM_ON);
-        lv_obj_set_style_bg_color(bar_dots_session, pct_color(data->session_pct, idx), LV_PART_INDICATOR);
+    const int shown = total <= CREDIT_SEGMENTS_MAX ? total : CREDIT_SEGMENTS_MAX - 1;
+    for (int i = 0; i < CREDIT_SEGMENTS_MAX; i++) {
+        lv_obj_t* c = credit_segments[i];
+        set_shown(c, i < shown);
+        const bool lit = (i < held);
+        lv_obj_set_style_bg_color(c, th.accent, 0);
+        lv_obj_set_style_bg_opa(c, lit ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_color(c, th.accent, 0);
+        lv_obj_set_style_border_opa(c, LV_OPA_70, 0);
+        lv_obj_set_style_border_width(c, lit ? 0 : 1, 0);
     }
+    if (total > CREDIT_SEGMENTS_MAX) {
+        lv_label_set_text_fmt(lbl_credit_more, "+%d", total - shown);
+        lv_obj_set_pos(lbl_credit_more, MX(MOD_PANEL_PAD + shown * MOD_SEG_PITCH),
+                       text_top(L.mod_label_font, MOD_SEG_Y + MOD_SEG_H / 2 + 5) - MY(MOD_PANEL_Y));
+        set_shown(lbl_credit_more, true);
+    } else {
+        set_shown(lbl_credit_more, false);
+    }
+
+    char meta[48], exp[32];
+    if (held > 0) {
+        format_credit_expiry(data->reset_credits_exp_mins, exp, sizeof(exp));
+        if (used > 0) snprintf(meta, sizeof(meta), "%d used \xC2\xB7 %s", used, exp);
+        else          snprintf(meta, sizeof(meta), "%s", exp);
+    } else if (used > 0) {
+        snprintf(meta, sizeof(meta), "%d used", used);
+    } else {
+        snprintf(meta, sizeof(meta), "None available");
+    }
+    lv_label_set_text(lbl_credit_meta, meta);
+}
+
+// Render the visible view into the module. The main figure is the weekly
+// window (the scoped limit on the Fable view, the spending on enterprise
+// accounts); the lower module is the credit panel, the 5-hour block, the
+// Fable grid, or the remaining line.
+static void render_module(int idx, const UsageData* data, const ProviderTheme& th) {
+    const bool fable = (idx == UI_VIEW_FABLE);
+    const bool ent   = data->enterprise && !fable;
+    const char* label = "WEEKLY USAGE";
+    const char* used_word = "used";
+    bool  known = true;
+    float main_pct = 0;
+    int   reset_mins = -1;
+    if (fable)                 { main_pct = data->third_pct;   reset_mins = data->third_reset_mins; }
+    else if (ent)              { main_pct = data->session_pct; label = "MONTHLY SPENDING"; used_word = "of budget"; }
+    else if (data->has_weekly) { main_pct = data->weekly_pct;  reset_mins = data->weekly_reset_mins; }
+    else if (data->has_session){ main_pct = data->session_pct; reset_mins = data->session_reset_mins; label = "CURRENT \xC2\xB7 5H"; }
+    else                       { known = false; }
+
+    lv_label_set_text(lbl_mod_label, label);
+    lv_label_set_text(lbl_mod_used, used_word);
+    place_text_right(lbl_mod_used, 448, MOD_USED_BASE);
+    const int main_i = pct_round(main_pct);
+    if (known) lv_label_set_text_fmt(lbl_mod_value, "%d", main_i);
+    else       lv_label_set_text(lbl_mod_value, "\xE2\x80\x94");
+    set_shown(lbl_mod_sign, known);
+    const int sign_x = MX(MOD_VALUE_X) + label_w(lbl_mod_value) + MX(MOD_SIGN_GAP);
+    lv_obj_set_pos(lbl_mod_sign, sign_x, text_top(L.mod_sign_font, MOD_SIGN_BASE));
+    // The label follows the figure on the "used" baseline (L15). "used" is
+    // dropped only when a long label ("MONTHLY SPENDING" at 100 %) would
+    // run into it.
+    const int label_x = sign_x + (known ? label_w(lbl_mod_sign) : 0) + MX(MOD_LABEL_GAP);
+    lv_obj_set_pos(lbl_mod_label, label_x, text_top(L.mod_label_font, MOD_USED_BASE));
+    const bool used_fits = label_x + label_w(lbl_mod_label) + MX(MOD_USED_MIN_GAP) <= MX(448) - label_w(lbl_mod_used);
+    lv_bar_set_value(bar_mod, known ? main_i : 0, LV_ANIM_ON);
+    lv_obj_set_style_bg_color(bar_mod, th.accent, LV_PART_INDICATOR);
+
+    char buf[48];
+    if (ent && data->reset_date[0]) snprintf(buf, sizeof(buf), "Resets %s", data->reset_date);
+    else if (known)                 format_reset_time(reset_mins, buf, sizeof(buf));
+    else                            snprintf(buf, sizeof(buf), "Loading usage");
+    lv_label_set_text(lbl_mod_reset, buf);   // placed below, once the lower module is known
+
+    // Lower module
+    enum { LOW_CREDITS, LOW_WINDOW, LOW_GRID, LOW_REMAINING } low;
+    if (fable)                                             low = LOW_GRID;
+    else if (ent)                                          low = LOW_WINDOW;
+    else if (data->has_credits)                            low = LOW_CREDITS;
+    else if (data->has_session && data->has_weekly)        low = LOW_WINDOW;
+    else                                                   low = LOW_REMAINING;
+
+    set_shown(credit_panel, low == LOW_CREDITS);
+    set_shown(lbl_mod_remaining, low == LOW_REMAINING);
+    set_shown(lbl_mod_remaining_word, low == LOW_REMAINING);
+    set_shown(module_divider, low == LOW_REMAINING || low == LOW_WINDOW);
+    set_shown(lbl_win_label, low == LOW_WINDOW);
+    set_shown(lbl_win_pct, low == LOW_WINDOW);
+    set_shown(bar_win, low == LOW_WINDOW);
+    set_shown(lbl_win_reset, low == LOW_WINDOW);
+    set_shown(grid_canvas, low == LOW_GRID);
+    // The Fable grid stands in for the track, so the reset line moves up
+    // under the figure row and the grid takes the rest down to the footer.
+    set_shown(bar_mod, low != LOW_GRID);
+    set_shown(lbl_mod_used, low != LOW_GRID && used_fits);
+    place_text(lbl_mod_reset, 32, low == LOW_GRID ? MOD_GRID_RESET_BASE : MOD_RESET_BASE);
+
+    switch (low) {
+    case LOW_CREDITS:
+        render_credits(data, th);
+        break;
+    case LOW_WINDOW: {
+        const float pct = ent ? (float)data->time_pct : data->session_pct;
+        const int pct_i = pct_round(pct);
+        lv_label_set_text(lbl_win_label, ent ? "BILLING PERIOD" : "CURRENT \xC2\xB7 5H");
+        lv_label_set_text_fmt(lbl_win_pct, "%d%%", pct_i);
+        lv_obj_set_style_text_color(lbl_win_pct, th.accent, 0);
+        place_text_right(lbl_win_pct, 448, MOD_WIN_PCT_BASE);
+        lv_bar_set_value(bar_win, pct_i, LV_ANIM_ON);
+        lv_obj_set_style_bg_color(bar_win, th.accent, LV_PART_INDICATOR);
+        if (ent) {
+            // Pace: spending against the elapsed share of the billing period.
+            const char* pace = "Under pace";
+            lv_color_t  color = th.bar_ok;
+            if (data->session_pct > (float)data->time_pct + 15.0f)      { pace = "Over pace"; color = th.bar_danger; }
+            else if (data->session_pct > (float)data->time_pct - 15.0f) { pace = "On pace";   color = th.bar_warn; }
+            lv_label_set_text(lbl_win_reset, pace);
+            lv_obj_set_style_text_color(lbl_win_reset, color, 0);
+        } else {
+            format_reset_time(data->session_reset_mins, buf, sizeof(buf));
+            lv_label_set_text(lbl_win_reset, buf);
+            lv_obj_set_style_text_color(lbl_win_reset, COL_DIM, 0);
+        }
+        break;
+    }
+    case LOW_GRID: {
+        const int glyphs = (main_i * 2 + 5) / 10;   // one Clawd per 5 %, rounded (0–20)
+        if (glyphs != grid_filled) draw_clawds(glyphs, th);
+        break;
+    }
+    case LOW_REMAINING:
+        lv_label_set_text_fmt(lbl_mod_remaining, "%d%%", known ? 100 - main_i : 0);
+        lv_obj_set_style_text_color(lbl_mod_remaining, th.accent, 0);
+        lv_obj_set_pos(lbl_mod_remaining_word, MX(32) + label_w(lbl_mod_remaining) + MX(MOD_REMAIN_GAP),
+                       text_top(L.mod_reset_font, MOD_REMAIN_BASE - 1));
+        break;
+    }
+    // The mascot's full-size lurk peeks in over the lower area: only the
+    // remaining line leaves it room.
+    splash_mascot_set_trips(low == LOW_REMAINING);
+}
+
+// Dense fallback (C6): the three bars, every fill in the accent.
+static void render_dense(const UsageData* data, const ProviderTheme& th) {
+    char buf[48];
+    const int s_pct = pct_round(data->session_pct);
+    lv_label_set_text(lbl_session_label, "Current");
+    lv_label_set_text_fmt(lbl_session_pct, "%d%%", s_pct);
+    format_reset_time(data->session_reset_mins, buf, sizeof(buf));
+    lv_label_set_text(lbl_session_reset, buf);
+    lv_bar_set_value(bar_session, s_pct, LV_ANIM_ON);
+    lv_obj_set_style_bg_color(bar_session, th.accent, LV_PART_INDICATOR);
+
+    const int w_pct = pct_round(data->weekly_pct);
+    lv_label_set_text(lbl_weekly_label, "Weekly");
+    lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", w_pct);
+    lv_bar_set_value(bar_weekly, w_pct, LV_ANIM_ON);
+    lv_obj_set_style_bg_color(bar_weekly, th.accent, LV_PART_INDICATOR);
+    format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
+    lv_label_set_text(lbl_weekly_reset, buf);
+
+    const int t_pct = pct_round(data->third_pct);
+    lv_label_set_text(lbl_third_label, data->third_label[0] ? data->third_label : "Fable");
+    lv_obj_align(lbl_third_label, LV_ALIGN_TOP_RIGHT, 0, 1);
+    lv_label_set_text_fmt(lbl_third_pct, "%d%%", t_pct);
+    lv_bar_set_value(bar_third, t_pct, LV_ANIM_ON);
+    lv_obj_set_style_bg_color(bar_third, th.accent, LV_PART_INDICATOR);
+    format_reset_time(data->third_reset_mins, buf, sizeof(buf));
+    lv_label_set_text(lbl_third_reset, buf);
+    splash_mascot_set_trips(false);
 }
 
 // ---- Carousel ----
@@ -1345,7 +2018,7 @@ void ui_update_slot(int idx, const UsageData* data) {
     }
 }
 
-// Render one view's data into the panels and make it the visible view.
+// Render one view's data and make it the visible view.
 static void show_view(int idx) {
     if (idx == UI_VIEW_FABLE && !fable_available()) idx = PROVIDER_CLAUDE;   // the limit went away
     // Logged only on a change; tools/test/shell/test_sim_sticky_view.sh reads it.
@@ -1356,98 +2029,15 @@ static void show_view(int idx) {
     refresh_title();
     splash_mascot_set_provider(prov);   // corner mascot follows the visible provider
 
-    // Everything colored on this screen follows the provider's palette.
+    // Everything accented on this screen follows the provider's palette.
     const ProviderTheme th = provider_theme(prov);
-    lv_obj_set_style_text_color(lbl_anim, th.status_text, 0);
+    lv_obj_set_style_bg_color(footer_dot, th.accent, 0);
+    if (!alert_active) lv_obj_set_style_text_color(lbl_anim, th.status_text, 0);
 
     const usage_layout_t mode = layout_for(idx, data);
     if (layout_mode != mode) apply_usage_layout(mode);
-    if (mode == LAYOUT_DOTS) {
-        if (idx == UI_VIEW_FABLE) render_fable(data);
-        else                      render_dots(idx, data);
-        return;
-    }
-    const bool layout_dense = (mode == LAYOUT_DENSE);
-
-    int s_pct = (int)(data->session_pct + 0.5f);
-
-    if (data->enterprise) {
-        // Spending box: big number-only label + small "%" symbol + desc + pace
-        lv_obj_set_style_text_font(lbl_session_pct, layout_dense ? L.dense_pct_font : L.ent_pct_font, 0);
-        lv_label_set_text(lbl_session_label, "Spending");
-        lv_obj_add_flag(lbl_session_reset, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(lbl_spending_desc,   LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(lbl_spending_status,   LV_OBJ_FLAG_HIDDEN);
-        if (panel_weekly) lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_set_style_text_font(lbl_session_pct, layout_dense ? L.dense_pct_font : L.pct_font, 0);
-        lv_label_set_text(lbl_session_label, "Current");
-        lv_label_set_text(lbl_weekly_label, "Weekly");   // undo the enterprise "Period" pill
-        lv_obj_clear_flag(lbl_session_reset, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(lbl_spending_desc,   LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(lbl_spending_status, LV_OBJ_FLAG_HIDDEN);
-        if (panel_weekly) lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    char buf[48];
-
-    // Pace vars used in both enterprise blocks below. Enterprise accounts are
-    // Claude-only, so the recolor hex strings match the Claude tiers.
-    const char* pace_text = "Under pace";
-    lv_color_t  pace_color = th.bar_ok;
-    const char* pace_hex   = "788c5d";   // matches THEME_GREEN
-    if (data->session_pct > (float)data->time_pct + 15.0f) {
-        pace_text = "Over pace";  pace_color = th.bar_danger; pace_hex = "c0392b";
-    } else if (data->session_pct > (float)data->time_pct - 15.0f) {
-        pace_text = "On pace";    pace_color = th.bar_warn;   pace_hex = "d97757";
-    }
-
-    if (data->enterprise) {
-        lv_label_set_text_fmt(lbl_session_pct, "%d", s_pct);
-        lv_obj_align_to(lbl_session_pct_sym, lbl_session_pct,
-                        LV_ALIGN_OUT_RIGHT_TOP, 4, 12);
-    } else {
-        lv_label_set_text_fmt(lbl_session_pct, "%d%%", s_pct);
-        format_reset_time(data->session_reset_mins, buf, sizeof(buf));
-        lv_label_set_text(lbl_session_reset, buf);
-    }
-
-    lv_bar_set_value(bar_session, s_pct, LV_ANIM_ON);
-    lv_obj_set_style_bg_color(bar_session, pct_color(data->session_pct, idx), LV_PART_INDICATOR);
-
-    if (data->enterprise) {
-        // Period box: time % + dynamic pace color + "Resets <date>" label
-        lv_label_set_text(lbl_weekly_label, "Period");
-        lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", data->time_pct);
-        lv_bar_set_value(bar_weekly, data->time_pct, LV_ANIM_ON);
-        lv_color_t bar_pace = (data->session_pct <= (float)data->time_pct) ? th.bar_ok :
-                              (data->session_pct <= (float)data->time_pct + 15.0f) ? th.bar_warn :
-                              th.bar_danger;
-        lv_obj_set_style_bg_color(bar_weekly, bar_pace, LV_PART_INDICATOR);
-        snprintf(buf, sizeof(buf), "#%s %s# - #faf9f5 Resets %s#",
-                 pace_hex, pace_text, data->reset_date);
-        lv_label_set_text(lbl_weekly_reset, buf);
-    } else {
-        int w_pct = (int)(data->weekly_pct + 0.5f);
-        lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", w_pct);
-        lv_bar_set_value(bar_weekly, w_pct, LV_ANIM_ON);
-        lv_obj_set_style_bg_color(bar_weekly, pct_color(data->weekly_pct, idx), LV_PART_INDICATOR);
-        format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
-        lv_label_set_text(lbl_weekly_reset, buf);
-    }
-
-    if (layout_dense) {
-        int t_pct = (int)(data->third_pct + 0.5f);
-        lv_label_set_text(lbl_third_label, data->third_label[0] ? data->third_label : "Fable");
-        lv_obj_align(lbl_third_label, LV_ALIGN_TOP_RIGHT, 0, 1);
-        lv_label_set_text_fmt(lbl_third_pct, "%d%%", t_pct);
-        lv_bar_set_value(bar_third, t_pct, LV_ANIM_ON);
-        lv_obj_set_style_bg_color(bar_third, pct_color(data->third_pct, idx), LV_PART_INDICATOR);
-        format_reset_time(data->third_reset_mins, buf, sizeof(buf));
-        lv_label_set_text(lbl_third_reset, buf);
-    }
+    if (mode == LAYOUT_DENSE) render_dense(data, th);
+    else                      render_module(idx, data, th);
 }
 
 // Pick the usage-view sub-screen: pairing hint (BLE down), the idle "Zzz" screen
@@ -1474,19 +2064,21 @@ static void update_view_state(void) {
 }
 
 void ui_tick_anim(void) {
+    focus_tick_ui();   // a running block counts down on every screen
     if (current_screen != SCREEN_USAGE) return;
     update_view_state();
     if (view_state == 1) splash_mini_tick();   // animate the sleeping creature on the idle screen
 
     uint32_t now = lv_tick_get();
 
-    // Title clock: once the daemon has sent wall-clock time, replace "Usage" with
-    // the live time, advanced locally so it ticks every minute between payloads.
+    // Header clock: once the daemon has sent wall-clock time, the clock rides
+    // left of the provider label, advanced locally so it ticks every minute
+    // between payloads.
     if (clock_base_epoch > 0) {
         time_t cur = (time_t)(clock_base_epoch + (now - clock_base_ms) / 1000);
         struct tm tmv;
         gmtime_r(&cur, &tmv);   // epoch is already local wall-clock → gmtime keeps it as-is
-        if (tmv.tm_min != clock_last_min) {   // only rewrite the title when the minute changes
+        if (tmv.tm_min != clock_last_min) {   // only rewrite the clock when the minute changes
             clock_last_min = tmv.tm_min;
             char tbuf[12];
             if (clock_fmt == 12) {
@@ -1497,8 +2089,8 @@ void ui_tick_anim(void) {
             } else {
                 snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tmv.tm_hour, tmv.tm_min);
             }
-            lv_label_set_text(lbl_title, tbuf);
-            layout_title();   // the clock width changed → re-center clock + provider pill
+            lv_label_set_text(lbl_clock, tbuf);
+            layout_title();   // the clock width changed → re-align it against the provider label
         }
     }
 
@@ -1509,13 +2101,7 @@ void ui_tick_anim(void) {
         anim_msg_start = now;
     }
 
-    if (now - anim_last_ms < spinner_ms[anim_spinner_idx]) return;
-    anim_last_ms = now;
-    anim_phase = (anim_phase + 1) % SPINNER_PHASES;
-    anim_spinner_idx = (anim_phase < SPINNER_COUNT) ? anim_phase
-                                                    : (SPINNER_PHASES - anim_phase);
-
-    // Status text by priority. Whimsical messages only when connected & settled.
+    // Status verb by priority. Whimsical verbs only when connected & settled.
     const char* text;
     if (!s_ble_connected) {
         text = "Waiting";              // advertising / waiting for a host connection
@@ -1526,12 +2112,7 @@ void ui_tick_anim(void) {
     } else {
         text = anim_messages[anim_msg_idx];
     }
-
-    // All states share the whimsical style: "<glyph> <Title-case word>…"
-    static char buf[80];
-    snprintf(buf, sizeof(buf), "%s %s\xE2\x80\xA6",
-             spinner_frames[anim_spinner_idx], text);
-    lv_label_set_text(lbl_anim, buf);
+    if (strcmp(lv_label_get_text(lbl_anim), text) != 0) lv_label_set_text(lbl_anim, text);
 }
 
 static screen_t prev_non_splash_screen = SCREEN_USAGE;
@@ -1591,9 +2172,22 @@ bool ui_handle_swipe(lv_dir_t dir) {
         if (dir == LV_DIR_RIGHT)      { splash_prev(); return true; }
         return false;
     case SCREEN_USAGE:
+        // Single-button boards have no side button: a swipe down that starts
+        // in the header opens the app center instead of the splash.
+        if (dir == LV_DIR_BOTTOM && board_caps().button_count < 2 && apps_enabled_count() > 1) {
+            lv_indev_t* indev = lv_indev_active();
+            lv_point_t p = { 0, L.scr_h };
+            if (indev) lv_indev_get_point(indev, &p);
+            if (p.y < L.content_y) { ui_show_screen(SCREEN_APPS); return true; }
+        }
         if (vertical)                 { ui_show_screen(SCREEN_SPLASH); return true; }
         if (dir == LV_DIR_LEFT)       return ui_carousel_next();
         if (dir == LV_DIR_RIGHT)      return ui_carousel_prev();
+        return false;
+    case SCREEN_FOCUS:
+        // Setup: swipe up +5 / down −5. Running, paused and done ignore swipes.
+        if (dir == LV_DIR_TOP)        { if (focus_adjust(&focus, +1)) { render_focus(); return true; } return false; }
+        if (dir == LV_DIR_BOTTOM)     { if (focus_adjust(&focus, -1)) { render_focus(); return true; } return false; }
         return false;
     default:
         return false;
@@ -1602,6 +2196,8 @@ bool ui_handle_swipe(lv_dir_t dir) {
 
 void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
+    if (apps_container)  lv_obj_add_flag(apps_container, LV_OBJ_FLAG_HIDDEN);
+    if (focus_container) lv_obj_add_flag(focus_container, LV_OBJ_FLAG_HIDDEN);
     splash_hide();
     if (screen != SCREEN_SPLASH) {
         // Leaving the splash ends mascot mode and the parade: the next plain
@@ -1613,18 +2209,23 @@ void ui_show_screen(screen_t screen) {
     switch (screen) {
     case SCREEN_SPLASH:  splash_show(); break;
     case SCREEN_USAGE:   lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN); break;
+    case SCREEN_APPS:    layout_apps(); lv_obj_clear_flag(apps_container, LV_OBJ_FLAG_HIDDEN); break;
+    case SCREEN_FOCUS:   render_focus(); lv_obj_clear_flag(focus_container, LV_OBJ_FLAG_HIDDEN); break;
     default: break;
     }
 
-    splash_mascot_set_visible(screen != SCREEN_SPLASH);
+    // The corner mascot / still logo belong to the meter only.
+    splash_mascot_set_visible(screen == SCREEN_USAGE);
     if (logo_img) {
-        if (screen == SCREEN_SPLASH) lv_obj_add_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
-        else                          lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
+        if (screen == SCREEN_USAGE) lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
+        else                        lv_obj_add_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
     }
 
     if (screen != SCREEN_SPLASH) prev_non_splash_screen = screen;
+    if (screen == SCREEN_USAGE || screen == SCREEN_FOCUS) last_app_screen = screen;
     current_screen = screen;
     apply_battery_visibility();
+    apply_alert_overlay();
 }
 
 void ui_toggle_splash(void) {
@@ -1692,8 +2293,11 @@ void ui_show_alert(const char* message) {
     if (current_screen == SCREEN_SPLASH) ui_show_screen(SCREEN_USAGE);
     splash_mascot_attention(true);
     lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_width(lbl_anim, L.content_w);
+    lv_obj_set_width(lbl_anim, MX(448) - MX(MOD_FOOT_TEXT_X));
+    lv_obj_set_style_text_color(lbl_anim, provider_color(view_provider(visible_view)), 0);
     lv_label_set_text(lbl_anim, message);
+    if (lbl_overlay_alert) lv_label_set_text(lbl_overlay_alert, message);
+    apply_alert_overlay();
     lv_timer_reset(alert_timer);
     lv_timer_resume(alert_timer);
 }
@@ -1704,5 +2308,60 @@ void ui_hide_alert(void) {
     splash_mascot_attention(false);
     lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(lbl_anim, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_color(lbl_anim, provider_theme(view_provider(visible_view)).status_text, 0);
     lv_timer_pause(alert_timer);
+    apply_alert_overlay();
+}
+
+// ---- App center and Focus public API (H12) ----
+
+bool ui_apps_toggle(void) {
+    if (current_screen == SCREEN_APPS) {
+        ui_show_screen(apps_enabled(APP_FOCUS) || last_app_screen == SCREEN_USAGE ? last_app_screen : SCREEN_USAGE);
+        return true;
+    }
+    if (apps_enabled_count() < 2) return false;   // only Meter: nothing to pick from
+    ui_show_screen(SCREEN_APPS);
+    return true;
+}
+
+void ui_apps_refresh(void) {
+    layout_apps();
+    // Focus got disabled while it was up: back to the meter.
+    if (!apps_enabled(APP_FOCUS)) {
+        // A block that was still counting would otherwise ring the bell from
+        // an app the host just switched off.
+        if (focus_cancel(&focus)) Serial.println("focus: block cancelled (app disabled)");
+        if (current_screen == SCREEN_FOCUS || last_app_screen == SCREEN_FOCUS) {
+            last_app_screen = SCREEN_USAGE;
+            if (current_screen == SCREEN_FOCUS) ui_show_screen(SCREEN_USAGE);
+        }
+    }
+}
+
+bool ui_focus_running(void) {
+    return focus.phase == FOCUS_RUNNING;
+}
+
+bool ui_focus_pwr_press(void) {
+    if (current_screen != SCREEN_FOCUS) return false;
+    return focus_action();
+}
+
+bool ui_focus_command(const char* action) {
+    if (!action) return false;
+    bool ok = false;
+    if (strcmp(action, "start") == 0)       ok = focus_do_start();
+    else if (strcmp(action, "next") == 0)   { if (focus.phase != FOCUS_DONE) return false; focus_next_setup(); return true; }
+    else if (strcmp(action, "pause") == 0)  ok = focus_toggle_pause(&focus, lv_tick_get());
+    else if (strcmp(action, "cancel") == 0) ok = focus_cancel(&focus);
+    else if (strcmp(action, "plus") == 0)   ok = focus_adjust(&focus, +1);
+    else if (strcmp(action, "minus") == 0)  ok = focus_adjust(&focus, -1);
+    else if (strcmp(action, "finish") == 0) {
+        ok = focus_finish_now(&focus, clock_day_now());
+        if (ok) { focus_finished(); return true; }
+    }
+    else return false;
+    if (ok) render_focus();
+    return ok;
 }

@@ -49,3 +49,25 @@ size_t Preferences::putUChar(const char* key, uint8_t value) {
         }
     return 0;
 }
+
+// 32-bit values (Focus day counter) keep their own table so the uint8 one
+// stays untouched.
+static struct { char key[16]; uint32_t val; bool used; } store32[PREF_SLOTS];
+
+uint32_t Preferences::getUInt(const char* key, uint32_t def) {
+    for (auto& s : store32)
+        if (s.used && strcmp(s.key, key) == 0) return s.val;
+    return def;
+}
+size_t Preferences::putUInt(const char* key, uint32_t value) {
+    for (auto& s : store32)
+        if (s.used && strcmp(s.key, key) == 0) { s.val = value; return 4; }
+    for (auto& s : store32)
+        if (!s.used) {
+            s.used = true;
+            strncpy(s.key, key, sizeof(s.key) - 1);
+            s.val = value;
+            return 4;
+        }
+    return 0;
+}

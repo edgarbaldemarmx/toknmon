@@ -44,7 +44,7 @@ Connects to a host daemon over BLE; the daemon polls each enabled provider (Clau
 - Touch: **CST9220** via I2C (SDA=15, SCL=14, INT=11, addr=0x5A)
 - PMU: **AXP2101** on same I2C bus (addr=0x34) — battery, USB VBUS, PWR button IRQ
 - IMU: **QMI8658** on same I2C bus (addr=0x6B) — accelerometer for auto-rotation
-- Buttons: GPIO 0 (left → Space/voice-mode), GPIO 18 (right → Shift+Tab/mode-toggle), AXP PKEY (middle → cycle screens; on splash → cycle animations)
+- Buttons: GPIO 0 (left → Space/voice-mode), GPIO 18 (right → app center toggle since H12; `sidebtn hid` restores Shift+Tab/mode-toggle), AXP PKEY (middle → cycle screens / brightness; on splash → cycle animations; on Focus → start / start next)
 
 ### AMOLED-1.8 (newer port)
 **Two hardware revisions ship under this name; the firmware probes I2C at boot and picks drivers automatically (`board_rev()`):**
@@ -111,16 +111,18 @@ firmware/src/
   splash.{h,cpp}            — 20×20 pixel-art engine. CELL = min(W,H)/20, centered.
   ble.{h,cpp}               — NimBLE peripheral: custom data service + HID keyboard
   data.h                    — UsageData struct
+  apps.{h,cpp}              — enabled-apps list (NVS `apps`, payload `ap`) and side-button mode (`side_btn`)
+  focus_logic.{h,cpp}       — Focus block-timer state machine (pure C++, tested natively by tools/test/shell/test_focus_logic.sh)
   icons.h                   — icon arrays. Battery (5×) are RGB565A8 with alpha; rest are raw RGB565.
   logo.h                    — 80×80 RGB565 logo
-  font_*.c                  — pre-compiled LVGL 9 bitmap fonts (Tiempos 56/34, Styrene 48/28/24/20/16/14/12, Mono 32/18)
+  font_*.c                  — pre-compiled LVGL 9 bitmap fonts: Inter 80/60/29/26/22/20/17/16/15/13 (H14 design system, usage/Focus/app pages), Tiempos 56/34 and Styrene 48/28/24/20/16/14/12 (splash, pairing, legacy breakpoints), Mono 32/18 (spinner glyphs)
   splash_animations.h       — generated, do not hand-edit (official Clawd set)
   custom_animations.h       — generated, do not hand-edit (Codex/Kimi grids)
 daemon/                     — macOS host daemon (claude_usage_daemon.py + providers/), launchd template, tests
 tools/                      — asset converters, fetch_official_clawd.sh, tests (see tools/README.md)
 docs/porting/               — adding-a-board.md, hal-contract.md, capability-flags.md
 docs/simulator.md           — desktop simulator usage (controls, scenarios, env hooks)
-docs/odd/                   — design log: one feature document per milestone (H0–H10)
+docs/odd/                   — design log: one feature document per milestone (H0–H13)
 ```
 
 Each board folder contains: `board.h` (pins, I2C addresses, `BOARD_HAS_*` flags),
@@ -298,8 +300,8 @@ then a blink) whose only corner act is that blink; their small splash acts
 stay on the splash, and `splash_step()` skips `*.icon` entries when it walks
 the catalog. `ui.cpp` calls `splash_mascot_set_provider()` when the
 carousel changes view, and `splash_mascot_set_trips(false)` unless the
-two-bar layout is up, because the full-size lurk peeks in over the third
-panel or the dot grid; Codex, Kimi and Grok have no walk gait, so they only
+two-bar layout is up, because the full-size lurk peeks in over the lower
+module (credit panel, 5h block or Fable grid); Codex, Kimi and Grok have no walk gait, so they only
 ever act in place. The corner buffer is sized
 from the largest frame across all specs at create time and `mas_render()`
 refuses (and logs once) any frame that would not fit.
@@ -314,11 +316,26 @@ Claude, Fable, Codex, Kimi, Grok; `UI_VIEW_FABLE = PROVIDER_COUNT` in
 stale or reports `ok:false` stays on screen with its last values. At boot,
 until the picked view has data, the first view with data stands in. The
 Fable view is Claude's model-scoped weekly limit (`f`/`fr`, label `fl`)
-drawn by `draw_clawds()` as a 10×10 grid of 12×8-cell Clawd glyphs written
-straight into the dot canvas buffer; it exists only while Claude's payload
-carries the limit and the board has the dot canvas, otherwise Claude keeps
-the dense three-bar layout (C6). `SIM_SLOT=0-4` seeds the pick in the
-simulator.
+drawn by `draw_clawds()` as a 5×4 grid of 12×8-cell Clawd glyphs at scale 4
+(one glyph per 5 %, H14) written straight into the canvas buffer; it exists
+only while Claude's payload carries the limit and the board has the canvas,
+otherwise Claude keeps the dense three-bar layout (C6). `SIM_SLOT=0-4` seeds
+the pick in the simulator.
+
+### Design system (H14)
+
+Usage pages, the app center and Focus follow the user's design package
+(`docs/odd/toknmon-h14-ui-redesign.md`, L9–L17): tokens in `theme.h`
+(`UI_BG 0x0B0F14`, `UI_SURFACE`, `UI_DIVIDER`, `UI_TRACK`, `UI_TEXT`,
+`UI_MUTED`; accents Claude terracotta, Codex monochrome, Kimi pastel blue,
+Grok silver, Focus amber), Inter faces (`docs/fonts.md`), and one usage
+module in `ui.cpp` (`MOD_*` constants in 480-px design coordinates scaled by
+`L.sx/L.sy`, text placed by baseline through `text_top()`): header (title,
+corner mascot, clock, provider label, battery, rule), figure row (80 px value,
+`%`, inline `WEEKLY USAGE`, `used`), 22 px bar, reset line, then the credit
+panel (Codex), the `CURRENT · 5H` block (Claude, Kimi), the remaining line
+(Grok) or the Clawd grid (Fable), and a footer dot + status verb. The dot
+grids of H5/H10 are gone; the splash keeps pure black.
 
 ### Mascot mode and parade (H6)
 

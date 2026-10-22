@@ -7,7 +7,7 @@
 ![Built with PlatformIO](https://img.shields.io/badge/built%20with-PlatformIO-orange)
 
 <p align="center">
-  <img src="docs/media/screens/hw-claude.png" width="360" alt="ToknMon showing Claude Code usage: Current and Weekly bars on the Waveshare 2.16 AMOLED">
+  <img src="docs/media/screens/hw-claude.png" width="360" alt="ToknMon showing Claude Code usage on the Waveshare 2.16 AMOLED: weekly bar, 5-hour block and the Clawd mascot in the header">
 </p>
 
 **ToknMon** is a desk-side usage meter for AI coding assistants. A pocket-size
@@ -47,11 +47,13 @@ requests are welcome, support is best-effort.
 | | |
 | --- | --- |
 | <img src="docs/media/screens/claude-usage.png" width="240" alt="Claude usage view with Current and Weekly bars"> | **Four providers, one carousel.** Claude Code (5-hour session and weekly bars, plus the model-scoped **Fable** weekly window on its own page of small Clawds when your plan has one), Codex CLI, Kimi Code and Grok Build CLI each get a slot. Tap or swipe to page; it stays on the provider you picked, even after a reboot. Paging skips slots without fresh data. |
-| <img src="docs/media/screens/hw-grok.png" width="240" alt="Grok weekly dot grid at 5 percent with its corner icon on the real panel"> | **A screen per provider.** Codex shows a 10×10 dot grid filling to the weekly percentage (plus a compact 5h bar when the plan has one); Grok shows its weekly credit window on a silver dot grid; Kimi shows 5h and weekly bars in blue; Claude keeps its bars in clay. Palettes, bar tiers and status lines never bleed between providers. |
-| <img src="docs/media/screens/mascot-codex.png" width="240" alt="Mascot mode pinned to Codex"> | **Mascots and mascot mode.** Clawd for Claude (Anthropic's official set), original three-dots, crescent-moon and Grokbot-style ball characters for Codex, Kimi and Grok, each with idle, acts, a mountain-bike ride and two full-screen scenes. Long-press the meter to watch a provider's set full-size. |
+| <img src="docs/media/screens/hw-codex.png" width="240" alt="Codex page on the real panel: weekly bar, reset-credit panel and the Bsod mascot in the header"> | **A screen per provider, one design system.** Every page shares the same module (H14): title and mascot in the header, the weekly figure in large type, a full-width usage bar, the reset time and a footer with a status dot. Codex adds a **Reset credits** panel when your account has them (held, used in the last 30 days, next expiry); Claude and Kimi add a `CURRENT · 5H` block; Grok shows its weekly credit window in silver; Fable shows Claude's model-scoped weekly window as a 5×4 grid of Clawds, one per 5 %. |
+| <img src="docs/media/screens/hw-codex-pet-rocky.png" width="240" alt="Rocky, one of the Codex pets, full-size on the real panel"> | **Codex pets.** The eight ChatGPT pets (Bsod, Codex, Dewey, Fireball, Null Signal, Rocky, Seedy, Stacky) ride along in Codex's full-screen set: idle loop, wave, jump and a happy hop. Tap the splash to cycle them. Converted from the sprite sheets with `tools/convert_pet_spritesheet.py` (see `NOTICE.md`). |
+| <img src="docs/media/screens/mascot-codex.png" width="240" alt="Mascot mode pinned to Codex"> | **Mascots and mascot mode.** Clawd for Claude (Anthropic's official set), the Bsod pet for Codex, original crescent-moon and Grokbot-style ball characters for Kimi and Grok, each with idle, acts, a mountain-bike ride and two full-screen scenes. Long-press the meter to watch a provider's set full-size. |
 | <img src="docs/media/screens/parade.png" width="240" alt="Idle parade with the Codex mascot on stage"> | **The parade.** The device rotates every live provider's full-size mascot every 20 s, until you swipe back. It never starts on its own (serial `parade on`). |
 | <img src="docs/media/screens/scene-kimi-night.png" width="240" alt="Kimi night scene"> | **Draw your own.** Animations are plain text grids compiled by a small Node tool. The Codex and Kimi scenes were authored by an AI agent from a two-sentence brief. |
-| <img src="docs/media/screens/splash-claude.png" width="240" alt="Default Clawd splash"> | **Quiet by design.** No cloud, no accounts of its own: the daemon reads the tokens your CLIs already have (Claude Code, Kimi) or local logs (Codex), polls once a minute with no token spend, and pushes ~150 bytes per provider over BLE. The side buttons double as Bluetooth keyboard keys for Claude Code (Space, Shift+Tab). |
+| <img src="docs/media/screens/splash-claude.png" width="240" alt="Default Clawd splash"> | **Quiet by design.** No cloud, no accounts of its own: the daemon reads the tokens your CLIs already have (Claude Code, Codex, Kimi, Grok) or local logs, polls once a minute with no token spend, and pushes ~150 bytes per provider over BLE. The BOOT button doubles as a Bluetooth keyboard key for Claude Code (Space). |
+| <img src="docs/media/screens/menubar-app.png" width="240" alt="Preview of the ToknMon menu-bar app menu, rendered from a live status file"> | **A menu-bar app on the Mac.** `ToknMon.app` shows each provider's last numbers, whether the board is connected, and edits the daemon's settings in place: rename the board over BLE, turn the Focus timer on or off, pick providers, sound and clock. The installer builds it with py2app and starts it at login; `--no-gui` skips it ([docs/gui.md](docs/gui.md)). |
 
 Also: configurable Bluetooth name per board (several on one desk), optional
 clock and session-reset chime, Claude Code attention alerts (the mascot waves
@@ -82,7 +84,7 @@ On the device the scenes fill the 480×480 panel:
 | Board | PlatformIO env | Status |
 | --- | --- | --- |
 | [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) — 480×480 CO5300 AMOLED, CST9220 touch, AXP2101 PMU, QMI8658 IMU, ES8311 codec | `waveshare_amoled_216` | ✅ **verified** — the board ToknMon is developed and tested on |
-| Waveshare ESP32-S3-Touch-AMOLED-1.8, ESP32-S3-Touch-AMOLED-2.06, ESP32-C6-Touch-AMOLED-2.16 / 1.8, ESP32-S3-Touch-LCD-1.54, ESP32-S3-Touch-LCD-4 | `waveshare_amoled_18`, `waveshare_amoled_206`, `waveshare_amoled_216_c6`, `waveshare_amoled_18_c6`, `waveshare_lcd_154`, `waveshare_lcd_4` | ⚠️ **inherited from Clawdmeter, untested with ToknMon.** They compile in CI, but nobody has run the multi-provider UI, mascots or gestures on them since the fork. The C6 boards have no PSRAM: no corner mascots, no dot grid, no `screenshot` command. Reports welcome. |
+| Waveshare ESP32-S3-Touch-AMOLED-1.8, ESP32-S3-Touch-AMOLED-2.06, ESP32-C6-Touch-AMOLED-2.16 / 1.8, ESP32-S3-Touch-LCD-1.54, ESP32-S3-Touch-LCD-4 | `waveshare_amoled_18`, `waveshare_amoled_206`, `waveshare_amoled_216_c6`, `waveshare_amoled_18_c6`, `waveshare_lcd_154`, `waveshare_lcd_4` | ⚠️ **inherited from Clawdmeter, untested with ToknMon.** They compile in CI, but nobody has run the multi-provider UI, mascots or gestures on them since the fork. The C6 boards have no PSRAM: no corner mascots, no Fable grid, no `screenshot` command. Reports welcome. |
 
 **Host**: macOS only. The Linux and Windows daemons in `daemon/` are inherited,
 Claude-only and untested with ToknMon.
@@ -155,6 +157,7 @@ PlatformIO env; shared code never changes. See
    ```bash
    ./install-mac.sh                                                              # interactive
    # ./install-mac.sh --yes --providers auto --device-name "<Your name>" --no-prime  # non-interactive
+   # add --apps meter to skip the Focus timer, --no-gui to skip the menu-bar app
    ```
 
    It creates `daemon/.venv`, writes `~/.config/toknmon/config`, installs the
@@ -187,7 +190,7 @@ The board boots on the **splash** (animations) and swipes to the **meter**
 | **PWR button** (middle) | next animation | cycle brightness |
 | **PWR held ~3 s, then released** | pairing mode (clears the bond, advertises again) | same |
 | **BOOT button** (left) | hold: **Space** over Bluetooth HID (Claude Code push-to-talk) | same |
-| **Secondary button** (right) | **Shift+Tab** over Bluetooth HID (Claude Code mode toggle) | same |
+| **Side button** (right) | opens the **app center** (Meter, Focus); press again to go back. `sidebtn hid` over serial restores the old **Shift+Tab** HID key | same |
 
 - **Carousel**: the meter stays on the provider you picked (tap or swipe to
   page; the pick survives a reboot); a slot is live for 90 s after its last
@@ -199,6 +202,23 @@ The board boots on the **splash** (animations) and swipes to the **meter**
 - **Parade**: every live provider's mascot gets 20 s on stage in turn; a
   vertical swipe ends it. It never starts on its own: the meter stays up
   until you touch it (serial `parade on` starts it).
+- **App center and Focus** (H12): the side button shows one tile per enabled
+  app. **Focus** is a block timer for deep work: pick a block (25 min by
+  default, 5 to 120 in 5-minute steps: the **−5 / +5** cards, the screen
+  halves or a vertical swipe), press **Start focus** (or PWR), and the amber
+  ring empties while the countdown runs; **Pause** / **Resume** on the button
+  or PWR, a long press on the timer cancels. At zero the bell rings three
+  times, the screen says **COMPLETE** and **Start next** returns to setup
+  with the same length for another explicit start. The daily counter
+  survives reboots and resets when the daemon's clock says the day changed.
+  The host decides which apps the board offers (`apps = meter` hides Focus
+  and the app center; the menu-bar app toggles it). Details:
+  [`docs/apps.md`](docs/apps.md).
+
+| <img src="docs/media/screens/hw-apps.png" width="220" alt="App center with the Meter and Focus tiles on the real panel"> | <img src="docs/media/screens/hw-focus-setup.png" width="220" alt="Focus setup: 25:00 inside the ring, minus and plus cards, Start focus"> | <img src="docs/media/screens/hw-focus-running.png" width="220" alt="Focus running: countdown inside the amber ring, Pause"> | <img src="docs/media/screens/hw-focus-done.png" width="220" alt="Focus complete: 00:00, empty ring, Start next"> |
+| --- | --- | --- | --- |
+| app center | Focus: setup | Focus: running | Focus: complete |
+
 - **Attention alerts**: with the Claude Code hooks installed
   ([how](docs/install-macos.md#attention-alerts-from-claude-code-optional)),
   Clawd walks on and waves when a session waits for you.
@@ -208,9 +228,9 @@ The board boots on the **splash** (animations) and swipes to the **meter**
 | Provider | Source | Screen |
 | --- | --- | --- |
 | **Claude Code** | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token — one request per poll, no token spend | Current (5h) and Weekly bars, and a **Fable** view (a grid of small Clawds) when the subscription reports a model-scoped window |
-| **Codex CLI** | the newest `rate_limits` entry in `~/.codex/sessions/**/rollout-*.jsonl` (last 7 days) — local files, no network | 10×10 dot grid for the weekly window, large percentage and reset time; compact 5h bar only when the plan has one |
+| **Codex CLI** | the newest `rate_limits` entry in `~/.codex/sessions/**/rollout-*.jsonl` (last 7 days) — local files; plus, once an hour, OpenAI's reset credits with the Codex CLI login (`codex_credits = off` disables it) | weekly usage bar, large percentage and reset time; a "Reset credits" panel when the account has reset credits (the 5h window, when a plan has one, yields to the panel) |
 | **Kimi Code** | `GET https://api.kimi.com/coding/v1/usages` with the token from `~/.kimi-code/credentials`; expired tokens are refreshed through `https://auth.kimi.com/api/oauth/token` and written back like the CLI does | 5h and weekly bars |
-| **Grok Build CLI** | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with the access token from `~/.grok/auth.json`; an expired token is refreshed through `https://auth.x.ai/oauth2/token` and written back like Grok does; when the call still fails, the newest billing line in `~/.grok/logs/unified.jsonl` if it is under 6 h old | 10×10 dot grid for the weekly credit window (Grok has no 5h window) |
+| **Grok Build CLI** | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with the access token from `~/.grok/auth.json`; an expired token is refreshed through `https://auth.x.ai/oauth2/token` and written back like Grok does; when the call still fails, the newest billing line in `~/.grok/logs/unified.jsonl` if it is under 6 h old | weekly credit bar in silver with the remaining percentage (Grok has no 5h window) |
 
 **Detection.** With `providers = auto` (the default) the daemon checks on every
 poll which providers are usable, locally and without network: a Claude Code

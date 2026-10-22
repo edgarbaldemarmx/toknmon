@@ -74,14 +74,14 @@ permission-priming run):
 
 What the installer does, in order (the banners it prints):
 
-1. `[1/6] Checking prerequisites`: `curl`, a Python interpreter (3.10+), and
+1. `[1/7] Checking prerequisites`: `curl`, a Python interpreter (3.10+), and
    the Claude Code OAuth token in the Keychain. The token check is silent
    when the token exists and prints a warning when it is missing.
-2. `[2/6] Creating Python virtualenv`: creates `daemon/.venv` and installs
+2. `[2/7] Creating Python virtualenv`: creates `daemon/.venv` and installs
    `daemon/requirements-macos.txt` (`bleak`, `httpx`, `pillow`, `pytest`).
-3. `[3/6] Rendering launchd plist`: renders `daemon/com.toknmon.daemon.plist`
+3. `[3/7] Rendering launchd plist`: renders `daemon/com.toknmon.daemon.plist`
    into `~/Library/LaunchAgents/com.toknmon.daemon.plist` (not loaded yet).
-4. `[4/6] Configuring the daemon`: first migrates a Clawdmeter-era setup if
+4. `[4/7] Configuring the daemon`: first migrates a Clawdmeter-era setup if
    one exists (copies `~/.config/claude-usage-monitor/{config,ble-address}`
    to `~/.config/toknmon/` only when the new files are absent; nothing is
    deleted; the `Migrated …` lines appear only when a legacy install is
@@ -104,18 +104,24 @@ What the installer does, in order (the banners it prints):
      value `flash-mac.sh` saved).
    - **Clock** (`off|auto|12|24`), **chime** on session reset and **beep** on
      attention alerts.
-5. `[5/6] Bluetooth permission check`: runs the daemon once in the foreground
+5. `[5/7] Bluetooth permission check`: runs the daemon once in the foreground
    so macOS shows its **Bluetooth permission** prompt for the right process
    (skip with `--no-prime`, then run the printed command once yourself; with
    `--yes` the run is bounded to a few seconds). Accept the prompt. If
    `blueutil` is installed, it is primed the same way (bounded to 20 s) so
    stale-bond recovery can use it.
-6. `[6/6] Loading launchd service`: retires the legacy
+6. `[6/7] Loading launchd service`: retires the legacy
    `com.user.claude-usage-daemon` agent if present (stops it and moves its
    plist to `~/.config/toknmon/legacy/`), then loads the agent with
    `launchctl bootstrap gui/$(id -u) <plist>` (after a `bootout` of any
    previous copy). On a system that refuses `bootstrap` the script falls back
    to `launchctl load -w` and says so.
+7. `[7/7] Menu-bar app`: builds `ToknMon.app` with py2app
+   (`tools/build_mac_app.sh`), copies it to `~/Applications/ToknMon.app`,
+   renders `daemon/com.toknmon.menubar.plist` into `~/Library/LaunchAgents/`
+   and starts it, so a ToknMon icon appears in the menu bar at every login.
+   See [gui.md](gui.md). `--no-gui` skips this step; a build failure is
+   reported and the daemon stays installed.
 
 Options (`./install-mac.sh --help`):
 
@@ -124,7 +130,9 @@ Options (`./install-mac.sh --help`):
 | `--yes`, `-y` | accept the default answer for every prompt; keep existing config values |
 | `--providers <list>` | `auto`, or a comma-separated subset of `claude,codex,kimi,grok`; an unknown name is an error |
 | `--device-name <name>` | the board's Bluetooth name (1–18 printable ASCII characters, no `#`) |
+| `--apps meter\|suite` | what the board offers: `suite` (default) is the meter plus the Focus timer behind the app center, `meter` hides them; stored as `apps` and pushed to the board |
 | `--no-prime` | skip the permission-priming foreground run |
+| `--no-gui` | do not build or start the menu-bar app |
 | `-h`, `--help` | usage |
 
 ### What gets installed where
@@ -136,6 +144,8 @@ Options (`./install-mac.sh --help`):
 | Configuration | `~/.config/toknmon/config` (re-read every poll, no restart needed) |
 | Cached board address | `~/.config/toknmon/ble-address` |
 | Logs | `~/Library/Logs/toknmon.out.log`, `~/Library/Logs/toknmon.err.log` |
+| Status for the menu-bar app | `~/.config/toknmon/status.json` (rewritten after every poll) and `state.json` (last config pushed to the board) |
+| Menu-bar app | `~/Applications/ToknMon.app`, agent `~/Library/LaunchAgents/com.toknmon.menubar.plist`, log `~/Library/Logs/toknmon-menubar.log` |
 | Retired Clawdmeter agent | `~/.config/toknmon/legacy/com.user.claude-usage-daemon.plist` (if one existed) |
 
 ## 5. Check that it works
@@ -160,8 +170,8 @@ daemon/.venv/bin/python daemon/claude_usage_daemon.py                  # run in 
 daemon/.venv/bin/python daemon/claude_usage_daemon.py --detect         # print which providers are detected on this Mac
 ```
 
-Re-running `./install-mac.sh` is safe: it reuses the venv, keeps your config
-and re-renders the agent.
+Re-running `./install-mac.sh` is safe: it reuses the venv, keeps your config,
+re-renders the agents and rebuilds the menu-bar app.
 
 ## Configuration file
 
@@ -209,6 +219,9 @@ Claude provider to be enabled. `beep = on` adds a sound.
 ## Uninstall
 
 ```bash
+launchctl bootout gui/$(id -u)/com.toknmon.menubar
+rm ~/Library/LaunchAgents/com.toknmon.menubar.plist
+rm -rf ~/Applications/ToknMon.app
 launchctl bootout gui/$(id -u)/com.toknmon.daemon
 rm ~/Library/LaunchAgents/com.toknmon.daemon.plist
 rm -rf ~/.config/toknmon ~/Library/Logs/toknmon.*.log

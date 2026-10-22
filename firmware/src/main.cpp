@@ -13,6 +13,7 @@
 #include "idle.h"
 #include "idle_cfg.h"
 #include "brightness.h"
+#include "apps.h"
 
 #include "hal/board_caps.h"
 #include "hal/display_hal.h"
@@ -114,7 +115,30 @@ enum parse_result_t {
     PARSE_OK,       // *out_idx names the slot that was filled
     PARSE_ERROR,    // malformed JSON → nack
     PARSE_IGNORED,  // well-formed but for an unknown provider → ack and skip
+    PARSE_CFG,      // {"p":"cfg", ...} config packet: applied, no slot touched
 };
+
+static void set_device_name(char* text);
+
+// Config packet (H12 S1.5): `ap` = comma list of enabled apps, `n` = new
+// device name. The daemon sends one only when a config value changes. It is
+// not a provider payload: no slot, no usage side effects.
+static void handle_cfg_packet(JsonDocument& doc) {
+    if (!doc["ap"].isNull()) {
+        const char* ap = doc["ap"] | "";
+        bool changed = apps_set_list(ap);
+        char list[32];
+        apps_list_string(list, sizeof(list));
+        Serial.printf("cfg: apps=%s%s\n", list, changed ? " (changed)" : "");
+        ui_apps_refresh();
+    }
+    if (!doc["n"].isNull()) {
+        char name[BLE_DEVICE_NAME_MAX_LEN + 8];
+        strlcpy(name, doc["n"] | "", sizeof(name));
+        Serial.printf("cfg: name \"%s\"\n", name);
+        set_device_name(name);   // validates; stores + restarts only when the name differs
+    }
+}
 
 // Parse a JSON line into the provider slot it names.
 static parse_result_t parse_json(const char* json, UsageData* slots_out, int* out_idx) {
@@ -126,6 +150,10 @@ static parse_result_t parse_json(const char* json, UsageData* slots_out, int* ou
     }
 
     const char* p = doc["p"] | "";
+    if (strcmp(p, "cfg") == 0) {
+        handle_cfg_packet(doc);
+        return PARSE_CFG;
+    }
     int idx = provider_index(p);
     if (idx < 0) {
         Serial.printf("JSON: unknown provider \"%s\" — packet ignored\n", p);
@@ -151,6 +179,12 @@ static parse_result_t parse_json(const char* json, UsageData* slots_out, int* ou
         out->session_pct == 0.0f && out->session_reset_mins == 0) {
         out->has_session = false;
     }
+    // Reset credits ("rc" held, "ru" used, "rm" minutes to the soonest
+    // expiry): same semantics as the windows, absent = none for this slot.
+    out->has_credits = !doc["rc"].isNull() || !doc["ru"].isNull();
+    out->reset_credits = doc["rc"] | 0;
+    out->reset_credits_used = doc["ru"] | 0;
+    out->reset_credits_exp_mins = doc["rm"] | -1;
     // Optional third bar: a model-scoped weekly limit ("f"/"fr"), labelled by
     // "fl" when the daemon sends one, "Fable" otherwise.
     out->has_third = !doc["f"].isNull();
@@ -284,6 +318,16 @@ static void set_device_name(char* text) {
     }
     Preferences prefs;
     prefs.begin(BLE_NAME_NVS_NAMESPACE, false);
+    // Idempotent: the daemon replays its config packet on every BLE link, so
+    // a name equal to the stored one must not store or restart (a restart
+    // would open a new link, replay the packet and loop forever).
+    char current[BLE_DEVICE_NAME_MAX_LEN + 8] = {0};
+    prefs.getString(BLE_NAME_NVS_KEY, current, sizeof(current));
+    if (strcmp(current, text) == 0) {
+        prefs.end();
+        Serial.printf("BLE: name unchanged (\"%s\")\n", text);
+        return;
+    }
     prefs.putString(BLE_NAME_NVS_KEY, text);
     prefs.end();
     Serial.printf("BLE: name set to \"%s\", restarting\n", text);
@@ -306,6 +350,8 @@ static void qa_reply(bool ok, const char* why) {
 
 static void cmd_screen(const char* arg) {
     if (strcmp(arg, "usage") == 0)       { ui_show_screen(SCREEN_USAGE);  qa_reply(true, NULL); }
+    else if (strcmp(arg, "apps") == 0)   { ui_show_screen(SCREEN_APPS);   qa_reply(true, NULL); }
+    else if (strcmp(arg, "focus") == 0)  { ui_show_screen(SCREEN_FOCUS);  qa_reply(true, NULL); }
     else if (strcmp(arg, "splash") == 0) { ui_show_mascot(-1);            qa_reply(true, NULL); }
     else if (strncmp(arg, "splash ", 7) == 0) {
         const char* prov = arg + 7;
@@ -319,7 +365,30 @@ static void cmd_screen(const char* arg) {
         }
         qa_reply(false, "unknown provider (claude|codex|kimi|grok)");
     }
-    else                                   qa_reply(false, "unknown screen (usage|splash [provider])");
+    else                                   qa_reply(false, "unknown screen (usage|apps|focus|splash [provider])");
+}
+
+// App center config (H12): `apps` prints the enabled list, `apps <list>`
+// stores it (meter always on, unknown names dropped); `sidebtn` prints the
+// side-button mode, `sidebtn apps|hid` sets it; `focus <action>` drives the
+// Focus timer like touch / PWR would (see ui_focus_command()).
+static void cmd_apps(const char* arg) {
+    if (arg) {
+        apps_set_list(arg);
+        ui_apps_refresh();
+    }
+    char list[32];
+    apps_list_string(list, sizeof(list));
+    Serial.printf("apps: %s\n", list);
+}
+
+static void cmd_sidebtn(const char* arg) {
+    if (arg && !apps_set_side_button(arg)) { qa_reply(false, "sidebtn apps|hid"); return; }
+    Serial.printf("sidebtn: %s\n", apps_side_button_mode());
+}
+
+static void cmd_focus(const char* arg) {
+    qa_reply(ui_focus_command(arg), "focus start|pause|cancel|next|finish|plus|minus (not applicable now)");
 }
 
 static void cmd_parade(const char* arg) {
@@ -370,6 +439,11 @@ static void check_serial_cmd() {
             else if (strncmp(cmd_buf, "parade ", 7) == 0) cmd_parade(cmd_buf + 7);
             else if (strncmp(cmd_buf, "splash ", 7) == 0) cmd_splash(cmd_buf + 7);
             else if (strncmp(cmd_buf, "swipe ", 6) == 0)  cmd_swipe(cmd_buf + 6);
+            else if (strcmp(cmd_buf, "apps") == 0)        cmd_apps(NULL);
+            else if (strncmp(cmd_buf, "apps ", 5) == 0)   cmd_apps(cmd_buf + 5);
+            else if (strcmp(cmd_buf, "sidebtn") == 0)     cmd_sidebtn(NULL);
+            else if (strncmp(cmd_buf, "sidebtn ", 8) == 0) cmd_sidebtn(cmd_buf + 8);
+            else if (strncmp(cmd_buf, "focus ", 6) == 0)  cmd_focus(cmd_buf + 6);
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;
@@ -482,6 +556,9 @@ static void pair_tick(void) {
 }
 
 void loop() {
+    // A running Focus block holds the panel awake (S1.4): count it as activity
+    // before the idle timer looks at the clock.
+    if (ui_focus_running()) idle_note_activity();
     idle_tick();
     lv_timer_handler();
     ui_tick_anim();
@@ -498,9 +575,10 @@ void loop() {
 
     // ---- Physical buttons ----
     //   PRIMARY   → HID Space  (Claude Code voice-mode PTT)
-    //   SECONDARY → HID Shift+Tab  (mode toggle; only if the board has one)
-    //   PWR       → on splash: cycle animations; on usage: cycle brightness;
-    //               hold ~3s + release: pairing mode
+    //   SECONDARY → app center ↔ last app (default), or HID Shift+Tab when
+    //               NVS side_btn = hid (only if the board has one)
+    //   PWR       → on splash: cycle animations; on Focus: mirrors the action button (start / pause / resume / next);
+    //               elsewhere: cycle brightness; hold ~3s + release: pairing mode
     // First press from sleep is consumed as a wake-only event by
     // idle_consume_wake_press(); the normal action fires from the second
     // press. Activity bookkeeping happens inside idle_consume_wake_press
@@ -526,11 +604,12 @@ void loop() {
             bool secondary_now = input_hal_is_held(INPUT_BTN_SECONDARY);
             if (secondary_now != secondary_was) {
                 if (secondary_now) {
-                    if (idle_consume_wake_press()) secondary_wake_swallowed = true;
-                    else                            ble_keyboard_press(0x2B, 0x02);  // HID Tab + LEFT_SHIFT
+                    if (idle_consume_wake_press())   secondary_wake_swallowed = true;
+                    else if (apps_side_button_hid()) ble_keyboard_press(0x2B, 0x02);  // HID Tab + LEFT_SHIFT
+                    else                             ui_apps_toggle();   // no-op with only Meter enabled
                 } else {
-                    if (secondary_wake_swallowed) secondary_wake_swallowed = false;
-                    else                          ble_keyboard_release();
+                    if (secondary_wake_swallowed)    secondary_wake_swallowed = false;
+                    else if (apps_side_button_hid()) ble_keyboard_release();
                 }
                 secondary_was = secondary_now;
             }
@@ -538,10 +617,10 @@ void loop() {
 
         if (power_hal_pwr_pressed()) {
             if (!idle_consume_wake_press()) {
-                // On splash: cycle animations. On the usage view: cycle
-                // screen brightness (single non-splash view, no more screens).
+                // On splash: cycle animations. On Focus: start / start the
+                // next block. Everywhere else: cycle screen brightness.
                 if (ui_get_current_screen() == SCREEN_SPLASH) splash_next();
-                else                                          brightness_cycle();
+                else if (!ui_focus_pwr_press())               brightness_cycle();
             }
         }
 
@@ -580,7 +659,7 @@ void loop() {
             ble_send_nack();
             continue;
         }
-        if (r == PARSE_IGNORED) {
+        if (r == PARSE_IGNORED || r == PARSE_CFG) {
             ble_send_ack();   // acknowledged so the daemon does not retry it
             continue;
         }
