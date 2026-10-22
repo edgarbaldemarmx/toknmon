@@ -95,6 +95,35 @@ jobs:
           node tools/convert_grid_animations.js
           git diff --exit-code -- firmware/src/custom_animations.h
 
+  mac-app:
+    name: macOS menu-bar app (py2app)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Same layout the installer creates: the venv under daemon/.venv with
+      # the daemon and GUI requirements; the build script refuses an output
+      # dir inside the repository, so it goes to the runner's temp dir.
+      - name: Build ToknMon.app and DMG
+        run: |
+          python -m venv daemon/.venv
+          daemon/.venv/bin/python -m pip install --upgrade pip
+          daemon/.venv/bin/python -m pip install -r daemon/requirements-macos.txt -r daemon/requirements-gui.txt
+          OUT="$RUNNER_TEMP/toknmon-app" bash tools/build_mac_app.sh
+          ls -l "$RUNNER_TEMP/toknmon-app"/*.dmg
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: toknmon-macos-menubar-app
+          path: ${{ runner.temp }}/toknmon-app/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
   firmware-sim:
     name: Firmware sim (native, SDL2)
     runs-on: ubuntu-latest
