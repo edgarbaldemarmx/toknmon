@@ -76,7 +76,7 @@ a small built-in state list is used.
 | `SIM_PARADE=1` | start the ambient parade once a fresh slot exists (same as serial `parade on`); pair it with a multi-provider scenario |
 | `SIM_SLOT=0-4` | start with that usage view picked (0 Claude, 1 Codex, 2 Kimi, 3 Grok, 4 Fable), as if the user had swiped to it before a reboot; the carousel never moves on its own |
 | `SIM_SCREEN=apps\|focus` | open the app center / Focus once the first payloads land (same as serial `screen apps\|focus`) |
-| `SIM_FOCUS=start\|done` | with `SIM_SCREEN=focus`: start a block (`focus start`) or start one and finish it at once (`focus finish`), to capture the running / done states |
+| `SIM_FOCUS=start\|paused\|done` | with `SIM_SCREEN=focus`: start a block (`focus start`), start and pause one (`focus pause`), or start one and finish it at once (`focus finish`), to capture the running / paused / done states |
 | `SIM_NO_BATTERY=1` | start in "USB power only" mode (plug-zap icon) |
 | `SDL_VIDEODRIVER=dummy` | SDL's own switch: render off-screen, for CI and headless captures |
 

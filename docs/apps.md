@@ -33,36 +33,48 @@ Bluetooth HID (Claude Code mode toggle) and never opens the app center.
 
 ## Focus
 
-A block timer in 5-minute steps. The whole screen is one big ring (340 px on
-the 480×480 panel): a caption, the time, a hint, the blocks line and the
-button sit inside it, the header carries a **Timer** pill beside the title,
-and a spinner status line at the bottom reads "Preparing…", "Focusing…",
-"Resting…" or "Reflecting…" for the state. The screen has three states:
+A block timer in 5-minute steps, laid out on the meter's design system
+(H14, `DESIGN.md` §6 of the design package): the same header as the usage
+pages ("Focus" in the app's amber, `TIMER` where the provider label goes,
+the battery, the hairline), a ring of radius 120 centred on the panel with
+the state label, the time and a supporting line stacked on its centre, one
+amber action button under it, and the footer dot with the blocks line. The
+screen has four states:
 
-**Setup** (caption `SET DURATION`) shows the block length as `MM:00` (default
-25 minutes, 5 to 120 in steps of 5) inside the full ring, the hint
-"Tap left -5 / right +5", the blocks finished today, and a **Start** button.
-
-| Action | Effect |
-| --- | --- |
-| tap the right half / swipe up | +5 minutes |
-| tap the left half / swipe down | −5 minutes |
-| **Start** button / PWR short press | start the block |
-
-**Running** (caption `IN PROGRESS`) shows the countdown as `MM:SS`, the ring
-emptying clockwise from the top, the hint "Tap to pause · Hold to cancel" and
-"Block N today" (N counts the block that is running).
+**Setup** (label `SET DURATION`, full amber ring as a preview) shows the
+block length as `MM:00` over the word "minutes" (default 25 minutes, 5 to
+120 in steps of 5), a **-5** and a **+5** card either side of the ring
+(muted at the 5 / 120 bounds), the blocks finished today in the footer, and
+the **Start focus** button.
 
 | Action | Effect |
 | --- | --- |
-| tap | pause / resume (the caption reads `PAUSED` and the hint "Tap to resume · Hold to cancel") |
-| long press | cancel back to setup; the block is not counted |
+| **+5** card / tap the right half / swipe up | +5 minutes |
+| **-5** card / tap the left half / swipe down | −5 minutes |
+| **Start focus** button / PWR short press | start the block |
 
-**Done** (caption `COMPLETE`): when the countdown reaches zero the bell rings
+**Running** (label `IN PROGRESS`) shows the countdown as `MM:SS` over
+"remaining", the ring emptying clockwise from the top in proportion to the
+time left of the selected length, "Block N today" in the footer (N counts the
+block that is running) with "Hold timer to cancel" at the right, and the
+**Pause** button.
+
+| Action | Effect |
+| --- | --- |
+| **Pause** button / tap elsewhere / PWR short press | pause: the label reads `PAUSED`, the frozen arc and the label turn muted, the button reads **Resume** |
+| **Resume** button / tap elsewhere / PWR short press | resume where it left off |
+| long press on the ring | cancel back to setup; the block is not counted |
+
+**Done** (label `COMPLETE`): when the countdown reaches zero the bell rings
 three times (the session-reset clip, 400 ms apart, on boards with a speaker),
-the ring shows its track only, the screen reads "Ready for another block?"
-and "Done · Block N today", and a **Start next** button, or a PWR short
-press, starts a new block of the same length.
+the ring shows its track only, the screen reads `00:00` over "N min
+completed", the footer counts the finished block, and the **Start next**
+button, or a PWR short press, returns to setup with the same length selected;
+the next block starts on another **Start focus**.
+
+The design package also specifies a 1.2 s hold with visible feedback and a
+confirmation dialog for cancelling; the firmware keeps the plain long press
+of H12 for now.
 
 The countdown runs from the board's own `millis()` clock, so it does not need
 the daemon or BLE. While a block is running the panel never dims or sleeps.
@@ -112,8 +124,8 @@ or `hid`) and is set from the serial console.
 | `sidebtn` | print the side-button mode | `sidebtn: apps` |
 | `sidebtn apps\|hid` | set the side-button mode | `sidebtn: <mode>` / `err sidebtn apps\|hid` |
 | `screen apps` / `screen focus` | open the app center / Focus | `ok` |
-| `focus start\|pause\|cancel\|next\|finish\|plus\|minus` | drive the timer like touch and PWR would; `finish` ends the running block now (counts it, rings the bell) | `ok` / `err …` |
+| `focus start\|pause\|cancel\|next\|finish\|plus\|minus` | drive the timer like touch and PWR would; `start` starts a block from setup or done, `next` is the done screen's **Start next** (back to setup, same length), `finish` ends the running block now (counts it, rings the bell) | `ok` / `err …` |
 
 In the simulator the `n` key is the side button and `SIM_SCREEN=apps|focus`
-plus `SIM_FOCUS=start|done` capture the screens headless
+plus `SIM_FOCUS=start|paused|done` capture the screens headless
 ([`simulator.md`](simulator.md)).

@@ -66,11 +66,14 @@ void ui_apps_refresh(void);
 // True while a Focus block is counting down (the main loop keeps the panel
 // awake, S1.4). Paused and done blocks do not hold the screen.
 bool ui_focus_running(void);
-// PWR short press while the Focus screen is up: setup → start, done → start
-// the next block. False when the press was not consumed (other screens or
-// a running block), so the caller falls through to its default action.
+// PWR short press while the Focus screen is up mirrors the action button:
+// setup → start, running → pause, paused → resume, done → back to setup with
+// the same length. False when the press was not consumed (other screens), so
+// the caller falls through to its default action.
 bool ui_focus_pwr_press(void);
 // Serial / sim QA: `focus start|pause|cancel|next|finish|plus|minus` drive
-// the same state machine as touch and PWR. `finish` ends a running block now
-// (counts it, rings the bell). False when the action does not apply.
+// the same state machine as touch and PWR. `start` starts a block from setup
+// or done; `next` is the done screen's "Start next" (back to setup, same
+// length); `finish` ends a running block now (counts it, rings the bell).
+// False when the action does not apply.
 bool ui_focus_command(const char* action);

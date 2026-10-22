@@ -97,16 +97,13 @@ struct Layout {
     const lv_font_t* bt_credit_1_font;
     const lv_font_t* bt_credit_2_font;
 
-    // Focus screen (H14): one font per element, picked per breakpoint; the
-    // geometry itself scales from the 480×480 prototype in init_focus_screen().
-    const lv_font_t* focus_title_font;    // "Focus" (prototype: 42 px serif)
-    const lv_font_t* focus_pill_font;     // "Timer" header pill (16 px bold)
-    const lv_font_t* focus_caption_font;  // "SET DURATION" / "IN PROGRESS" (16 px bold)
-    const lv_font_t* focus_time_font;     // countdown (76 px mono-bold)
-    const lv_font_t* focus_hint_font;     // line under the countdown (16 px)
-    const lv_font_t* focus_blocks_font;   // "N blocks today" (20 px)
-    const lv_font_t* focus_btn_font;      // Start / Start next (20 px bold)
-    const lv_font_t* focus_mono_font;     // fallback face for "·", "…" and the spinner
+    // Focus screen (H14, DESIGN.md §6): one Inter face per element, picked per
+    // breakpoint; the geometry scales from the 480×480 design in
+    // init_focus_screen(). The header and footer reuse the mod_* faces.
+    const lv_font_t* focus_label_font;    // SET DURATION / IN PROGRESS / PAUSED / COMPLETE (13 px semibold)
+    const lv_font_t* focus_time_font;     // countdown (60 px medium)
+    const lv_font_t* focus_support_font;  // "minutes" / "remaining" / "N min completed" (15 px)
+    const lv_font_t* focus_ctrl_font;     // "-5" / "+5" cards and the action button (17 px)
 };
 static Layout L = {};
 
@@ -149,14 +146,10 @@ static void compute_layout(const BoardCaps& c) {
     L.pair_y2 = 120;
     L.pair_y3 = 160;
     L.idle_px = 160;
-    L.focus_title_font   = &font_tiempos_56;
-    L.focus_pill_font    = &font_styrene_16;
-    L.focus_caption_font = &font_styrene_16;
-    L.focus_time_font    = &font_styrene_48;
-    L.focus_hint_font    = &font_styrene_16;
-    L.focus_blocks_font  = &font_styrene_20;
-    L.focus_btn_font     = &font_styrene_20;
-    L.focus_mono_font    = &font_mono_18;
+    L.focus_label_font   = &font_inter_13;
+    L.focus_time_font    = &font_inter_60;
+    L.focus_support_font = &font_inter_15;
+    L.focus_ctrl_font    = &font_inter_17;
 
     if (c.height >= 460) {
         // Large layout — tuned for 480x480 (AMOLED-2.16).
@@ -211,12 +204,10 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_credit_1_font = &font_styrene_16;
         L.bt_credit_2_font = &font_styrene_14;
         // The header is narrower: a 34 px title keeps clear of the pill.
-        L.focus_title_font   = &font_tiempos_34;
-        L.focus_pill_font    = &font_styrene_14;
-        L.focus_caption_font = &font_styrene_14;
-        L.focus_hint_font    = &font_styrene_14;
-        L.focus_blocks_font  = &font_styrene_16;
-        L.focus_btn_font     = &font_styrene_16;
+        L.focus_label_font   = &font_inter_13;
+        L.focus_time_font    = &font_inter_60;
+        L.focus_support_font = &font_inter_15;
+        L.focus_ctrl_font    = &font_inter_17;
     } else {
         // Small layout — tuned for 240x240 (LCD-1.54 and similar square TFTs).
         // Everything shrinks: fonts two steps down, panels ~half height, and
@@ -270,13 +261,10 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_device_font   = &font_styrene_14;
         L.bt_credit_1_font = &font_styrene_12;
         L.bt_credit_2_font = &font_styrene_12;
-        L.focus_title_font   = &font_tiempos_34;
-        L.focus_pill_font    = &font_styrene_12;
-        L.focus_caption_font = &font_styrene_12;
-        L.focus_time_font    = &font_styrene_24;
-        L.focus_hint_font    = &font_styrene_12;
-        L.focus_blocks_font  = &font_styrene_14;
-        L.focus_btn_font     = &font_styrene_14;
+        L.focus_label_font   = &font_inter_13;
+        L.focus_time_font    = &font_inter_29;
+        L.focus_support_font = &font_inter_13;
+        L.focus_ctrl_font    = &font_inter_13;
     }
 
     L.content_w = L.scr_w - 2 * L.margin;
@@ -504,22 +492,10 @@ static screen_t current_screen = SCREEN_USAGE;
 static bool     s_ble_connected = false;   // cached BLE connection state
 static uint32_t connected_at_ms = 0;       // when we last entered CONNECTED ("Connected" dwell)
 
-// Animation state: the footer verb rotates every ANIM_MSG_MS; the spinner
-// glyphs and cadence below belong to the Focus footer (H12) only.
+// Animation state: the footer verb rotates every ANIM_MSG_MS.
 static uint8_t anim_msg_idx = 0;
 static uint32_t anim_msg_start = 0;
 #define ANIM_MSG_MS     4000
-
-static const char* const spinner_frames[] = {
-    "\xC2\xB7", "\xE2\x9C\xBB", "\xE2\x9C\xBD",
-    "\xE2\x9C\xB6", "\xE2\x9C\xB3", "\xE2\x9C\xA2",
-};
-#define SPINNER_COUNT 6
-#define SPINNER_PHASES (2 * (SPINNER_COUNT - 1))  // 10: ping-pong 0..5..0
-
-static const uint16_t spinner_ms[SPINNER_COUNT] = {
-    260, 130, 130, 130, 130, 260,
-};
 
 static const char* const anim_messages[] = {
     "Accomplishing", "Elucidating", "Perusing",
@@ -1084,71 +1060,47 @@ static lv_obj_t* apps_container = nullptr;
 static lv_obj_t* app_tiles[APP_COUNT] = {};
 static lv_image_dsc_t tile_clawd_dsc;           // the still Clawd on the Meter tile
 
-// Focus layout (H14): everything lives inside one big ring, laid out from the
-// 480×480 prototype (ring 340 px, stroke 10, caption / countdown / hint /
-// blocks line stacked inside it, the Start pill over its lower arc, a
-// "Timer" pill in the header and a spinner status line at the bottom).
-// Other panels scale the same picture by their width and height.
+// Focus layout (H14, DESIGN.md §6): the header and footer of the usage pages,
+// a ring of radius 120 centred at (240, 233) with the state label, the
+// countdown and a supporting line stacked on its centre, "-5" / "+5" surface
+// cards beside it while setting up, and one amber action button under it.
+// Design pixels scale by MX / MY; the ring takes the smaller of the two
+// factors so it stays round on non-square panels.
+#define FX_RING_CX       240
+#define FX_RING_CY       233
+#define FX_RING_D        248   // outer diameter: radius 120 on the stroke's centre line + 8 px stroke
+#define FX_RING_STROKE   8
+#define FX_LABEL_BASE    187   // SET DURATION / IN PROGRESS / PAUSED / COMPLETE
+#define FX_TIME_BASE     252   // countdown
+#define FX_SUPPORT_BASE  285   // minutes / remaining / N min completed
+#define FX_CARD_Y        207   // "-5" at x 32, "+5" at x 392, 56 × 52
+#define FX_CARD_W        56
+#define FX_CARD_H        52
+#define FX_CARD_MINUS_X  32
+#define FX_CARD_PLUS_X   392
+#define FX_BTN_X         96    // the action button, 288 × 48, text baseline 407
+#define FX_BTN_Y         376
+#define FX_BTN_W         288
+#define FX_BTN_H         48
+#define FX_BTN_BASE      407
+#define FX_HOLD_RIGHT    448   // "Hold timer to cancel", right-aligned in the footer
+
 static lv_obj_t* focus_container = nullptr;
-static lv_obj_t* focus_arc;                     // the ring that empties
-static lv_obj_t* lbl_focus_caption;             // "SET DURATION" / "IN PROGRESS" / "PAUSED" / "COMPLETE"
-static lv_obj_t* lbl_focus_time;                // big MM:SS (MM:00 in setup)
-static lv_obj_t* lbl_focus_hint;                // small line under the countdown
-static lv_obj_t* lbl_focus_sub;                 // "Block N today" / "Done · Block N today"
-static lv_obj_t* btn_focus;                     // "Start" / "Start next"
+static lv_obj_t* focus_arc;                     // full in setup, the remaining share while counting, track only when done
+static lv_obj_t* lbl_focus_label;               // SET DURATION / IN PROGRESS / PAUSED / COMPLETE
+static lv_obj_t* lbl_focus_time;                // MM:SS (MM:00 in setup)
+static lv_obj_t* lbl_focus_support;             // "minutes" / "remaining" / "N min completed"
+static lv_obj_t* focus_card_minus;              // setup only
+static lv_obj_t* focus_card_plus;
+static lv_obj_t* lbl_focus_minus;
+static lv_obj_t* lbl_focus_plus;
+static lv_obj_t* btn_focus;                     // Start focus / Pause / Resume / Start next
 static lv_obj_t* lbl_focus_btn;
-static lv_obj_t* lbl_focus_status;              // "<spinner> Preparing…" footer
+static lv_obj_t* lbl_focus_blocks;              // footer: "N blocks today" / "Block N today"
+static lv_obj_t* lbl_focus_hold;                // footer, right: "Hold timer to cancel" while counting
 static FocusState focus;
 static int        focus_shown_sec = -1;         // last rendered remaining second
 static screen_t   last_app_screen = SCREEN_USAGE;   // what the side button returns to
-
-// The Styrene faces carry ASCII only; "·", "…" and the spinner glyphs come
-// from the mono face through LVGL's font fallback, on private copies of the
-// Styrene descriptors so the shared fonts stay untouched.
-static lv_font_t focus_hint_font_fb;
-static lv_font_t focus_blocks_font_fb;
-static const lv_font_t* focus_font_with_glyphs(lv_font_t* dst, const lv_font_t* base) {
-    *dst = *base;
-    dst->fallback = L.focus_mono_font;
-    return dst;
-}
-
-// Button / pill ink on the clay fill (the prototype's #141413).
-#define FOCUS_INK lv_color_hex(0x141413)
-
-// Footer spinner: same glyphs and cadence as the meter's status line, with
-// its own phase so the two screens never share state.
-static uint32_t focus_spin_last_ms = 0;
-static uint8_t  focus_spin_phase = 0;
-static uint8_t  focus_spin_idx = 0;
-
-static const char* focus_status_verb(void) {
-    switch (focus.phase) {
-    case FOCUS_RUNNING: return "Focusing";
-    case FOCUS_PAUSED:  return "Resting";
-    case FOCUS_DONE:    return "Reflecting";
-    default:            return "Preparing";
-    }
-}
-
-static void focus_status_render(void) {
-    if (!lbl_focus_status) return;
-    char buf[48];
-    snprintf(buf, sizeof(buf), "%s %s\xE2\x80\xA6", spinner_frames[focus_spin_idx], focus_status_verb());
-    lv_label_set_text(lbl_focus_status, buf);
-}
-
-// Advances the footer spinner while the Focus screen is up; the alert overlay
-// covers the footer, so it rests while a message scrolls.
-static void focus_status_tick(uint32_t now) {
-    if (current_screen != SCREEN_FOCUS || alert_active) return;
-    if (now - focus_spin_last_ms < spinner_ms[focus_spin_idx]) return;
-    focus_spin_last_ms = now;
-    focus_spin_phase = (focus_spin_phase + 1) % SPINNER_PHASES;
-    focus_spin_idx = (focus_spin_phase < SPINNER_COUNT) ? focus_spin_phase
-                                                        : (SPINNER_PHASES - focus_spin_phase);
-    focus_status_render();
-}
 
 // Bell: the reset clip (bell_pcm.h, 2.4 s at 44.1 kHz stereo) three times
 // with 400 ms gaps. chime_play() ignores calls while a clip plays, so the
@@ -1189,60 +1141,95 @@ static void focus_bell_start(void) {
 static void render_focus(void) {
     if (!focus_container) return;
     const uint32_t total_ms = (uint32_t)focus.length_min * 60000u;
+    const bool counting = focus.phase == FOCUS_RUNNING || focus.phase == FOCUS_PAUSED;
     uint32_t shown_ms = (focus.phase == FOCUS_SETUP) ? total_ms : focus_remaining_ms(&focus);
     // Ceil to the second while counting so 24:59.4 reads 25:00 → 24:59 → …
-    uint32_t sec = (focus.phase == FOCUS_RUNNING || focus.phase == FOCUS_PAUSED)
-                       ? (shown_ms + 999) / 1000 : shown_ms / 1000;
+    uint32_t sec = counting ? (shown_ms + 999) / 1000 : shown_ms / 1000;
     char buf[48];
     snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)(sec / 60), (unsigned)(sec % 60));
     lv_label_set_text(lbl_focus_time, buf);
     focus_shown_sec = (int)sec;
 
+    // Ring: a full amber preview in setup, remaining / selected length while
+    // counting (frozen and muted when paused), the bare track when done.
     int32_t v = (focus.phase == FOCUS_SETUP) ? 1000
               : (focus.phase == FOCUS_DONE) ? 0
               : (int32_t)((uint64_t)shown_ms * 1000u / total_ms);
     lv_arc_set_value(focus_arc, v);
+    lv_obj_set_style_arc_color(focus_arc, focus.phase == FOCUS_PAUSED ? COL_DIM : THEME_FOCUS, LV_PART_INDICATOR);
 
-    const uint8_t today = focus_blocks_today(&focus, clock_day_now());
+    const char* label;
+    const char* action;
     switch (focus.phase) {
-    case FOCUS_SETUP:
-        snprintf(buf, sizeof(buf), "%u block%s today", today, today == 1 ? "" : "s");
-        lv_label_set_text(lbl_focus_caption, "SET DURATION");
-        lv_label_set_text(lbl_focus_hint, "Tap left -5 / right +5");
-        lv_label_set_text(lbl_focus_btn, "Start");
-        lv_obj_clear_flag(btn_focus, LV_OBJ_FLAG_HIDDEN);
-        break;
-    case FOCUS_RUNNING:
-        snprintf(buf, sizeof(buf), "Block %u today", today + 1);
-        lv_label_set_text(lbl_focus_caption, "IN PROGRESS");
-        lv_label_set_text(lbl_focus_hint, "Tap to pause \xC2\xB7 Hold to cancel");
-        lv_obj_add_flag(btn_focus, LV_OBJ_FLAG_HIDDEN);
-        break;
-    case FOCUS_PAUSED:
-        snprintf(buf, sizeof(buf), "Block %u today", today + 1);
-        lv_label_set_text(lbl_focus_caption, "PAUSED");
-        lv_label_set_text(lbl_focus_hint, "Tap to resume \xC2\xB7 Hold to cancel");
-        lv_obj_add_flag(btn_focus, LV_OBJ_FLAG_HIDDEN);
-        break;
-    case FOCUS_DONE:
-        snprintf(buf, sizeof(buf), "Done \xC2\xB7 Block %u today", today);
-        lv_label_set_text(lbl_focus_caption, "COMPLETE");
-        lv_label_set_text(lbl_focus_hint, "Ready for another block?");
-        lv_label_set_text(lbl_focus_btn, "Start next");
-        lv_obj_clear_flag(btn_focus, LV_OBJ_FLAG_HIDDEN);
-        break;
+    case FOCUS_RUNNING: label = "IN PROGRESS";  action = "Pause";       break;
+    case FOCUS_PAUSED:  label = "PAUSED";       action = "Resume";      break;
+    case FOCUS_DONE:    label = "COMPLETE";     action = "Start next";  break;
+    default:            label = "SET DURATION"; action = "Start focus"; break;
     }
-    lv_label_set_text(lbl_focus_sub, buf);
-    focus_status_render();
+    lv_label_set_text(lbl_focus_label, label);
+    // The paused label is muted like its arc (render 07-focus-paused).
+    lv_obj_set_style_text_color(lbl_focus_label, focus.phase == FOCUS_PAUSED ? COL_DIM : THEME_FOCUS, 0);
+    lv_label_set_text(lbl_focus_btn, action);
+
+    if (focus.phase == FOCUS_DONE) {
+        snprintf(buf, sizeof(buf), "%u min completed", (unsigned)focus.length_min);
+        lv_label_set_text(lbl_focus_support, buf);
+    } else {
+        lv_label_set_text(lbl_focus_support, counting ? "remaining" : "minutes");
+    }
+
+    // Footer: the block being counted while running / paused, the finished
+    // count otherwise; the cancel hint only while a block can be cancelled.
+    const uint8_t today = focus_blocks_today(&focus, clock_day_now());
+    if (counting) snprintf(buf, sizeof(buf), "Block %u today", today + 1);
+    else          snprintf(buf, sizeof(buf), "%u block%s today", today, today == 1 ? "" : "s");
+    lv_label_set_text(lbl_focus_blocks, buf);
+    set_shown(lbl_focus_hold, counting);
+
+    // "-5" / "+5" cards: setup only, muted at the 5 / 120 minute bounds.
+    set_shown(focus_card_minus, focus.phase == FOCUS_SETUP);
+    set_shown(focus_card_plus, focus.phase == FOCUS_SETUP);
+    lv_obj_set_style_text_color(lbl_focus_minus, focus.length_min > FOCUS_MIN_MINUTES ? COL_TEXT : COL_DIM, 0);
+    lv_obj_set_style_text_color(lbl_focus_plus, focus.length_min < FOCUS_MAX_MINUTES ? COL_TEXT : COL_DIM, 0);
 }
 
-// Start (setup) / start the next block (done). Shared by the button, PWR and
-// the serial command.
+// Start the block with the selected length. Shared by the action button,
+// PWR and serial `focus start`.
 static bool focus_do_start(void) {
     if (!focus_start(&focus, lv_tick_get())) return false;
     Serial.printf("focus: block started (%u min)\n", focus.length_min);
     render_focus();
     return true;
+}
+
+// "Start next" (DESIGN.md §6): back to setup with the previous length; the
+// next block only starts on another "Start focus". The counter and its day
+// are kept; the state machine's own DONE → RUNNING edge stays reachable
+// through serial `focus start`.
+static void focus_next_setup(void) {
+    const uint16_t length = focus.length_min;
+    focus_init(&focus, focus.blocks, focus.blocks_day);
+    focus.length_min = length;
+    Serial.println("focus: ready for the next block");
+    render_focus();
+}
+
+// The primary action for the current state — Start focus / Pause / Resume /
+// Start next — shared by the button, PWR and serial `focus next`.
+static bool focus_action(void) {
+    switch (focus.phase) {
+    case FOCUS_SETUP:
+        return focus_do_start();
+    case FOCUS_RUNNING:
+    case FOCUS_PAUSED:
+        if (!focus_toggle_pause(&focus, lv_tick_get())) return false;
+        render_focus();
+        return true;
+    case FOCUS_DONE:
+        focus_next_setup();
+        return true;
+    }
+    return false;
 }
 
 static void focus_finished(void) {
@@ -1255,7 +1242,6 @@ static void focus_finished(void) {
 // Called every loop from ui_tick_anim(), whatever screen is up: a block keeps
 // counting in the background and rings when it ends.
 static void focus_tick_ui(void) {
-    focus_status_tick(lv_tick_get());
     if (focus.phase != FOCUS_RUNNING) return;
     if (focus_tick(&focus, lv_tick_get(), clock_day_now())) {
         focus_finished();
@@ -1269,11 +1255,18 @@ static void focus_tick_ui(void) {
 static void focus_btn_cb(lv_event_t* e) {
     (void)e;
     if (gesture_seen || alert_active) return;
-    focus_do_start();
+    focus_action();
 }
 
-// Tap on the Focus screen: setup → ±5 by half (right +, left −); running or
-// paused → pause / resume. Done is handled by the button only.
+// "-5" / "+5" cards (user data: the step sign). They do not bubble, so a tap
+// on a card never doubles with the half-screen tap below.
+static void focus_card_cb(lv_event_t* e) {
+    if (gesture_seen || alert_active) return;
+    if (focus_adjust(&focus, (int)(intptr_t)lv_event_get_user_data(e))) render_focus();
+}
+
+// Tap elsewhere on the Focus screen: setup → ±5 by half (right +, left −);
+// running or paused → pause / resume. Done is handled by the button only.
 static void focus_tap_cb(lv_event_t* e) {
     (void)e;
     if (gesture_seen || alert_active) return;
@@ -1288,6 +1281,8 @@ static void focus_tap_cb(lv_event_t* e) {
 }
 
 // Long press while running or paused: cancel back to setup without counting.
+// (DESIGN.md §6 asks for a 1.2 s hold with feedback and a confirmation
+// dialog; this is LVGL's plain long press, as in H12.)
 static void focus_long_press_cb(lv_event_t* e) {
     (void)e;
     if (gesture_seen || alert_active) return;
@@ -1295,6 +1290,16 @@ static void focus_long_press_cb(lv_event_t* e) {
         Serial.println("focus: block cancelled");
         render_focus();
     }
+}
+
+// A "-5" / "+5" surface card (radius 10) with its own tap handler.
+static lv_obj_t* make_focus_card(lv_obj_t* parent, int x_design, const char* text, int step, lv_obj_t** lbl_out) {
+    lv_obj_t* card = make_box(parent, MX(x_design), MY(FX_CARD_Y), MX(FX_CARD_W), MY(FX_CARD_H), COL_SURFACE, MX(10));
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(card, focus_card_cb, LV_EVENT_SHORT_CLICKED, (void*)(intptr_t)step);
+    *lbl_out = make_label(card, L.focus_ctrl_font, COL_TEXT, text);
+    lv_obj_center(*lbl_out);
+    return card;
 }
 
 static void init_focus_screen(lv_obj_t* scr) {
@@ -1309,53 +1314,25 @@ static void init_focus_screen(lv_obj_t* scr) {
     lv_obj_add_event_cb(focus_container, focus_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
     lv_obj_add_flag(focus_container, LV_OBJ_FLAG_HIDDEN);
 
-    // Prototype geometry is in 480×480 pixels: horizontal / vertical values
-    // scale by the panel's width / height, the ring and what sits inside it
-    // by the smaller of the two so it stays round and keeps its proportions.
-    const float sx = (float)L.scr_w / 480.0f;
-    const float sy = (float)L.scr_h / 480.0f;
-    const float s  = sx < sy ? sx : sy;
-    #define FOCUS_SX(v) ((int32_t)((v) * sx + 0.5f))
-    #define FOCUS_SY(v) ((int32_t)((v) * sy + 0.5f))
-    #define FOCUS_S(v)  ((int32_t)((v) * s + 0.5f))
+    // Header as on the usage pages: the title in the app's amber, TIMER in
+    // the provider-label slot, the rule. The battery lives on the screen
+    // object; the corner mascot stays hidden here (ui_show_screen).
+    lv_obj_t* title = make_label(focus_container, L.mod_title_font, THEME_FOCUS, "Focus");
+    place_text(title, 32, HDR_TITLE_BASE);
+    lv_obj_t* kind = make_label(focus_container, L.mod_label_font, COL_DIM, "TIMER");
+    place_text_right(kind, HDR_LABEL_RIGHT, HDR_LABEL_BASE);
+    make_rule(focus_container, 32, 448, HDR_RULE_Y);
 
-    // Header: title and the "Timer" pill share the battery icon's centre line
-    // (the icon is a square, L.batt_w on a side).
-    const int32_t head_cy = L.batt_y + L.batt_w / 2;
-    lv_obj_t* title = lv_label_create(focus_container);
-    lv_label_set_text(title, "Focus");
-    lv_obj_set_style_text_font(title, L.focus_title_font, 0);
-    lv_obj_set_style_text_color(title, COL_ACCENT, 0);
-    lv_obj_set_pos(title, FOCUS_SX(104), head_cy - lv_font_get_line_height(L.focus_title_font) / 2);
-
-    const int32_t pill_w = FOCUS_SX(89), pill_h = FOCUS_SY(27);
-    lv_obj_t* pill = lv_obj_create(focus_container);
-    lv_obj_set_size(pill, pill_w, pill_h);
-    lv_obj_set_pos(pill, FOCUS_SX(300), head_cy - pill_h / 2);
-    lv_obj_set_style_bg_color(pill, COL_ACCENT, 0);
-    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(pill, 0, 0);
-    lv_obj_set_style_shadow_width(pill, 0, 0);
-    lv_obj_set_style_pad_all(pill, 0, 0);
-    lv_obj_clear_flag(pill, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(pill, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t* lbl_pill = lv_label_create(pill);
-    lv_label_set_text(lbl_pill, "Timer");
-    lv_obj_set_style_text_font(lbl_pill, L.focus_pill_font, 0);
-    lv_obj_set_style_text_color(lbl_pill, FOCUS_INK, 0);
-    lv_obj_center(lbl_pill);
-
-    // Ring: 340 px outer, 10 px stroke drawn inward, centred at (240, 256).
-    const int32_t ring = FOCUS_S(340);
-    const int32_t ring_cy = FOCUS_SY(256);
-    int32_t arc_w = FOCUS_S(10);
-    if (arc_w < 4) arc_w = 4;
-
+    // Ring: 248 px outer, the 8 px stroke drawn inward, from 12 o'clock
+    // clockwise.
+    const float s = L.sx < L.sy ? L.sx : L.sy;
+    const int ring = (int)(FX_RING_D * s + 0.5f);
+    int stroke = (int)(FX_RING_STROKE * s + 0.5f);
+    if (stroke < 4) stroke = 4;
     focus_arc = lv_arc_create(focus_container);
     lv_obj_set_size(focus_arc, ring, ring);
-    lv_obj_set_pos(focus_arc, (L.scr_w - ring) / 2, ring_cy - ring / 2);
-    lv_arc_set_rotation(focus_arc, 270);          // start at 12 o'clock
+    lv_obj_set_pos(focus_arc, MX(FX_RING_CX) - ring / 2, MY(FX_RING_CY) - ring / 2);
+    lv_arc_set_rotation(focus_arc, 270);
     lv_arc_set_bg_angles(focus_arc, 0, 360);
     lv_arc_set_range(focus_arc, 0, 1000);
     lv_arc_set_value(focus_arc, 1000);
@@ -1365,65 +1342,46 @@ static void init_focus_screen(lv_obj_t* scr) {
     lv_obj_set_style_pad_all(focus_arc, 0, 0);
     lv_obj_set_style_border_width(focus_arc, 0, 0);
     lv_obj_set_style_shadow_width(focus_arc, 0, 0);
-    lv_obj_set_style_arc_width(focus_arc, arc_w, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(focus_arc, arc_w, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(focus_arc, stroke, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(focus_arc, stroke, LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(focus_arc, COL_BAR_BG, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(focus_arc, COL_ACCENT, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(focus_arc, THEME_FOCUS, LV_PART_INDICATOR);
     lv_obj_set_style_arc_rounded(focus_arc, false, LV_PART_MAIN);
     lv_obj_set_style_arc_rounded(focus_arc, false, LV_PART_INDICATOR);
 
-    // Text inside the ring, each line centred on its prototype ink box
-    // (offsets from the ring centre). lv_obj_align() is persistent, so the
-    // labels stay centred when their text width changes.
-    lbl_focus_caption = lv_label_create(focus_container);
-    lv_obj_set_style_text_font(lbl_focus_caption, L.focus_caption_font, 0);
-    lv_obj_set_style_text_color(lbl_focus_caption, COL_ACCENT, 0);
-    lv_obj_align(lbl_focus_caption, LV_ALIGN_TOP_MID, 0,
-                 ring_cy + FOCUS_S(-102) - lv_font_get_line_height(L.focus_caption_font) / 2);
+    // Three centred lines on the ring's centre, each on its design baseline.
+    // lv_obj_align() is persistent, so they stay centred as their text changes.
+    lbl_focus_label = make_label(focus_container, L.focus_label_font, THEME_FOCUS, "");
+    lv_obj_align(lbl_focus_label, LV_ALIGN_TOP_MID, 0, text_top(L.focus_label_font, FX_LABEL_BASE));
+    lbl_focus_time = make_label(focus_container, L.focus_time_font, COL_TEXT, "");
+    lv_obj_align(lbl_focus_time, LV_ALIGN_TOP_MID, 0, text_top(L.focus_time_font, FX_TIME_BASE));
+    lbl_focus_support = make_label(focus_container, L.focus_support_font, COL_DIM, "");
+    lv_obj_align(lbl_focus_support, LV_ALIGN_TOP_MID, 0, text_top(L.focus_support_font, FX_SUPPORT_BASE));
 
-    lbl_focus_time = lv_label_create(focus_container);
-    lv_obj_set_style_text_font(lbl_focus_time, L.focus_time_font, 0);
-    lv_obj_set_style_text_color(lbl_focus_time, COL_TEXT, 0);
-    lv_obj_align(lbl_focus_time, LV_ALIGN_TOP_MID, 0,
-                 ring_cy + FOCUS_S(-38) - lv_font_get_line_height(L.focus_time_font) / 2);
+    focus_card_minus = make_focus_card(focus_container, FX_CARD_MINUS_X, "-5", -1, &lbl_focus_minus);
+    focus_card_plus  = make_focus_card(focus_container, FX_CARD_PLUS_X,  "+5", +1, &lbl_focus_plus);
 
-    lbl_focus_hint = lv_label_create(focus_container);
-    lv_obj_set_style_text_font(lbl_focus_hint, focus_font_with_glyphs(&focus_hint_font_fb, L.focus_hint_font), 0);
-    lv_obj_set_style_text_color(lbl_focus_hint, COL_DIM, 0);
-    lv_obj_align(lbl_focus_hint, LV_ALIGN_TOP_MID, 0,
-                 ring_cy + FOCUS_S(23) - lv_font_get_line_height(L.focus_hint_font) / 2);
-
-    lbl_focus_sub = lv_label_create(focus_container);
-    lv_obj_set_style_text_font(lbl_focus_sub, focus_font_with_glyphs(&focus_blocks_font_fb, L.focus_blocks_font), 0);
-    lv_obj_set_style_text_color(lbl_focus_sub, COL_ACCENT, 0);
-    lv_obj_align(lbl_focus_sub, LV_ALIGN_TOP_MID, 0,
-                 ring_cy + FOCUS_S(57) - lv_font_get_line_height(L.focus_blocks_font) / 2);
-
-    // Start / Start next pill over the lower arc: (142, 344, 196, 44).
-    const int32_t btn_w = FOCUS_S(196), btn_h = FOCUS_S(44);
+    // Action button: amber, radius 10, dark ink.
     btn_focus = lv_button_create(focus_container);
-    lv_obj_set_size(btn_focus, btn_w, btn_h);
-    lv_obj_set_pos(btn_focus, (L.scr_w - btn_w) / 2, ring_cy + FOCUS_S(88));
-    lv_obj_set_style_bg_color(btn_focus, COL_ACCENT, 0);
+    lv_obj_set_size(btn_focus, MX(FX_BTN_W), MY(FX_BTN_H));
+    lv_obj_set_pos(btn_focus, MX(FX_BTN_X), MY(FX_BTN_Y));
+    lv_obj_set_style_bg_color(btn_focus, THEME_FOCUS, 0);
     lv_obj_set_style_bg_opa(btn_focus, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(btn_focus, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(btn_focus, MX(10), 0);
     lv_obj_set_style_shadow_width(btn_focus, 0, 0);
     lv_obj_set_style_pad_all(btn_focus, 0, 0);
     lv_obj_add_event_cb(btn_focus, focus_btn_cb, LV_EVENT_SHORT_CLICKED, NULL);
-    lbl_focus_btn = lv_label_create(btn_focus);
-    lv_obj_set_style_text_font(lbl_focus_btn, L.focus_btn_font, 0);
-    lv_obj_set_style_text_color(lbl_focus_btn, FOCUS_INK, 0);
-    lv_obj_center(lbl_focus_btn);
+    lbl_focus_btn = make_label(btn_focus, L.focus_ctrl_font, COL_BG, "");
+    lv_obj_align(lbl_focus_btn, LV_ALIGN_TOP_MID, 0, text_top(L.focus_ctrl_font, FX_BTN_BASE) - MY(FX_BTN_Y));
 
-    // Status footer, centred 28 px above the bottom edge (y = 452 on 480).
-    lbl_focus_status = lv_label_create(focus_container);
-    lv_obj_set_style_text_font(lbl_focus_status, &focus_hint_font_fb, 0);
-    lv_obj_set_style_text_color(lbl_focus_status, COL_ACCENT, 0);
-    lv_obj_align(lbl_focus_status, LV_ALIGN_TOP_MID, 0,
-                 L.scr_h - FOCUS_SY(28) - lv_font_get_line_height(L.focus_hint_font) / 2);
-    #undef FOCUS_SX
-    #undef FOCUS_SY
-    #undef FOCUS_S
+    // Footer like the usage status line: amber dot, the blocks line, and the
+    // cancel hint right-aligned while a block is counting.
+    const int d = MX(MOD_FOOT_DOT_D) < 4 ? 4 : MX(MOD_FOOT_DOT_D);
+    make_box(focus_container, MX(MOD_FOOT_DOT_X) - d / 2, MY(MOD_FOOT_DOT_Y) - d / 2, d, d, THEME_FOCUS, LV_RADIUS_CIRCLE);
+    lbl_focus_blocks = make_label(focus_container, L.mod_small_font, COL_DIM, "");
+    place_text(lbl_focus_blocks, MOD_FOOT_TEXT_X, MOD_FOOT_TEXT_BASE);
+    lbl_focus_hold = make_label(focus_container, L.mod_label_font, COL_DIM, "Hold timer to cancel");
+    place_text_right(lbl_focus_hold, FX_HOLD_RIGHT, MOD_FOOT_TEXT_BASE);
 
     focus_bell_timer = lv_timer_create(focus_bell_cb, FOCUS_BELL_CLIP_MS + FOCUS_BELL_GAP_MS, NULL);
     lv_timer_pause(focus_bell_timer);
@@ -2360,13 +2318,14 @@ bool ui_focus_running(void) {
 
 bool ui_focus_pwr_press(void) {
     if (current_screen != SCREEN_FOCUS) return false;
-    return focus_do_start();
+    return focus_action();
 }
 
 bool ui_focus_command(const char* action) {
     if (!action) return false;
     bool ok = false;
-    if (strcmp(action, "start") == 0 || strcmp(action, "next") == 0) ok = focus_do_start();
+    if (strcmp(action, "start") == 0)       ok = focus_do_start();
+    else if (strcmp(action, "next") == 0)   { if (focus.phase != FOCUS_DONE) return false; focus_next_setup(); return true; }
     else if (strcmp(action, "pause") == 0)  ok = focus_toggle_pause(&focus, lv_tick_get());
     else if (strcmp(action, "cancel") == 0) ok = focus_cancel(&focus);
     else if (strcmp(action, "plus") == 0)   ok = focus_adjust(&focus, +1);

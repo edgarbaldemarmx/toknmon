@@ -130,8 +130,8 @@ void ble_init(void) {
 
 // Headless QA hooks (see board.h): SIM_SPLASH_PROVIDER=claude|codex|kimi|grok
 // opens mascot mode for that provider, SIM_PARADE=1 starts the parade,
-// SIM_SCREEN=apps|focus opens the app center / Focus, SIM_FOCUS=start|done
-// drives a Focus block. They
+// SIM_SCREEN=apps|focus opens the app center / Focus,
+// SIM_FOCUS=start|paused|done drives a Focus block. They
 // make the same calls as the serial `screen splash <p>` / `parade on`
 // commands, once the first scenario payloads have landed (the parade needs a
 // fresh slot, so it keeps trying until one is).
@@ -145,8 +145,9 @@ static void apply_env_hooks(void) {
     }
     done = true;
     // SIM_SCREEN=apps|focus opens that screen (serial `screen apps|focus`);
-    // SIM_FOCUS=start|done then starts a block / ends it right away (serial
-    // `focus start` / `focus finish`) so the running and done states can be
+    // SIM_FOCUS=start|paused|done then starts a block / starts and pauses
+    // it / ends it right away (serial `focus start` / `focus pause` /
+    // `focus finish`) so the running, paused and done states can be
     // captured headless.
     const char* screen = getenv("SIM_SCREEN");
     if (screen) {
@@ -157,8 +158,9 @@ static void apply_env_hooks(void) {
     const char* fx = getenv("SIM_FOCUS");
     if (fx) {
         ui_focus_command("start");
-        if (strcmp(fx, "done") == 0) ui_focus_command("finish");
-        else if (strcmp(fx, "start") != 0) printf("[sim] SIM_FOCUS=%s: unknown (start|done)\n", fx);
+        if (strcmp(fx, "done") == 0)        ui_focus_command("finish");
+        else if (strcmp(fx, "paused") == 0) ui_focus_command("pause");
+        else if (strcmp(fx, "start") != 0)  printf("[sim] SIM_FOCUS=%s: unknown (start|paused|done)\n", fx);
     }
     const char* prov = getenv("SIM_SPLASH_PROVIDER");
     if (!prov) return;
