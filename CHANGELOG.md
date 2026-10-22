@@ -37,6 +37,15 @@ H0–H10); the entries below summarize them.
 - `install-mac.sh --apps meter|suite` and the `apps` config key choose
   between the usage meter alone and the full suite (meter + Focus timer).
 
+- **Design system** (H14): usage pages, the app center and Focus follow one
+  visual system (dark `#0B0F14` background, Inter type, full-width usage
+  bars, a credit panel for Codex, `CURRENT · 5H` block for Claude and Kimi,
+  footer status dot) with the provider mascots kept in the header; Fable
+  shows its model-scoped window as a 5×4 grid of Clawds (one per 5 %); Focus
+  gets the amber ring, −5/+5 cards, Pause/Resume, a Paused state and
+  "Start next" back to setup. The Bsod pet is Codex's corner avatar and opens
+  its splash set. New Inter faces (OFL) in `firmware/src/font_inter_*.c`.
+
 ### Changed
 
 - The side button (GPIO18 on the 2.16) now opens the app center; its

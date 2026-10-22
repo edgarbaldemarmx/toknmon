@@ -73,8 +73,8 @@ through the whole catalog, custom animations included (`claude.bike`).
   percentage, reset) under it; title in terracotta; the Clawd corner mascot,
   which walks off and back, lurks and acts depending on the pace.
 - **Fable**: when the subscription has a model-scoped weekly limit, it gets
-  its own view right after Claude: the track gives way to a 10×10 grid of
-  small Clawds across the working width, one per percent, filled in
+  its own view right after Claude: the track gives way to a 5×4 grid of
+  large Clawds across the working width, one per 5 %, filled in
   terracotta; the title is the model name the daemon sends (`fl`, "Fable"
   when absent) tagged `CLAUDE`, with the reset time right of the figure.
   Boards without the canvas (the C6 ports) keep it as a third bar on the
