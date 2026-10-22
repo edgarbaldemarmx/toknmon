@@ -9,8 +9,8 @@
 # on top of the same data for the mascot, scene, and parade shots.
 {"name":"claude + fable (alert opens usage)","hold_ms":0,"p":"claude","s":17.0,"sr":110,"w":73.0,"wr":860,"f":41.0,"fr":860,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24,"m":"gallery"}
 {"name":"claude + fable (3 bars)","hold_ms":0,"p":"claude","s":17.0,"sr":110,"w":73.0,"wr":860,"f":41.0,"fr":860,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24,"x":true}
-{"name":"codex (weekly only, dot grid)","hold_ms":0,"p":"codex","w":54,"wr":9400,"st":"allowed","ok":true,"t":1785474000,"tf":24}
-# The later Codex line wins the slot in the same pass: codex-dots captures the reset-credit ledger (H11).
-{"name":"codex (weekly + reset credits, dot grid)","hold_ms":0,"p":"codex","w":37,"wr":5000,"rc":2,"ru":1,"rm":20000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+{"name":"codex (weekly only, remaining line)","hold_ms":0,"p":"codex","w":54,"wr":9400,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+# The later Codex line wins the slot in the same pass: the Codex shot captures the reset-credit panel (H11, H14).
+{"name":"codex (weekly + reset credits, credit panel)","hold_ms":0,"p":"codex","w":37,"wr":5000,"rc":2,"ru":1,"rm":20000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
 {"name":"kimi","hold_ms":0,"p":"kimi","s":3.0,"sr":200,"w":9.0,"wr":6000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
-{"name":"grok (weekly credits, dot grid)","hold_ms":600000,"p":"grok","w":5,"wr":8400,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+{"name":"grok (weekly credits, remaining line)","hold_ms":600000,"p":"grok","w":5,"wr":8400,"st":"allowed","ok":true,"t":1785474000,"tf":24}

@@ -2,78 +2,66 @@
 #include <lvgl.h>
 #include "data.h"
 
-// Design tokens — single source of truth for UI colors. Anthropic-inspired
-// dark palette, AMOLED-friendly (true black bg).
-#define THEME_BG       lv_color_hex(0x000000)   // screen background
-#define THEME_PANEL    lv_color_hex(0x1f1f1e)   // card/zone fill
-#define THEME_TEXT     lv_color_hex(0xfaf9f5)   // primary text
-#define THEME_DIM      lv_color_hex(0xb0aea5)   // secondary text
-#define THEME_ACCENT   lv_color_hex(0xd97757)   // brand terra-cotta
-#define THEME_GREEN    lv_color_hex(0x788c5d)
-#define THEME_AMBER    lv_color_hex(0xd97757)
-#define THEME_RED      lv_color_hex(0xc0392b)
-#define THEME_BAR_BG   lv_color_hex(0x2a2a28)   // unfilled bar track
-// Provider accents — title / pill color per carousel slot (see data.h).
-#define THEME_CLAUDE   THEME_ACCENT                 // Anthropic terra-cotta
-#define THEME_CODEX    lv_color_hex(0x10a37f)   // OpenAI green-teal
-#define THEME_KIMI     lv_color_hex(0x3b6cf6)   // Moonshot blue
-// Grok: a cool blue-gray silver. Not black (it would vanish on the AMOLED
-// background) and not the warm ivory THEME_TEXT: the blue cast and lower
-// luminance keep the title and dots visibly tinted next to primary text.
-#define THEME_GROK     lv_color_hex(0xc5ccd6)
+// Design tokens — single source of truth for UI colors (H14 design system,
+// docs/odd/toknmon-h14-ui-redesign.md L9). One dark palette for the usage
+// pages, the app center and Focus; each provider only contributes its accent.
+#define UI_BG          lv_color_hex(0x0B0F14)   // whole display behind the pages
+#define UI_SURFACE     lv_color_hex(0x121A23)   // credit panel, app tiles, secondary controls
+#define UI_DIVIDER     lv_color_hex(0x293541)   // 1 px quiet structure
+#define UI_TRACK       lv_color_hex(0x33414F)   // unfilled usage / ring track
+#define UI_TEXT        lv_color_hex(0xF2F5F7)   // percentage, countdown, key values
+#define UI_MUTED       lv_color_hex(0xAAB5C0)   // labels, reset time, metadata
 
-// Per-provider palette. Every colored element on a provider's usage screen
-// (title / pill, bar fills, dot grid, status spinner) draws from its theme,
-// so a Codex, Kimi or Grok screen never shows the Claude terra-cotta.
+// Legacy names kept for the splash and the parts of the UI that have not
+// moved to the token names yet. THEME_BG stays true black: it is the splash
+// background and palette index 0 of every animation (splash.cpp).
+#define THEME_BG       lv_color_hex(0x000000)
+#define THEME_PANEL    UI_SURFACE
+#define THEME_TEXT     UI_TEXT
+#define THEME_DIM      UI_MUTED
+#define THEME_ACCENT   THEME_CLAUDE               // Claude accent; Focus keeps it until its own unit
+#define THEME_GREEN    lv_color_hex(0x8FBF9F)   // enterprise pace: under
+#define THEME_AMBER    THEME_FOCUS                // enterprise pace: on
+#define THEME_RED      lv_color_hex(0xE5484D)   // enterprise pace: over
+#define THEME_BAR_BG   UI_TRACK
+
+// Provider accents — title, filled bar, available-credit segments, status
+// dot and the remaining / 5-hour figures of each page (see data.h).
+#define THEME_CLAUDE   lv_color_hex(0xE3A18B)   // terracotta
+// Codex: monochrome, the user's pick (L9). The designer's recommendation was
+// ice blue 0xB8DDFF; swap the value to compare.
+#define THEME_CODEX    lv_color_hex(0xF2F5F7)
+// #define THEME_CODEX lv_color_hex(0xB8DDFF)   // ice blue alternative
+#define THEME_KIMI     lv_color_hex(0x9DB7FF)   // pastel of Moonshot's 0x3B6CF6
+#define THEME_GROK     lv_color_hex(0xCDD5DF)   // silver
+#define THEME_FOCUS    lv_color_hex(0xF2C078)   // amber: the Focus app, not a provider
+
+// Per-provider palette. The usage page tints only the accent slots; the
+// bar tiers are kept for the enterprise pace line (Under / On / Over pace),
+// which is the one place a usage figure still changes colour.
 struct ProviderTheme {
-    lv_color_t accent;       // title text / provider pill / filled dots
-    lv_color_t bar_ok;       // bar fill below 50 %
-    lv_color_t bar_warn;     // bar fill 50-79 %
-    lv_color_t bar_danger;   // bar fill 80 % and above
-    lv_color_t status_text;  // animated status line at the bottom
-    lv_color_t dot_empty;    // unfilled dot in the dot grid (Codex, Grok; Fable Clawds)
-    lv_color_t pill_text;    // provider-name text on the accent pill beside the clock
+    lv_color_t accent;       // title text / filled track / credit segments / status dot
+    lv_color_t bar_ok;       // enterprise pace: under
+    lv_color_t bar_warn;     // enterprise pace: on
+    lv_color_t bar_danger;   // enterprise pace: over
+    lv_color_t status_text;  // footer status verb
+    lv_color_t dot_empty;    // the unfilled Clawd glyphs of the Fable grid
+    lv_color_t pill_text;    // ink on an accent-filled control (mascot-mode label stays accent on black)
 };
 
 static inline ProviderTheme provider_theme(int provider) {
     ProviderTheme t;
     switch (provider) {
-    case PROVIDER_CODEX:
-        t.accent      = THEME_CODEX;
-        t.bar_ok      = THEME_CODEX;
-        t.bar_warn    = lv_color_hex(0xc9d42b);   // yellow-green, deliberately not orange
-        t.bar_danger  = lv_color_hex(0xe5484d);
-        t.status_text = THEME_CODEX;
-        t.dot_empty   = lv_color_hex(0x1f3a33);
-        t.pill_text   = THEME_TEXT;
-        break;
-    case PROVIDER_KIMI:
-        t.accent      = THEME_KIMI;
-        t.bar_ok      = THEME_KIMI;
-        t.bar_warn    = lv_color_hex(0x8b5cf6);   // violet
-        t.bar_danger  = lv_color_hex(0xe5484d);
-        t.status_text = THEME_KIMI;
-        t.dot_empty   = lv_color_hex(0x1e2a4a);
-        t.pill_text   = THEME_TEXT;
-        break;
-    case PROVIDER_GROK:
-        t.accent      = THEME_GROK;
-        t.bar_ok      = THEME_GROK;
-        t.bar_warn    = lv_color_hex(0xf5a524);   // amber
-        t.bar_danger  = lv_color_hex(0xe5484d);
-        t.status_text = THEME_GROK;
-        t.dot_empty   = lv_color_hex(0x262b33);   // dark slate
-        t.pill_text   = lv_color_hex(0x141413);   // ivory on silver would not read
-        break;
-    default:   // Claude keeps the historical palette
-        t.accent      = THEME_CLAUDE;
-        t.bar_ok      = THEME_GREEN;
-        t.bar_warn    = THEME_AMBER;
-        t.bar_danger  = THEME_RED;
-        t.status_text = THEME_CLAUDE;
-        t.dot_empty   = lv_color_hex(0x3a2820);   // dim clay: the unfilled Clawds of the Fable view
-        t.pill_text   = THEME_TEXT;
-        break;
+    case PROVIDER_CODEX: t.accent = THEME_CODEX; break;
+    case PROVIDER_KIMI:  t.accent = THEME_KIMI;  break;
+    case PROVIDER_GROK:  t.accent = THEME_GROK;  break;
+    default:             t.accent = THEME_CLAUDE; break;
     }
+    t.bar_ok      = THEME_GREEN;
+    t.bar_warn    = THEME_AMBER;
+    t.bar_danger  = THEME_RED;
+    t.status_text = UI_MUTED;
+    t.dot_empty   = UI_TRACK;
+    t.pill_text   = UI_BG;
     return t;
 }

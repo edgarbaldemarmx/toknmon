@@ -62,24 +62,31 @@ through the whole catalog, custom animations included (`claude.bike`).
 
 ### Meter
 
-- **Claude**: Current (5h) and Weekly bars, each with "Resets in …"; title
-  in clay; a status line
-  with the spinner; the clock (`clock = auto|12|24`) in place of the "Usage"
-  title; the Clawd corner mascot, which walks off and back, lurks and acts
-  depending on the pace.
+- **Every page** shares one module (H14): header with the title in the
+  provider's accent, the corner mascot after it, the clock (`clock =
+  auto|12|24`) and the provider name in muted small caps, the battery and a
+  hairline; `WEEKLY USAGE`, the percentage used in large type over a
+  full-width track, "Resets in …"; a lower block per provider; and a footer
+  dot in the accent with the status verb (the spinner glyph is gone from this
+  screen).
+- **Claude**: weekly on top, a compact `CURRENT · 5H` block (track,
+  percentage, reset) under it; title in terracotta; the Clawd corner mascot,
+  which walks off and back, lurks and acts depending on the pace.
 - **Fable**: when the subscription has a model-scoped weekly limit, it gets
-  its own view right after Claude: a 10×10 grid of small Clawds, one per
-  percent, filled in clay; the title is the model name the daemon sends
-  (`fl`, "Fable" when absent), with the "Weekly" pill and "Resets in …".
-  Boards without the dot canvas (the C6 ports) keep it as a third bar on
-  the Claude view.
-- **Codex**: 10×10 dot grid filled to the weekly percentage, large percentage
-  and reset time, a compact 5h bar only if the plan reports one; the three
-  dots in the corner.
-- **Kimi**: Current and Weekly bars in blue; the moon in the corner.
-- **Grok**: the same 10×10 dot grid as Codex, filled to the weekly (or
-  monthly) credit percentage, in silver; Grok has no 5-hour window, so there
-  is never a 5h row. The white Grokbot-style ball sits in the corner.
+  its own view right after Claude: the track gives way to a 10×10 grid of
+  small Clawds across the working width, one per percent, filled in
+  terracotta; the title is the model name the daemon sends (`fl`, "Fable"
+  when absent) tagged `CLAUDE`, with the reset time right of the figure.
+  Boards without the canvas (the C6 ports) keep it as a third bar on the
+  Claude view.
+- **Codex**: weekly track in the white (monochrome) accent; a `RESET
+  CREDITS` panel when the account has reset credits, otherwise "N%
+  remaining"; the Bsod pet in the corner.
+- **Kimi**: the same two-window module as Claude, in pastel blue; the moon
+  in the corner.
+- **Grok**: weekly (or monthly) credit window on the track and "N%
+  remaining", in silver; Grok has no 5-hour window. The white Grokbot-style
+  ball sits in the corner.
 - **Carousel**: the meter stays on the provider you picked; tap or swipe
   left/right to page through the fresh slots. The pick is stored on the
   board and restored after a reboot (until that provider's first payload

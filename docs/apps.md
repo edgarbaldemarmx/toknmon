@@ -11,7 +11,10 @@ sessions. The host enables apps and renames the board through its config
 Open it with the **side button** (the secondary button, GPIO 18 on the
 Waveshare AMOLED 2.16): a short press toggles between the app center and the
 last app you were in (the meter or Focus); from the splash it opens the app
-center too. Tap a tile to launch that app.
+center too. The screen follows the meter's design system (H14): an "Apps"
+header with the battery and a hairline, one surface card per app with its
+icon and name (Meter in primary text, Focus in its amber), and a footer dot
+with "Pick an app". Tap a tile to launch that app.
 
 | Tile | Icon | Opens |
 | --- | --- | --- |

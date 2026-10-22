@@ -13,12 +13,12 @@
 # Each provider holds >= 12 s so its corner mascot (H3/H4) gets through an idle period and an act
 # (the acts alternate, so the mountain bike shows up on the second act of a slot).
 {"name":"claude + fable (3 bars)","hold_ms":0,"p":"claude","s":17.0,"sr":110,"w":73.0,"wr":860,"f":41.0,"fr":860,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24}
-# Codex: weekly-only plan (no "s"/"sr" → dot grid without the 5h row), then a plan with a 5h window (compact bar under the grid)
-# and reset credits ("rc" held / "ru" used / "rm" minutes to the soonest expiry → the "Resets" ledger under the header; H11).
+# Codex: weekly-only plan (no "s"/"sr" → the "remaining" line), then a plan with a 5h window
+# and reset credits ("rc" held / "ru" used / "rm" minutes to the soonest expiry → the RESET CREDITS panel; H11/H14).
 {"name":"codex (weekly only)","hold_ms":12000,"p":"codex","w":54,"wr":9400,"st":"allowed","ok":true,"t":1785474000,"tf":24}
 {"name":"codex (with 5h + reset credits)","hold_ms":12000,"p":"codex","s":12.0,"sr":240,"w":40.0,"wr":5000,"rc":2,"ru":1,"rm":20000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
 {"name":"kimi","hold_ms":24000,"p":"kimi","s":3.0,"sr":200,"w":9.0,"wr":6000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
-# Grok: one weekly credit window only (no "s"/"sr" → dot grid without the 5h row, like weekly-only Codex).
+# Grok: one weekly credit window only (no "s"/"sr" → the "remaining" line, like weekly-only Codex).
 {"name":"grok (weekly credits)","hold_ms":12000,"p":"grok","w":5,"wr":8400,"st":"allowed","ok":true,"t":1785474000,"tf":24}
 {"name":"kimi offline (drops out)","hold_ms":12000,"p":"kimi","ok":false}
 {"name":"claude only again (no fable)","hold_ms":12000,"p":"claude","s":22.0,"sr":100,"w":74.0,"wr":850,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24}
