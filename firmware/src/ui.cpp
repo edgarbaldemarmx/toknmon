@@ -31,7 +31,9 @@ LV_FONT_DECLARE(font_mono_18);
 LV_FONT_DECLARE(font_inter_80);
 LV_FONT_DECLARE(font_inter_60);
 LV_FONT_DECLARE(font_inter_29);
+LV_FONT_DECLARE(font_inter_26);
 LV_FONT_DECLARE(font_inter_22);
+LV_FONT_DECLARE(font_inter_20);
 LV_FONT_DECLARE(font_inter_17);
 LV_FONT_DECLARE(font_inter_16);
 LV_FONT_DECLARE(font_inter_15);
@@ -127,10 +129,11 @@ static void compute_layout(const BoardCaps& c) {
     L.mod_title_font = &font_inter_29;
     L.mod_value_font = &font_inter_80;
     L.mod_sign_font  = &font_inter_29;
-    L.mod_label_font = &font_inter_16;
-    L.mod_reset_font = &font_inter_22;
-    L.mod_small_font = &font_inter_22;
-    L.footer_font    = &font_inter_22;
+    // Third device round (H14 L17): labels 20 px, supporting lines 26 px.
+    L.mod_label_font = &font_inter_20;
+    L.mod_reset_font = &font_inter_26;
+    L.mod_small_font = &font_inter_26;
+    L.footer_font    = &font_inter_26;
 
     // Values shared by the two original breakpoints; the small branch below
     // overrides them wholesale.
@@ -154,10 +157,10 @@ static void compute_layout(const BoardCaps& c) {
     L.idle_px = 160;
     // Focus (H14 L15): the state label in the 16 px small caps, the
     // supporting line, the −5/+5 cards and the button text in 22 px.
-    L.focus_label_font   = &font_inter_16;
+    L.focus_label_font   = &font_inter_20;
     L.focus_time_font    = &font_inter_60;
-    L.focus_support_font = &font_inter_22;
-    L.focus_ctrl_font    = &font_inter_22;
+    L.focus_support_font = &font_inter_26;
+    L.focus_ctrl_font    = &font_inter_26;
 
     if (c.height >= 460) {
         // Large layout — tuned for 480x480 (AMOLED-2.16).
