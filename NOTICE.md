@@ -52,6 +52,19 @@ downloads them on demand from [Petmeter](https://github.com/nathanjohnpayne/Petm
 `tools/convert_pet_spritesheet.py` writes the committed grids. No license
 is granted for the pet artwork by this repository.
 
+## Open-source fonts
+
+| Asset | Where | License |
+| --- | --- | --- |
+| Inter (generated LVGL bitmap fonts at 92, 60, 29, 17, 15 and 13 px) | `firmware/src/font_inter_*.c` | SIL Open Font License 1.1 |
+
+Inter is copyright 2016–2024 The Inter Project Authors
+(<https://github.com/rsms/inter>), licensed under the SIL Open Font License,
+Version 1.1 (<https://openfontlicense.org>). The TTF sources are **not**
+committed; `docs/fonts.md` downloads the release zip on demand and generates
+the bitmap faces. The generated files are derived font software under the
+OFL: they are not sold by themselves and keep the font's name.
+
 ## Original art in this repository
 
 The Codex, Kimi and Grok mascots and scenes (`assets/animations/codex.*.txt`
