@@ -9,6 +9,13 @@ H0–H10); the entries below summarize them.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-10-21
+
+Four providers on one desk meter: Grok Build CLI joins Claude Code, Codex CLI
+and Kimi Code, the meter stays on the provider you pick, Claude's
+model-scoped weekly limit gets its own Fable page, and Codex, Kimi and Grok
+get new corner icons. Verified on the Waveshare ESP32-S3-Touch-AMOLED-2.16.
+
 ### Added
 
 - **Grok Build CLI provider** (H9): the daemon polls Grok's weekly credit
@@ -175,5 +182,6 @@ First public release of the fork. Everything below is relative to upstream
 - The attention-hook flags still live under `~/.config/claude-usage-monitor`
   (shared with `daemon/attention-hook.sh`).
 
-[Unreleased]: https://github.com/edgarbaldemarmx/toknmon/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/edgarbaldemarmx/toknmon/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/edgarbaldemarmx/toknmon/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/edgarbaldemarmx/toknmon/releases/tag/v0.1.0
