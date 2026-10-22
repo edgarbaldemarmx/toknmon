@@ -15,12 +15,15 @@ Objective: a native-feeling macOS menu-bar app (Python, rumps + pyobjc) configur
 
 | ID | Specs | Route | Status | Commit |
 | --- | --- | --- | --- | --- |
-| T1 | S1.1 (daemon config payload + status.json) | writer D after H11 T1 (same `claude_usage_daemon.py`) | open | |
-| T2 | S1.2, S1.3 (menubar app + packaging) | writer D, same unit (new `daemon/gui/`, `tools/build_mac_app.sh`, `daemon/requirements-macos.txt`, plist) | open | |
-| T3 | S1.4, S1.5 (installer, CI, docs) | inline (parent) | open | |
+| T1 | S1.1 (daemon config payload + status.json) | writer D after H11 T1 (same `claude_usage_daemon.py`) | done | `bda3cfb` |
+| T2 | S1.2, S1.3 (menubar app + packaging) | writer D, same unit (new `daemon/gui/`, `tools/build_mac_app.sh`, `daemon/requirements-gui.txt`, plist) | done | `4270630` (config store, parent), `c26d0c9`, fix `6ee047b` |
+| T3 | S1.4, S1.5 (installer, CI, docs) | inline (parent) | done except README/screenshot | `960121c` (--apps), `838443b` (--no-gui + app install), `5e6a7e2` (CI mac-app), `5485278` (docs/gui.md, install guide) |
 | T4 | first launch with the user (Bluetooth permission is on the daemon, not the GUI; the GUI needs the Accessibility/Automation nothing) and screenshots | parent + user | open | |
 
 ## Log
 
 - **L1** See `toknmon-h11-codex-credits-pets.md` L1–L3.
 - **L2** Research (2026-10-21): upstream Clawdmeter replaced its Python daemon with a Rust GPUI tray app (`desktop/` crates, btleplug, espflash; DMG ad-hoc signed in CI; config `~/.config/clawdmeter/config` with keys `config_dirs`, `poll_interval`, `reset_chime`, `alert_chime`, `desktop_chime`, `clock`, `liveliness`, `attention_anim`, `pace_marker`, …; no device-name setting). Host: no `cargo`; `swift`/`xcodebuild` only via CommandLineTools; `rumps` not installed. User chose the Python menu-bar route.
+- **L3** T1/T2 evidence (writer D): RED collection errors → GREEN `392 passed, 2 skipped` (319 + 35 config-push + 10 status + 39 GUI-model tests); provider payload bytes and order pinned unchanged; cfg packet `{"p":"cfg","ap":…,"n":…}` written first, once per change and once per BLE link; `status.json`/`state.json` atomic 0600. `python -m gui.menubar` alive 8 s with empty stderr; `tools/build_mac_app.sh` → `ToknMon.app` 47 MB, DMG 26 MB, ad-hoc signed and `codesign --verify --deep --strict` clean after excluding `_lzma` (py2app's relinked Homebrew `liblzma` cannot be signed). GUI deps live in `daemon/requirements-gui.txt` (the daemon venv stays lean unless the installer adds them). Risk: items 3 and 5.
+- **L4** Parent end-to-end on the install clone `~/Downloads/toknmon` switched to the branch: `./install-mac.sh --yes --no-prime` → `[7/7] Menu-bar app… Installed ~/Applications/ToknMon.app and started it (launchctl bootstrap)`; `launchctl list` shows `com.toknmon.daemon` and `com.toknmon.menubar`; daemon log `Sending[cfg]: {"p":"cfg","ap":"meter,focus","n":"TokenMon de Edgar"}`; `status.json` 47 s old with `connected: true` and the four providers (`codex: rc 2, ru 2, rm 10862`); the board showed the Codex ledger "2 · Resets ●●○○ · Next expires in 7d" (`/tmp/h11-seam/hw-codex-credits.png`). The first app build crashed in `refresh()`: rumps keys the menu by the title an item had when added, and renaming the device line to "… · connected" broke `insert_before` (`KeyError`); fixed by keeping the original key (`6ee047b`), smoke run 30 s alive with empty stderr, app rebuilt and redeployed through the installer.
+- **L5** Pending for the user: open the menu once to eyeball it (no automated screenshot of an open NSMenu), decide on `daemon/VERSION` (new, 1.0.0) and the strict codesign verify; README feature bullet and a menu screenshot in `docs/gui.md`.
