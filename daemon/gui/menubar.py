@@ -61,7 +61,11 @@ class ToknMonApp(rumps.App):
         super().__init__(model.APP_NAME, icon=str(ICON), template=True, quit_button="Quit")
         self.store = ConfigStore(CONFIG_FILE)
         self.status_items: list[rumps.MenuItem] = []
+        # rumps keys the menu by the title an item had when it was added, and
+        # changing `.title` later does not re-key it, so keep the original key
+        # for insert_before() while the visible text follows the status.
         self.device_item = rumps.MenuItem("Device")
+        self.device_key = self.device_item.title
         self._build_menu()
         self.refresh(None)
         rumps.Timer(self.refresh, REFRESH_SECONDS).start()
@@ -116,7 +120,7 @@ class ToknMonApp(rumps.App):
                 del self.menu[item.title]
             self.status_items = [rumps.MenuItem(line) for line in lines]
             for item in self.status_items:
-                self.menu.insert_before(self.device_item.title, item)
+                self.menu.insert_before(self.device_key, item)
         self.device_item.title = model.device_line(status, config_name=config.get("device_name"))
         self.focus_item.state = int(model.focus_enabled(config.get("apps")))
         for pid_or_auto, checked in model.provider_states(config.get("providers")).items():
