@@ -9,6 +9,19 @@ H0–H10); the entries below summarize them.
 
 ## [Unreleased]
 
+### Added
+
+- **Codex reset credits** (H11): the daemon reads OpenAI's reset credits with
+  the Codex CLI login (`rc` held, `ru` used in the last 30 days, `rm` minutes
+  to the soonest expiry; one fetch per hour, `codex_credits = off` disables
+  it) and the Codex page shows them as a "Resets" ledger above the dot grid.
+- **Codex pets** (H11): the eight ChatGPT pets (Bsod, Codex, Dewey, Fireball,
+  Null Signal, Rocky, Seedy, Stacky) join Codex's full-screen splash set;
+  `tools/fetch_codex_pets.sh` + `tools/convert_pet_spritesheet.py` build the
+  grids from the sprite sheets (not committed, see `NOTICE.md`).
+- `install-mac.sh --apps meter|suite` and the `apps` config key choose
+  between the usage meter alone and the full suite (meter + Focus timer).
+
 ## [1.0.0] — 2026-10-21
 
 Four providers on one desk meter: Grok Build CLI joins Claude Code, Codex CLI
