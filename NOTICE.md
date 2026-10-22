@@ -38,10 +38,25 @@ The source GIF/Lottie files for the Clawd animations are **not** committed;
 `tools/fetch_official_clawd.sh` downloads them on demand from claude.ai into a
 git-ignored directory, and only the generated header ships.
 
+The following files are the property of OpenAI and are used here without a
+license, in the same posture as the Clawd set above. They will be removed on
+request from the rights holder.
+
+| Asset | Where | Owner |
+| --- | --- | --- |
+| ChatGPT pet artwork (the eight pets Bsod, Codex, Dewey, Fireball, Null Signal, Rocky, Seedy and Stacky; idle, waving, jumping and happy rows converted to indexed pixel frames) | `assets/animations/codex.pet-*.txt`, the generated `firmware/src/custom_animations.h` | OpenAI |
+
+The pet sprite sheets are **not** committed; `tools/fetch_codex_pets.sh`
+downloads them on demand from [Petmeter](https://github.com/nathanjohnpayne/Petmeter)'s
+`research/codex-pets/` archive into a git-ignored directory, and
+`tools/convert_pet_spritesheet.py` writes the committed grids. No license
+is granted for the pet artwork by this repository.
+
 ## Original art in this repository
 
-The Codex, Kimi and Grok mascots and scenes (`assets/animations/codex.*.txt`,
-`assets/animations/kimi.*.txt`, `assets/animations/grok.*.txt`, the generated `firmware/src/custom_animations.h`
+The Codex, Kimi and Grok mascots and scenes (`assets/animations/codex.*.txt`
+except the `codex.pet-*` grids listed above,
+`assets/animations/kimi.*.txt`, `assets/animations/grok.*.txt`, their entries in the generated `firmware/src/custom_animations.h`
 and the GIF previews under `docs/media/animations/`) are original pixel art
 created for ToknMon. They are **not** official brand assets of OpenAI,
 Moonshot AI or xAI; the names "Codex", "Kimi" and "Grok" belong to their respective owners

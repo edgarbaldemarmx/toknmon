@@ -142,12 +142,16 @@ static bool     pending_pick = false;   // rotate requested; honor at completion
 // slots the UI handed over, each playing its own set. The `*.scene.*`
 // entries are the full-screen scenes (H7); a name absent from the catalog is
 // skipped (logged once), so the sets play before and after the art lands.
-#define SET_MAX 6
+// Codex's list ends with the eight ChatGPT pets (H11, `codex.pet-*`: idle
+// looped, then waving/jumping/happy as the outro); shorter lists pad with NULL.
+#define SET_MAX 14
 static const char* const PROVIDER_SETS[PROVIDER_COUNT][SET_MAX] = {
-    { NULL, NULL, NULL, NULL, NULL, NULL },                           // Claude: rate groups
-    { "codex.idle", "codex.dots", "codex.think", "codex.bike", "codex.scene.wave",  "codex.scene.rain"  },
+    { NULL },                                                          // Claude: rate groups
+    { "codex.idle", "codex.dots", "codex.think", "codex.bike", "codex.scene.wave",  "codex.scene.rain",
+      "codex.pet-bsod", "codex.pet-codex", "codex.pet-dewey", "codex.pet-fireball",
+      "codex.pet-null-signal", "codex.pet-rocky", "codex.pet-seedy", "codex.pet-stacky" },
     { "kimi.idle",  "kimi.glow",  "kimi.sleep",  "kimi.bike",  "kimi.scene.night",  "kimi.scene.orbit"  },
-    { "grok.idle",  "grok.look",  "grok.bike",   "grok.scene.stars", "grok.scene.build", NULL           },
+    { "grok.idle",  "grok.look",  "grok.bike",   "grok.scene.stars", "grok.scene.build" },
 };
 static int      provider_mode = -1;     // -1 = Claude default; else PROVIDER_* with a set
 static uint8_t  set_pos = 0;            // index into PROVIDER_SETS[provider_mode]

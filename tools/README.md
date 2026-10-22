@@ -51,6 +51,29 @@ Hand-authored provider mascots (Codex, Kimi, Grok) live as text grids under
 `<name>.gif` per animation, byte-deterministic between runs; the committed
 previews are under `docs/media/animations/`.
 
+## Codex pets (ChatGPT pet sprite sheets)
+
+```bash
+bash fetch_codex_pets.sh                                  # eight WebP sheets + metadata → research/codex-pets/ (git-ignored)
+daemon/.venv/bin/python -I convert_pet_spritesheet.py \
+    --src research/codex-pets --out assets/animations     # → assets/animations/codex.pet-<slug>.txt
+daemon/.venv/bin/python -I convert_pet_spritesheet.py \
+    --src research/codex-pets --out assets/animations --pets bsod,rocky --verify /tmp/pets   # subset + PNG strips
+daemon/.venv/bin/python -m pytest test -q                 # converter tests (synthetic sheets)
+```
+
+`fetch_codex_pets.sh [DEST_DIR]` downloads the sheets Petmeter archives
+(OpenAI artwork, not redistributed; see `NOTICE.md`), checking the
+`RIFF….WEBP` magic bytes and keeping valid local copies (idempotent).
+`convert_pet_spritesheet.py` (Pillow from `daemon/.venv`, run with `-I`
+because the sheets are downloaded data) slices each 1536×1872 sheet into its
+8×9 grid of 192×208 cells and writes one grid file per pet in the format
+below: the idle row looped at 330 ms, then waving, jumping and happy at
+90 ms, downsampled to about 26–32 cells wide on the 55×37 stage with the
+feet on row 36, one ≤15-colour palette per pet. Then run
+`convert_grid_animations.js` as for any grid. Details in
+`docs/animations.md` ("Codex pets").
+
 ## Gallery (docs/media)
 
 ```bash

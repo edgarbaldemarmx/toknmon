@@ -143,6 +143,44 @@ to land on the entry you want; `splash next` is unavailable in the sim
 On hardware: `./screenshot.sh out.png [port] --screen splash:codex` then
 `splash next` over serial ([`controls.md`](controls.md#serial-qa-commands)).
 
+### Codex pets
+
+The eight ChatGPT pets (Bsod, Codex, Dewey, Fireball, Null Signal, Rocky,
+Seedy, Stacky) are full-screen entries of Codex's mascot-mode set
+(`codex.pet-<slug>`, after the scenes in `PROVIDER_SETS`). They are not drawn
+by hand: `tools/convert_pet_spritesheet.py` generates the grid files from the
+sprite sheets Petmeter archives (OpenAI artwork, see `NOTICE.md`; the sheets
+are git-ignored, the grids are committed).
+
+```bash
+bash tools/fetch_codex_pets.sh                            # → research/codex-pets/*.webp (git-ignored, idempotent)
+daemon/.venv/bin/python -I tools/convert_pet_spritesheet.py \
+    --src research/codex-pets --out assets/animations     # → assets/animations/codex.pet-<slug>.txt
+daemon/.venv/bin/python -I tools/convert_pet_spritesheet.py \
+    --src research/codex-pets --out assets/animations --pets rocky --verify /tmp/pets   # one pet + PNG strip
+node tools/convert_grid_animations.js                     # → firmware/src/custom_animations.h
+daemon/.venv/bin/python -m pytest tools/test -q           # converter tests
+```
+
+Sheet format: 1536×1872 WebP, 8 columns × 9 rows of 192×208 cells, one row
+per animation (idle 6, walking 8, running 8, waving 4, jumping 5, dizzy 8,
+thinking 6, laptop 6, happy 6 frames). Each pet becomes one grid file of 21
+frames: the idle row as the loop (`loop: 0-5`, `hold: 330`) and waving,
+jumping, happy as the outro at `hold=90`, so the splash plays idle for the
+scene time and then the three acts before the next entry. The converter
+area-downsamples one shared bounding box per pet (no jitter between rows) to
+about 26–32 cells wide and at most 34 tall, feet on row 36, centred on the
+stage, then quantizes to ≤15 colours plus transparent; colours darker than
+`#141413` become that ink and a palette too dark for the black panel is
+brightened uniformly (Null Signal, Stacky). Output is deterministic. Each
+pet costs 15–20 KB of flash; the 216 build stays under 85 % with all eight.
+
+To add a pet: drop `<slug>-spritesheet.webp` in `research/codex-pets/`
+(same layout), run the converter with `--pets <slug>`, regenerate the
+header and append `"codex.pet-<slug>"` to Codex's `PROVIDER_SETS` entry
+(raise `SET_MAX` if the list is full). The pets are splash-only: they exceed
+the corner-mascot envelope, and `MASCOT_SPECS` keeps `codex.icon`.
+
 ### Regenerating the gallery
 
 ```bash
