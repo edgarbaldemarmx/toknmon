@@ -79,12 +79,26 @@ Two things to keep in mind:
   between idle and act.
 
 Corner icons are `<provider>.icon` grids (`codex.icon`, `kimi.icon`,
-`grok.icon`): Clawd-sized (24×18, 21×18 and 18×18 cells, feet on row 36)
-portraits of each mascot with two or three shade and highlight tones, a
-darker rim and `#141413` eyes. Frame 0 is the still pose with a long hold and
-frame 1 closes the eyes for 140 ms, so the file is both the usage view's
-corner idle and its only act (a blink). They are corner art only: the splash
-never plays them (`splash_next`/`splash_prev` on the Claude default skip any
+`grok.icon`), Clawd-sized with the feet on row 36. Kimi's and Grok's (21×18
+and 18×18 cells) are hand-drawn portraits with two or three shade and
+highlight tones, a darker rim and `#141413` eyes: frame 0 is the still pose
+with a long hold and frame 1 closes the eyes for 140 ms, so the file is both
+the usage view's corner idle and its only act (a blink). Codex's (H14) is
+not drawn by hand: it is the Bsod ChatGPT pet's idle row scaled into the
+corner envelope by the pet converter (14×21 cells, six frames at 330 ms,
+`loop: 0-5`), so the corner still is the pet's first idle pose and the act
+is its whole idle bob; regenerate it with
+
+```bash
+daemon/.venv/bin/python -I tools/convert_pet_spritesheet.py \
+    --src research/codex-pets --out assets/animations --icon bsod   # → assets/animations/codex.icon.txt
+node tools/convert_grid_animations.js
+```
+
+(`--icon` scales the idle row to at most 24×21 cells, so a pet taller than
+wide is capped by the 21-row envelope; the name stays `codex.icon` so
+`MASCOT_SPECS` needs no change). They are corner art only: the splash never
+plays them (`splash_next`/`splash_prev` on the Claude default skip any
 `*.icon` name, and the play-lists never name them), while the small
 `idle`/act grids and the bikes keep playing on the splash and in mascot mode.
 
@@ -119,7 +133,7 @@ Everything is looked up **by name** in `firmware/src/splash.cpp`:
 
 | Where | What it controls |
 | --- | --- |
-| `MASCOT_SPECS[provider]` | the corner mascot: `idle`, optional walk gait, `acts[]` per usage-rate group, `lurk`. Codex, Kimi and Grok use their `<provider>.icon` as idle and as the only act at every pace (the blink), with no walk gait. |
+| `MASCOT_SPECS[provider]` | the corner mascot: `idle`, optional walk gait, `acts[]` per usage-rate group, `lurk`. Codex, Kimi and Grok use their `<provider>.icon` as idle and as the only act at every pace (Kimi and Grok: the blink; Codex: the Bsod idle bob), with no walk gait. |
 | `PROVIDER_SETS[provider]` | the mascot-mode play-list (idle, acts, bike, scenes) used by long-press, the parade and `screen splash <provider>`. A name missing from the catalog is skipped and logged once. |
 | `GROUP_NAMES` | the mood groups the default Claude splash picks from by usage rate (`claude.bike` lives in the busy groups). |
 
@@ -147,7 +161,9 @@ On hardware: `./screenshot.sh out.png [port] --screen splash:codex` then
 
 The eight ChatGPT pets (Bsod, Codex, Dewey, Fireball, Null Signal, Rocky,
 Seedy, Stacky) are full-screen entries of Codex's mascot-mode set
-(`codex.pet-<slug>`, after the scenes in `PROVIDER_SETS`). They are not drawn
+(`codex.pet-<slug>` in `PROVIDER_SETS`: Bsod first, since H14, so mascot
+mode opens on the pet the corner icon shows; the other seven after the
+scenes). They are not drawn
 by hand: `tools/convert_pet_spritesheet.py` generates the grid files from the
 sprite sheets Petmeter archives (OpenAI artwork, see `NOTICE.md`; the sheets
 are git-ignored, the grids are committed).
@@ -158,6 +174,8 @@ daemon/.venv/bin/python -I tools/convert_pet_spritesheet.py \
     --src research/codex-pets --out assets/animations     # → assets/animations/codex.pet-<slug>.txt
 daemon/.venv/bin/python -I tools/convert_pet_spritesheet.py \
     --src research/codex-pets --out assets/animations --pets rocky --verify /tmp/pets   # one pet + PNG strip
+daemon/.venv/bin/python -I tools/convert_pet_spritesheet.py \
+    --src research/codex-pets --out assets/animations --icon bsod   # the Codex corner icon only (codex.icon.txt)
 node tools/convert_grid_animations.js                     # → firmware/src/custom_animations.h
 daemon/.venv/bin/python -m pytest tools/test -q           # converter tests
 ```
@@ -178,8 +196,10 @@ pet costs 15–20 KB of flash; the 216 build stays under 85 % with all eight.
 To add a pet: drop `<slug>-spritesheet.webp` in `research/codex-pets/`
 (same layout), run the converter with `--pets <slug>`, regenerate the
 header and append `"codex.pet-<slug>"` to Codex's `PROVIDER_SETS` entry
-(raise `SET_MAX` if the list is full). The pets are splash-only: they exceed
-the corner-mascot envelope, and `MASCOT_SPECS` keeps `codex.icon`.
+(raise `SET_MAX` if the list is full). The pet clips are splash-only: they
+exceed the corner-mascot envelope, and `MASCOT_SPECS` keeps `codex.icon`,
+which `--icon <slug>` regenerates from any pet's idle row (see the corner
+icon paragraph above) if the corner character should change.
 
 ### Regenerating the gallery
 

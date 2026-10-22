@@ -59,6 +59,8 @@ daemon/.venv/bin/python -I convert_pet_spritesheet.py \
     --src research/codex-pets --out assets/animations     # → assets/animations/codex.pet-<slug>.txt
 daemon/.venv/bin/python -I convert_pet_spritesheet.py \
     --src research/codex-pets --out assets/animations --pets bsod,rocky --verify /tmp/pets   # subset + PNG strips
+daemon/.venv/bin/python -I convert_pet_spritesheet.py \
+    --src research/codex-pets --out assets/animations --icon bsod   # Codex corner icon only → codex.icon.txt
 daemon/.venv/bin/python -m pytest test -q                 # converter tests (synthetic sheets)
 ```
 
@@ -70,9 +72,12 @@ because the sheets are downloaded data) slices each 1536×1872 sheet into its
 8×9 grid of 192×208 cells and writes one grid file per pet in the format
 below: the idle row looped at 330 ms, then waving, jumping and happy at
 90 ms, downsampled to about 26–32 cells wide on the 55×37 stage with the
-feet on row 36, one ≤15-colour palette per pet. Then run
+feet on row 36, one ≤15-colour palette per pet. `--icon PET` also (or,
+without `--pets`, only) writes `codex.icon.txt`, the usage view's Codex
+corner mascot: PET's six idle frames at 330 ms scaled to at most 24×21
+cells so the grid fits the 28×21 corner envelope. Then run
 `convert_grid_animations.js` as for any grid. Details in
-`docs/animations.md` ("Codex pets").
+`docs/animations.md` ("Codex pets" and the corner icon paragraph).
 
 ## Gallery (docs/media)
 

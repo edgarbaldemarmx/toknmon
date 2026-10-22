@@ -180,6 +180,52 @@ def test_pets_filter_selects_sheets_and_rejects_unknown(src, tmp_path):
     assert "gamma" in res.stderr
 
 
+# ── corner icon mode (--icon PET → codex.icon.txt) ──────────────────────────
+
+def test_icon_mode_renders_the_idle_row_into_the_corner_envelope(src, tmp_path):
+    out = tmp_path / "out"
+    res = run("--src", src, "--out", out, "--icon", "alpha")
+    assert res.returncode == 0, res.stderr
+    # only the icon is written: no pet clip unless --pets asks for one
+    assert sorted(p.name for p in out.iterdir()) == ["codex.icon.txt"]
+    g = parse_grid((out / "codex.icon.txt").read_text())
+    assert g["name"] == "codex.icon"          # MASCOT_SPECS keeps resolving it
+    # the six idle frames, each held as a calm idle, looped over all of them
+    assert len(g["frames"]) == 6
+    assert g["holds"] == [330] * 6
+    assert g["loop"] == (0, 5)
+    # uniform frames inside the 28x21 mascot envelope, at most 24 wide
+    h = len(g["frames"][0])
+    w = len(g["frames"][0][0])
+    assert all(len(f) == h and all(len(r) == w for r in f) for f in g["frames"])
+    assert 1 <= w <= 24 and 1 <= h <= 21
+    # feet on stage row 36, off the stage edges (no edge-snap warning)
+    ox, oy = g["origin"]
+    assert oy + h == STAGE_H
+    assert 0 < ox and ox + w < STAGE_W
+    assert any(set(f[-1]) - {"."} for f in g["frames"])
+    # palette: one transparent entry, <= 15 colours, nothing darker than the ink
+    values = list(g["legend"].values())
+    assert values.count("transparent") == 1
+    assert 1 <= len(values) - 1 <= 15
+    for v in values:
+        if v != "transparent":
+            rgb = tuple(int(v[i:i + 2], 16) for i in (1, 3, 5))
+            assert max(rgb) >= 0x13
+
+
+def test_icon_mode_is_deterministic_and_combines_with_pets(src, tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert run("--src", src, "--out", a, "--icon", "beta", "--pets", "alpha").returncode == 0
+    assert run("--src", src, "--out", b, "--icon", "beta", "--pets", "alpha").returncode == 0
+    assert sorted(p.name for p in a.iterdir()) == ["codex.icon.txt", "codex.pet-alpha.txt"]
+    for f in sorted(a.iterdir()):
+        assert f.read_bytes() == (b / f.name).read_bytes(), f.name
+    res = run("--src", src, "--out", tmp_path / "none", "--icon", "gamma")
+    assert res.returncode != 0
+    assert "gamma" in res.stderr
+
+
 def test_verify_writes_one_png_strip_per_pet(src, tmp_path):
     out, verify = tmp_path / "out", tmp_path / "verify"
     res = run("--src", src, "--out", out, "--pets", "alpha", "--verify", verify)
