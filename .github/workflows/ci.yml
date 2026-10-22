@@ -70,6 +70,17 @@ jobs:
       - name: Node unit tests
         run: node --test tools/test/
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The pet sprite-sheet converter is Python (Pillow); its tests build a
+      # synthetic sheet, so no downloaded art is needed.
+      - name: Pet converter tests (pytest)
+        run: |
+          pip install "pillow>=10" "pytest>=8"
+          python -m pytest tools/test -q
+
       - name: Shell device-name validator tests
         run: bash tools/test/shell/test_device_name_validator.sh
 
