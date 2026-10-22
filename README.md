@@ -7,7 +7,7 @@
 ![Built with PlatformIO](https://img.shields.io/badge/built%20with-PlatformIO-orange)
 
 <p align="center">
-  <img src="docs/media/screens/hw-claude.png" width="360" alt="ToknMon showing Claude Code usage: Current, Weekly and Fable bars on the Waveshare 2.16 AMOLED">
+  <img src="docs/media/screens/hw-claude.png" width="360" alt="ToknMon showing Claude Code usage: Current and Weekly bars on the Waveshare 2.16 AMOLED">
 </p>
 
 **ToknMon** is a desk-side usage meter for AI coding assistants. A pocket-size
@@ -47,7 +47,7 @@ requests are welcome, support is best-effort.
 | | |
 | --- | --- |
 | <img src="docs/media/screens/claude-usage.png" width="240" alt="Claude usage view with Current and Weekly bars"> | **Four providers, one carousel.** Claude Code (5-hour session and weekly bars, plus the model-scoped **Fable** weekly window on its own page of small Clawds when your plan has one), Codex CLI, Kimi Code and Grok Build CLI each get a slot. Tap or swipe to page; it stays on the provider you picked, even after a reboot. Paging skips slots without fresh data. |
-| <img src="docs/media/screens/hw-codex.png" width="240" alt="Codex dot grid at 91 percent on the real panel"> | **A screen per provider.** Codex shows a 10×10 dot grid filling to the weekly percentage (plus a compact 5h bar when the plan has one); Grok shows its weekly credit window on a silver dot grid; Kimi shows 5h and weekly bars in blue; Claude keeps its bars in clay. Palettes, bar tiers and status lines never bleed between providers. |
+| <img src="docs/media/screens/hw-grok.png" width="240" alt="Grok weekly dot grid at 5 percent with its corner icon on the real panel"> | **A screen per provider.** Codex shows a 10×10 dot grid filling to the weekly percentage (plus a compact 5h bar when the plan has one); Grok shows its weekly credit window on a silver dot grid; Kimi shows 5h and weekly bars in blue; Claude keeps its bars in clay. Palettes, bar tiers and status lines never bleed between providers. |
 | <img src="docs/media/screens/mascot-codex.png" width="240" alt="Mascot mode pinned to Codex"> | **Mascots and mascot mode.** Clawd for Claude (Anthropic's official set), original three-dots, crescent-moon and Grokbot-style ball characters for Codex, Kimi and Grok, each with idle, acts, a mountain-bike ride and two full-screen scenes. Long-press the meter to watch a provider's set full-size. |
 | <img src="docs/media/screens/parade.png" width="240" alt="Idle parade with the Codex mascot on stage"> | **The parade.** The device rotates every live provider's full-size mascot every 20 s, until you swipe back. It never starts on its own (serial `parade on`). |
 | <img src="docs/media/screens/scene-kimi-night.png" width="240" alt="Kimi night scene"> | **Draw your own.** Animations are plain text grids compiled by a small Node tool. The Codex and Kimi scenes were authored by an AI agent from a two-sentence brief. |

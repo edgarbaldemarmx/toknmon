@@ -36,12 +36,20 @@ H0–H10); the entries below summarize them.
   with more detail, shading and a blink (`<provider>.icon`); the full-screen
   animations and scenes are unchanged.
 
+- `tools/test/shell/test_sim_sticky_view.sh` runs the simulator headless and
+  checks that the usage view stays where the user left it (also in CI).
+
 ### Changed
 
 - The meter no longer rotates between providers every 8 s (H10): it stays
   on the provider you picked, even when its data goes stale, and the pick
-  survives a reboot. Serial `slot` accepts `0-4` (4 = Fable) and the
-  simulator takes `SIM_SLOT=0-4`.
+  survives a reboot. A tap or swipe still pages away from a stale pick as
+  long as another view is live. Serial `slot` accepts `0-4` (4 = Fable), the
+  serial log prints `UI: picked view N` / `UI: restored picked view N` /
+  `UI: showing view N`, and the simulator takes `SIM_SLOT=0-4`.
+
+- README hero and provider shots are fresh hardware captures of the H10
+  screens (Claude with two bars, Grok with its corner icon).
 
 - The parade no longer starts after 5 minutes without input: the meter stays
   on screen until you touch it, and the animations only play on a tap, swipe
