@@ -30,11 +30,15 @@ Bluetooth HID (Claude Code mode toggle) and never opens the app center.
 
 ## Focus
 
-A block timer in 5-minute steps. The screen has three states:
+A block timer in 5-minute steps. The whole screen is one big ring (340 px on
+the 480×480 panel): a caption, the time, a hint, the blocks line and the
+button sit inside it, the header carries a **Timer** pill beside the title,
+and a spinner status line at the bottom reads "Preparing…", "Focusing…",
+"Resting…" or "Reflecting…" for the state. The screen has three states:
 
-**Setup** shows the block length as `MM:00` (default 25 minutes, 5 to 120 in
-steps of 5) inside a full ring, the blocks finished today, and a **Start**
-button.
+**Setup** (caption `SET DURATION`) shows the block length as `MM:00` (default
+25 minutes, 5 to 120 in steps of 5) inside the full ring, the hint
+"Tap left -5 / right +5", the blocks finished today, and a **Start** button.
 
 | Action | Effect |
 | --- | --- |
@@ -42,18 +46,20 @@ button.
 | tap the left half / swipe down | −5 minutes |
 | **Start** button / PWR short press | start the block |
 
-**Running** shows the countdown as `MM:SS`, the ring emptying clockwise from
-the top, and "Block N today" (N counts the block that is running).
+**Running** (caption `IN PROGRESS`) shows the countdown as `MM:SS`, the ring
+emptying clockwise from the top, the hint "Tap to pause · Hold to cancel" and
+"Block N today" (N counts the block that is running).
 
 | Action | Effect |
 | --- | --- |
-| tap | pause / resume ("Paused" shows under the time) |
+| tap | pause / resume (the caption reads `PAUSED` and the hint "Tap to resume · Hold to cancel") |
 | long press | cancel back to setup; the block is not counted |
 
-**Done**: when the countdown reaches zero the bell rings three times (the
-session-reset clip, 400 ms apart, on boards with a speaker), the screen reads
-"Done · Block N today" and a **Start next** button, or a PWR short press,
-starts a new block of the same length.
+**Done** (caption `COMPLETE`): when the countdown reaches zero the bell rings
+three times (the session-reset clip, 400 ms apart, on boards with a speaker),
+the ring shows its track only, the screen reads "Ready for another block?"
+and "Done · Block N today", and a **Start next** button, or a PWR short
+press, starts a new block of the same length.
 
 The countdown runs from the board's own `millis()` clock, so it does not need
 the daemon or BLE. While a block is running the panel never dims or sleeps.
