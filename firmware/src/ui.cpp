@@ -28,11 +28,12 @@ LV_FONT_DECLARE(font_mono_32);
 LV_FONT_DECLARE(font_mono_18);
 // Inter (H14 design system, docs/fonts.md "Inter"): the usage pages, the app
 // center and the status footer.
-LV_FONT_DECLARE(font_inter_92);
+LV_FONT_DECLARE(font_inter_80);
 LV_FONT_DECLARE(font_inter_60);
 LV_FONT_DECLARE(font_inter_29);
 LV_FONT_DECLARE(font_inter_22);
 LV_FONT_DECLARE(font_inter_17);
+LV_FONT_DECLARE(font_inter_16);
 LV_FONT_DECLARE(font_inter_15);
 LV_FONT_DECLARE(font_inter_13);
 
@@ -48,11 +49,11 @@ struct Layout {
     float   sx, sy;
     int16_t inset;                   // working inset (32 px on 480)
     const lv_font_t* mod_title_font;   // screen title (29 px semibold)
-    const lv_font_t* mod_value_font;   // main usage number (92 px medium, digits only)
+    const lv_font_t* mod_value_font;   // main usage number (80 px medium, digits only)
     const lv_font_t* mod_sign_font;    // "%" after the number, remaining / 5h figures (29 px)
-    const lv_font_t* mod_label_font;   // WEEKLY USAGE, provider label, clock (13 px semibold)
-    const lv_font_t* mod_reset_font;   // "Resets in …", "used", "remaining" (17 px)
-    const lv_font_t* mod_small_font;   // credit metadata, 5h reset (15 px)
+    const lv_font_t* mod_label_font;   // WEEKLY USAGE, provider label, clock (16 px semibold)
+    const lv_font_t* mod_reset_font;   // "Resets in …", "used", "remaining", tile names (22 px)
+    const lv_font_t* mod_small_font;   // credit metadata, 5h reset (22 px on the 480 panel)
     const lv_font_t* footer_font;      // status verb, "N blocks today", "Pick an app" (22 px; the user could not read 15 px on the panel)
     int16_t title_y;
     int16_t content_y;
@@ -121,12 +122,14 @@ static void compute_layout(const BoardCaps& c) {
     L.sx = (float)c.width / 480.0f;
     L.sy = (float)c.height / 480.0f;
     L.inset = (int16_t)(32.0f * L.sx + 0.5f);
+    // Sizes per the user's second device round (H14 L15): labels 16 px,
+    // every supporting line 22 px, the figure 80 px.
     L.mod_title_font = &font_inter_29;
-    L.mod_value_font = &font_inter_92;
+    L.mod_value_font = &font_inter_80;
     L.mod_sign_font  = &font_inter_29;
-    L.mod_label_font = &font_inter_13;
-    L.mod_reset_font = &font_inter_17;
-    L.mod_small_font = &font_inter_15;
+    L.mod_label_font = &font_inter_16;
+    L.mod_reset_font = &font_inter_22;
+    L.mod_small_font = &font_inter_22;
     L.footer_font    = &font_inter_22;
 
     // Values shared by the two original breakpoints; the small branch below
@@ -149,10 +152,12 @@ static void compute_layout(const BoardCaps& c) {
     L.pair_y2 = 120;
     L.pair_y3 = 160;
     L.idle_px = 160;
-    L.focus_label_font   = &font_inter_13;
+    // Focus (H14 L15): the state label in the 16 px small caps, the
+    // supporting line, the −5/+5 cards and the button text in 22 px.
+    L.focus_label_font   = &font_inter_16;
     L.focus_time_font    = &font_inter_60;
-    L.focus_support_font = &font_inter_15;
-    L.focus_ctrl_font    = &font_inter_17;
+    L.focus_support_font = &font_inter_22;
+    L.focus_ctrl_font    = &font_inter_22;
 
     if (c.height >= 460) {
         // Large layout — tuned for 480x480 (AMOLED-2.16).
@@ -330,16 +335,18 @@ static lv_obj_t* panel_third = nullptr;
 // carries the scoped limit. See apply_usage_layout().
 enum usage_layout_t { LAYOUT_MODULE, LAYOUT_DENSE };
 static usage_layout_t layout_mode = LAYOUT_MODULE;
-// Fable grid: 10×10 Clawd glyphs drawn into one canvas whose pixel buffer
-// lives in PSRAM. The C6 boards have none to spare, so there the scoped
-// limit is the third bar of the dense layout.
+// Fable grid: 5×4 Clawd glyphs (5 % each) drawn into one canvas whose pixel
+// buffer lives in PSRAM. The C6 boards have none to spare, so there the
+// scoped limit is the third bar of the dense layout.
 #ifdef BOARD_HAS_PSRAM
 static const bool GRID_AVAILABLE = true;
 #else
 static const bool GRID_AVAILABLE = false;
 #endif
-#define GRID_COUNT 100
-#define GRID_COLS  10
+#define GRID_COLS  5
+#define GRID_ROWS  4
+#define GRID_COUNT (GRID_COLS * GRID_ROWS)
+#define GRID_SCALE 4     // glyph cell size in design px (12×8 cells → 48×32)
 // ---- Usage module objects (built once by build_module(); shown and hidden
 // per view by render_module()). Geometry in design pixels, see MOD_* below.
 static lv_obj_t* module_group = nullptr;
@@ -793,12 +800,17 @@ static void build_idle_group(lv_obj_t* parent) {
 
 // ---- Usage module (H14, DESIGN.md §4) ----
 // Design geometry, in 480×480 pixels. Text values are baselines.
-#define MOD_LABEL_BASE     123   // WEEKLY USAGE
+// The figure row (L15): the 80 px figure, "%", then the WEEKLY USAGE label
+// inline on the "used" baseline, "used" right-aligned. The label's own row
+// (design baseline 123) is gone, so the figure sits 10 px higher than the
+// design's 210 and the bar keeps its place; the rest of the page is unchanged.
 #define MOD_VALUE_X        28    // big figure (its glyph box; the ink lands near x 32)
-#define MOD_VALUE_BASE     210
+#define MOD_VALUE_BASE     200
 #define MOD_SIGN_GAP       10    // between the measured numeric run and "%"
-#define MOD_SIGN_BASE      208
-#define MOD_USED_BASE      202   // "used", right-aligned at the inset
+#define MOD_SIGN_BASE      198
+#define MOD_LABEL_GAP      16    // between "%" and the inline label
+#define MOD_USED_BASE      192   // inline label and "used" (right-aligned at the inset)
+#define MOD_USED_MIN_GAP   16    // "used" is dropped when the label would get closer than this
 #define MOD_TRACK_Y        229   // design 234 with a 12 px track; 22 px keeps the same centre
 #define MOD_TRACK_H        22    // design 12; thicker per user feedback on the panel
 #define MOD_RESET_BASE     279
@@ -818,8 +830,9 @@ static void build_idle_group(lv_obj_t* parent) {
 #define MOD_WIN_PCT_BASE   340
 #define MOD_WIN_TRACK_Y    347   // design 352 (12 px) → 22 px, same centre
 #define MOD_WIN_RESET_BASE 392
-#define MOD_GRID_Y         226   // Fable: the Clawd grid stands in for the track and reset line
-#define MOD_GRID_H         200
+#define MOD_GRID_RESET_BASE 240  // Fable: "Resets in …" under the figure row (no bar on this page)
+#define MOD_GRID_Y         254   // Fable: the Clawd grid stands in for the track, down to the footer
+#define MOD_GRID_H         168
 #define MOD_FOOT_DOT_X     36    // status dot centre
 #define MOD_FOOT_DOT_Y     444
 #define MOD_FOOT_DOT_D     8     // design 6; scaled with the 22 px footer text
@@ -849,8 +862,7 @@ static void build_module(lv_obj_t* parent) {
     const int inset = L.inset;
     const int width = MX(448) - inset;
 
-    lbl_mod_label = make_label(module_group, L.mod_label_font, COL_DIM, "WEEKLY USAGE");
-    place_text(lbl_mod_label, 32, MOD_LABEL_BASE);
+    lbl_mod_label = make_label(module_group, L.mod_label_font, COL_DIM, "WEEKLY USAGE");   // placed after "%" by render_module()
     lbl_mod_value = make_label(module_group, L.mod_value_font, COL_TEXT, "\xE2\x80\x94");
     place_text(lbl_mod_value, MOD_VALUE_X, MOD_VALUE_BASE);
     lbl_mod_sign = make_label(module_group, L.mod_sign_font, COL_TEXT, "%");
@@ -905,11 +917,12 @@ static void build_module(lv_obj_t* parent) {
     }
 }
 
-// Fable view: 10×10 grid of small Clawds, `filled` in Claude's accent and the
-// rest in the track colour. The pixels go straight into the canvas buffer (a
-// few thousand rects would flood the LVGL draw pool). Glyphs are 12×8 cells
-// scaled by an integer so ten rows fit the canvas height; columns spread
-// evenly across the working width.
+// Fable view: 5×4 grid of Clawds, one per 5 %, `filled` in Claude's accent
+// and the rest in the track colour. The pixels go straight into the canvas
+// buffer (hundreds of rects would flood the LVGL draw pool). Glyphs are 12×8
+// cells at GRID_SCALE design px per cell (shrunk only if a smaller panel
+// cannot fit them); columns spread evenly across the working width and rows
+// across the canvas height.
 #define CLAWD_GLYPH_W 12
 #define CLAWD_GLYPH_H 8
 static const char* const CLAWD_GLYPH[CLAWD_GLYPH_H] = {
@@ -927,9 +940,9 @@ static void draw_clawds(int filled, const ProviderTheme& th) {
     if (!grid_canvas) return;
     lv_canvas_fill_bg(grid_canvas, COL_BG, LV_OPA_COVER);
     lv_draw_buf_t* db = lv_canvas_get_draw_buf(grid_canvas);
-    const int pitch_y = grid_h / GRID_COLS;
-    int s = pitch_y / CLAWD_GLYPH_H;
-    if (s < 1) s = 1;
+    const int pitch_y = grid_h / GRID_ROWS;
+    int s = MY(GRID_SCALE);
+    while (s > 1 && (CLAWD_GLYPH_H * s > pitch_y || CLAWD_GLYPH_W * s * GRID_COLS > grid_w)) s--;
     const int gw = CLAWD_GLYPH_W * s, gh = CLAWD_GLYPH_H * s;
     const uint16_t on  = lv_color_to_u16(th.accent);
     const uint16_t off = lv_color_to_u16(th.dot_empty);
@@ -1788,8 +1801,14 @@ static void render_module(int idx, const UsageData* data, const ProviderTheme& t
     if (known) lv_label_set_text_fmt(lbl_mod_value, "%d", main_i);
     else       lv_label_set_text(lbl_mod_value, "\xE2\x80\x94");
     set_shown(lbl_mod_sign, known);
-    lv_obj_set_pos(lbl_mod_sign, MX(MOD_VALUE_X) + label_w(lbl_mod_value) + MX(MOD_SIGN_GAP),
-                   text_top(L.mod_sign_font, MOD_SIGN_BASE));
+    const int sign_x = MX(MOD_VALUE_X) + label_w(lbl_mod_value) + MX(MOD_SIGN_GAP);
+    lv_obj_set_pos(lbl_mod_sign, sign_x, text_top(L.mod_sign_font, MOD_SIGN_BASE));
+    // The label follows the figure on the "used" baseline (L15). "used" is
+    // dropped only when a long label ("MONTHLY SPENDING" at 100 %) would
+    // run into it.
+    const int label_x = sign_x + (known ? label_w(lbl_mod_sign) : 0) + MX(MOD_LABEL_GAP);
+    lv_obj_set_pos(lbl_mod_label, label_x, text_top(L.mod_label_font, MOD_USED_BASE));
+    const bool used_fits = label_x + label_w(lbl_mod_label) + MX(MOD_USED_MIN_GAP) <= MX(448) - label_w(lbl_mod_used);
     lv_bar_set_value(bar_mod, known ? main_i : 0, LV_ANIM_ON);
     lv_obj_set_style_bg_color(bar_mod, th.accent, LV_PART_INDICATOR);
 
@@ -1816,12 +1835,11 @@ static void render_module(int idx, const UsageData* data, const ProviderTheme& t
     set_shown(bar_win, low == LOW_WINDOW);
     set_shown(lbl_win_reset, low == LOW_WINDOW);
     set_shown(grid_canvas, low == LOW_GRID);
-    // The Fable grid stands in for the track, so the reset line takes the
-    // "used" slot right of the figure (same face, right-aligned).
+    // The Fable grid stands in for the track, so the reset line moves up
+    // under the figure row and the grid takes the rest down to the footer.
     set_shown(bar_mod, low != LOW_GRID);
-    set_shown(lbl_mod_used, low != LOW_GRID);
-    if (low == LOW_GRID) place_text_right(lbl_mod_reset, 448, MOD_USED_BASE);
-    else                 place_text(lbl_mod_reset, 32, MOD_RESET_BASE);
+    set_shown(lbl_mod_used, low != LOW_GRID && used_fits);
+    place_text(lbl_mod_reset, 32, low == LOW_GRID ? MOD_GRID_RESET_BASE : MOD_RESET_BASE);
 
     switch (low) {
     case LOW_CREDITS:
@@ -1851,9 +1869,11 @@ static void render_module(int idx, const UsageData* data, const ProviderTheme& t
         }
         break;
     }
-    case LOW_GRID:
-        if (main_i != grid_filled) draw_clawds(main_i, th);
+    case LOW_GRID: {
+        const int glyphs = (main_i * 2 + 5) / 10;   // one Clawd per 5 %, rounded (0–20)
+        if (glyphs != grid_filled) draw_clawds(glyphs, th);
         break;
+    }
     case LOW_REMAINING:
         lv_label_set_text_fmt(lbl_mod_remaining, "%d%%", known ? 100 - main_i : 0);
         lv_obj_set_style_text_color(lbl_mod_remaining, th.accent, 0);

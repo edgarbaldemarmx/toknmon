@@ -45,7 +45,7 @@ The H14 design system (`docs/odd/toknmon-h14-ui-redesign.md`, L9/L10) sets
 the usage pages, the app center and the status footer in **Inter** (Rasmus
 Andersson, SIL Open Font License 1.1 — see `NOTICE.md`). The TTFs are **not**
 committed; download the release zip into a temporary directory and generate
-the six faces from `extras/ttf/`:
+the faces from `extras/ttf/`:
 
 ```bash
 D=$(mktemp -d)
@@ -54,36 +54,45 @@ unzip -q "$D/inter.zip" -d "$D/inter"
 F="$D/inter/extras/ttf"
 O=firmware/src
 
-# 92 px Medium — the main usage figure: digits, "%", "-", "—" (0x2014)
+# 80 px Medium — the main usage figure: digits, "%", "-", "—" (0x2014); replaced the
+# 92 px face after the user's second device round (H14 L15)
 npx --yes lv_font_conv@1.5.3 --font "$F/Inter-Medium.ttf" -r 0x30-0x39,0x25,0x2D,0x2014 \
-  --size 92 --format lvgl --bpp 4 --no-compress -o $O/font_inter_92.c --lv-include "lvgl.h"
+  --size 80 --format lvgl --bpp 4 --no-compress -o $O/font_inter_80.c --lv-include "lvgl.h"
 # 60 px Medium — the Focus countdown: digits, ":", "-"
 npx --yes lv_font_conv@1.5.3 --font "$F/Inter-Medium.ttf" -r 0x30-0x39,0x3A,0x2D \
   --size 60 --format lvgl --bpp 4 --no-compress -o $O/font_inter_60.c --lv-include "lvgl.h"
 # 29 px SemiBold — screen titles, "%", the remaining / 5h figures
 npx --yes lv_font_conv@1.5.3 --font "$F/Inter-SemiBold.ttf" -r 0x20-0x7E \
   --size 29 --format lvgl --bpp 4 --no-compress -o $O/font_inter_29.c --lv-include "lvgl.h"
-# 17 px Regular — reset line, "used", "remaining", tile names (+ "·" and "…")
+# 17 px Regular — the 1.8/compact breakpoints' title and footer (+ "·" and "…")
 npx --yes lv_font_conv@1.5.3 --font "$F/Inter-Regular.ttf" -r 0x20-0x7E,0xB7,0x2026 \
   --size 17 --format lvgl --bpp 4 --no-compress -o $O/font_inter_17.c --lv-include "lvgl.h"
-# 15 px Regular — credit metadata, 5h reset, footer verb (+ "·" and "…")
+# 15 px Regular — kept for smaller breakpoints (+ "·" and "…")
 npx --yes lv_font_conv@1.5.3 --font "$F/Inter-Regular.ttf" -r 0x20-0x7E,0xB7,0x2026 \
   --size 15 --format lvgl --bpp 4 --no-compress -o $O/font_inter_15.c --lv-include "lvgl.h"
-# 22 px Regular — status footer verb and "Pick an app" (+ "·" and "…"); added after
-# the user found the 15 px footer unreadable on the panel
+# 22 px Regular — every supporting line on the 480 panel: "Resets in …", "used",
+# "remaining", credit metadata, 5h reset, tile names, the Focus supporting line, the
+# −5/+5 cards and button text, the status footer and "Pick an app" (+ "·" and "…");
+# added after the user found the 15 px footer unreadable on the panel
 npx --yes lv_font_conv@1.5.3 --font "$F/Inter-Regular.ttf" -r 0x20-0x7E,0xB7,0x2026 \
   --size 22 --format lvgl --bpp 4 --no-compress -o $O/font_inter_22.c --lv-include "lvgl.h"
-# 13 px SemiBold — small-caps labels, provider label, clock (+ "·")
+# 16 px SemiBold — small-caps labels on the 480 panel: WEEKLY USAGE (inline after the
+# figure), CURRENT · 5H, RESET CREDITS, provider label, clock, the Focus state label and
+# "Hold timer to cancel" (+ "·"); bumped from 13 px per the user's second device round
+npx --yes lv_font_conv@1.5.3 --font "$F/Inter-SemiBold.ttf" -r 0x20-0x7E,0xB7 \
+  --size 16 --format lvgl --bpp 4 --no-compress -o $O/font_inter_16.c --lv-include "lvgl.h"
+# 13 px SemiBold — the same labels on the compact (240 px) breakpoint (+ "·")
 npx --yes lv_font_conv@1.5.3 --font "$F/Inter-SemiBold.ttf" -r 0x20-0x7E,0xB7 \
   --size 13 --format lvgl --bpp 4 --no-compress -o $O/font_inter_13.c --lv-include "lvgl.h"
 ```
 
 Then apply the LVGL 9 patch above to each file (drop the `LVGL_VERSION_MAJOR`
 guards and the `cache` field, add `.release_glyph`, `.kerning`,
-`.static_bitmap`, `.fallback`, `.user_data`). Generated sizes (bpp 4): 92 px
-≈ 117 KB of source / 13 glyphs, 60 px ≈ 47 KB, 29 px ≈ 98 KB, 17 px ≈ 47 KB,
-15 px ≈ 39 KB, 13 px ≈ 35 KB; the six faces cost about 1.7 % of the 2.16's
-flash (75.6 % → 77.3 %).
+`.static_bitmap`, `.fallback`, `.user_data`). Generated sizes (bpp 4): 80 px
+≈ 91 KB of source / 13 glyphs, 60 px ≈ 47 KB, 29 px ≈ 98 KB, 22 px ≈ 62 KB,
+17 px ≈ 47 KB, 16 px ≈ 45 KB, 15 px ≈ 39 KB, 13 px ≈ 35 KB; the original six
+faces cost about 1.7 % of the 2.16's flash (75.6 % → 77.3 %), and swapping
+92 → 80 px while adding 16 px is roughly flash-neutral.
 
 The pages lay text out by **baseline** (`text_top()` in `ui.cpp` turns a
 design baseline into the label's top edge with the face's `line_height` and

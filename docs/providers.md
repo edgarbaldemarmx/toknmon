@@ -164,10 +164,11 @@ footer is a dot in the accent plus the status verb.
   rides on this payload only.
 - **Fable**: the model-scoped weekly limit (`f`/`fr`, label `fl`) gets its
   own view after Claude, titled with the model label and tagged `CLAUDE`.
-  The track gives way to a 10×10 grid of small Clawds across the working
-  width, one per percent, filled in terracotta with the rest in the track
-  colour; the reset time sits right of the figure. On the C6 boards (no
-  canvas) it stays a third bar on the Claude view.
+  The track gives way to a 5 × 4 grid of Clawds (48 × 32 px each) across the
+  working width, one per 5 % (`round(pct / 5)` filled, 0–20), filled in
+  terracotta with the rest in the track colour; the reset time sits under
+  the figure row, above the grid. On the C6 boards (no canvas) it stays a
+  third bar on the Claude view.
 - **Codex** (monochrome, the white accent): weekly track and, when the
   payload carries reset credits (`rc`/`ru`, see
   [Codex reset credits](#codex-reset-credits)), a `RESET CREDITS` panel:
