@@ -1270,7 +1270,7 @@ static int load_picked_view(void) {
     return (idx >= 0 && idx < UI_VIEW_COUNT) ? idx : PROVIDER_CLAUDE;
 }
 
-// Move to the next fresh slot (if there is another one).
+// Move to the next fresh view (if there is another one).
 static void carousel_advance(void) {
     int nxt = next_fresh_view(visible_view);
     if (nxt < 0 || nxt == visible_view) return;
@@ -1345,9 +1345,10 @@ void ui_update_slot(int idx, const UsageData* data) {
     }
 }
 
-// Render one slot's data into the panels and make it the visible slot.
+// Render one view's data into the panels and make it the visible view.
 static void show_view(int idx) {
     if (idx == UI_VIEW_FABLE && !fable_available()) idx = PROVIDER_CLAUDE;   // the limit went away
+    // Logged only on a change; tools/test/shell/test_sim_sticky_view.sh reads it.
     if (idx != visible_view) Serial.printf("UI: showing view %d\n", idx);
     visible_view = idx;
     const int prov = view_provider(idx);
