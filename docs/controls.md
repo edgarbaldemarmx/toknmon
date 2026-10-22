@@ -1,8 +1,10 @@
 # Using the device
 
-ToknMon has two screens: the **splash** (full-size pixel-art animations) and
-the **meter** (usage view, one provider at a time). The board boots on the
-splash and waits for the daemon; the first payload lights up the meter.
+ToknMon has four screens: the **splash** (full-size pixel-art animations),
+the **meter** (usage view, one provider at a time), the **app center** and
+**Focus** (a block timer) — the last two are described in
+[`apps.md`](apps.md). The board boots on the splash and waits for the daemon;
+the first payload lights up the meter.
 
 ## Touch
 
@@ -17,17 +19,31 @@ splash and waits for the daemon; the first payload lights up the meter.
 A swipe never counts as a tap: the gesture handler marks the press and the
 tap/long-press handlers ignore it (LVGL fires both on the same release).
 
+| Gesture | App center | Focus (setup) | Focus (running) |
+| --- | --- | --- | --- |
+| **Tap** | on a tile: launch it | right half +5 min, left half −5 min | pause / resume |
+| **Swipe up** | — | +5 min | — |
+| **Swipe down** | — | −5 min | — |
+| **Long-press** | — | — | cancel back to setup |
+
+On boards without a secondary button, a swipe down that starts in the meter's
+header (the title row) opens the app center.
+
 ## Buttons (Waveshare AMOLED 2.16)
 
 | Button | Where | Splash | Meter |
 | --- | --- | --- | --- |
-| **PWR** (middle) | AXP2101 power key | next animation | cycle brightness |
+| **PWR** (middle) | AXP2101 power key | next animation | cycle brightness (on Focus: start / start next) |
 | **BOOT** (left, GPIO 0) | side | hold: sends **Space** over Bluetooth HID (Claude Code voice-mode push-to-talk) | same |
-| **Secondary** (right, GPIO 18) | side | press: sends **Shift+Tab** over Bluetooth HID (Claude Code mode toggle) | same |
+| **Secondary** (right, GPIO 18) | side | press: open the app center | press: app center ↔ last app |
 
-The HID keys are standard Bluetooth keyboard reports: they land in whatever
-window has focus on the paired Mac, not only in Claude Code. Boards without
-a secondary button simply lack the Shift+Tab key.
+With `sidebtn hid` (NVS `side_btn = hid`) the secondary button keeps its
+legacy role on every screen: it sends **Shift+Tab** over Bluetooth HID
+(Claude Code mode toggle) and never opens the app center. The HID keys are
+standard Bluetooth keyboard reports: they land in whatever window has focus
+on the paired Mac, not only in Claude Code. Boards without a secondary
+button open the app center with a swipe down from the meter's header and lack
+the Shift+Tab key.
 
 **Pairing mode**: hold PWR for about 3 seconds and release. The board clears
 its saved bond and advertises again; pair it from System Settings → Bluetooth.
@@ -116,6 +132,8 @@ Open the USB serial console at **115200 baud**
 | `name` | print the Bluetooth name | `BLE: name=<name>` |
 | `name <text>` | set the name (1–18 printable ASCII, no `#`) and reboot | `BLE: name set to "<text>", restarting` |
 | `screen usage` | show the meter | `ok` |
+| `screen apps` / `screen focus` | show the app center / Focus ([`apps.md`](apps.md)) | `ok` |
+| `apps [list]` / `sidebtn [apps\|hid]` / `focus <action>` | app center and Focus controls, see [`apps.md`](apps.md) | see there |
 | `screen splash` | show the default (Claude) splash | `ok` |
 | `screen splash claude\|codex\|kimi\|grok` | mascot mode for that provider | `ok` / `err …` |
 | `slot 0-4` | show that view on the meter and make it the picked one (0 Claude, 1 Codex, 2 Kimi, 3 Grok, 4 Fable) | `ok` / `err slot not fresh` |

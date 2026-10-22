@@ -6,6 +6,8 @@
 enum screen_t {
     SCREEN_SPLASH,
     SCREEN_USAGE,
+    SCREEN_APPS,     // app center (H12): one tile per enabled app
+    SCREEN_FOCUS,    // Focus block timer (H12)
     SCREEN_COUNT,
 };
 
@@ -54,3 +56,21 @@ void ui_update_battery(int percent, bool charging, bool usb_power);  // percent 
 // tap, after 2 minutes, or ui_hide_alert() when the session moves on.
 void ui_show_alert(const char* message);
 void ui_hide_alert(void);
+// ---- App center and Focus (H12, see docs/apps.md) ----
+// Side-button action: app center ↔ the last app (usage or Focus); from the
+// splash it opens the app center. False (nothing happens) when only Meter is
+// enabled (`apps` config) — the caller keeps the button inert then.
+bool ui_apps_toggle(void);
+// Re-lay the app tiles after apps_set_list() changed the enabled set.
+void ui_apps_refresh(void);
+// True while a Focus block is counting down (the main loop keeps the panel
+// awake, S1.4). Paused and done blocks do not hold the screen.
+bool ui_focus_running(void);
+// PWR short press while the Focus screen is up: setup → start, done → start
+// the next block. False when the press was not consumed (other screens or
+// a running block), so the caller falls through to its default action.
+bool ui_focus_pwr_press(void);
+// Serial / sim QA: `focus start|pause|cancel|next|finish|plus|minus` drive
+// the same state machine as touch and PWR. `finish` ends a running block now
+// (counts it, rings the bell). False when the action does not apply.
+bool ui_focus_command(const char* action);

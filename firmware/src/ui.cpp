@@ -7,6 +7,9 @@
 #include "clawd_still.h"
 #include "icons.h"
 #include "hal/board_caps.h"
+#include "hal/sound_hal.h"
+#include "apps.h"
+#include "focus_logic.h"
 #include <Preferences.h>
 
 // Custom fonts (scaled for 314 PPI, ~1.9x from original 165 PPI)
@@ -1118,6 +1121,393 @@ static void init_alert(void) {
     lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
 }
 
+// ======== App center and Focus (H12) ========
+// Two more screens beside the splash and the meter. The app center is a row
+// of tiles, one per enabled app (apps.cpp); Focus is a block timer whose
+// state machine lives in focus_logic.cpp and only gets millis()-backed
+// lv_tick deltas, touch/PWR events and the daemon clock's day from here.
+
+static lv_obj_t* apps_container = nullptr;
+static lv_obj_t* app_tiles[APP_COUNT] = {};
+static lv_image_dsc_t tile_clawd_dsc;           // the still Clawd on the Meter tile
+
+static lv_obj_t* focus_container = nullptr;
+static lv_obj_t* focus_arc;                     // the ring that empties
+static lv_obj_t* lbl_focus_time;                // big MM:SS (MM:00 in setup)
+static lv_obj_t* lbl_focus_hint;                // small line inside the ring
+static lv_obj_t* lbl_focus_sub;                 // "Block N today" / "Done · Block N today"
+static lv_obj_t* btn_focus;                     // "Start" / "Start next"
+static lv_obj_t* lbl_focus_btn;
+static FocusState focus;
+static int        focus_shown_sec = -1;         // last rendered remaining second
+static screen_t   last_app_screen = SCREEN_USAGE;   // what the side button returns to
+
+// Bell: the reset clip (bell_pcm.h, 2.4 s at 44.1 kHz stereo) three times
+// with 400 ms gaps. chime_play() ignores calls while a clip plays, so the
+// repeats are spaced by an lv_timer instead of being queued.
+#define FOCUS_BELL_CLIP_MS 2400
+#define FOCUS_BELL_GAP_MS  400
+#define FOCUS_BELL_TIMES   3
+static lv_timer_t* focus_bell_timer = nullptr;
+static int         focus_bells_left = 0;
+
+// Alert text for the app center and Focus screens: the usage status line is
+// hidden there, so the message rides on this screen-level label instead.
+static lv_obj_t* lbl_overlay_alert = nullptr;
+
+// YYYYMMDD from the daemon clock, advanced locally like the title clock; 0
+// until a payload with `t` has landed.
+static uint32_t clock_day_now(void) {
+    if (clock_base_epoch <= 0) return 0;
+    time_t cur = (time_t)(clock_base_epoch + (lv_tick_get() - clock_base_ms) / 1000);
+    struct tm tmv;
+    gmtime_r(&cur, &tmv);
+    return (uint32_t)(tmv.tm_year + 1900) * 10000u + (uint32_t)(tmv.tm_mon + 1) * 100u + (uint32_t)tmv.tm_mday;
+}
+
+static void focus_bell_cb(lv_timer_t* t) {
+    (void)t;
+    sound_hal_play_reset();
+    if (--focus_bells_left <= 0) lv_timer_pause(focus_bell_timer);
+}
+
+static void focus_bell_start(void) {
+    sound_hal_play_reset();
+    focus_bells_left = FOCUS_BELL_TIMES - 1;
+    lv_timer_reset(focus_bell_timer);
+    lv_timer_resume(focus_bell_timer);
+}
+
+static void render_focus(void) {
+    if (!focus_container) return;
+    const uint32_t total_ms = (uint32_t)focus.length_min * 60000u;
+    uint32_t shown_ms = (focus.phase == FOCUS_SETUP) ? total_ms : focus_remaining_ms(&focus);
+    // Ceil to the second while counting so 24:59.4 reads 25:00 → 24:59 → …
+    uint32_t sec = (focus.phase == FOCUS_RUNNING || focus.phase == FOCUS_PAUSED)
+                       ? (shown_ms + 999) / 1000 : shown_ms / 1000;
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)(sec / 60), (unsigned)(sec % 60));
+    lv_label_set_text(lbl_focus_time, buf);
+    focus_shown_sec = (int)sec;
+
+    int32_t v = (focus.phase == FOCUS_SETUP) ? 1000
+              : (focus.phase == FOCUS_DONE) ? 0
+              : (int32_t)((uint64_t)shown_ms * 1000u / total_ms);
+    lv_arc_set_value(focus_arc, v);
+
+    const uint8_t today = focus_blocks_today(&focus, clock_day_now());
+    switch (focus.phase) {
+    case FOCUS_SETUP:
+        snprintf(buf, sizeof(buf), "%u block%s today", today, today == 1 ? "" : "s");
+        lv_label_set_text(lbl_focus_hint, "tap right +5 / left -5");
+        lv_label_set_text(lbl_focus_btn, "Start");
+        lv_obj_clear_flag(btn_focus, LV_OBJ_FLAG_HIDDEN);
+        break;
+    case FOCUS_RUNNING:
+        snprintf(buf, sizeof(buf), "Block %u today", today + 1);
+        lv_label_set_text(lbl_focus_hint, "tap pause / hold cancel");
+        lv_obj_add_flag(btn_focus, LV_OBJ_FLAG_HIDDEN);
+        break;
+    case FOCUS_PAUSED:
+        snprintf(buf, sizeof(buf), "Block %u today", today + 1);
+        lv_label_set_text(lbl_focus_hint, "Paused / tap to resume");
+        lv_obj_add_flag(btn_focus, LV_OBJ_FLAG_HIDDEN);
+        break;
+    case FOCUS_DONE:
+        snprintf(buf, sizeof(buf), "Done \xC2\xB7 Block %u today", today);
+        lv_label_set_text(lbl_focus_hint, "");
+        lv_label_set_text(lbl_focus_btn, "Start next");
+        lv_obj_clear_flag(btn_focus, LV_OBJ_FLAG_HIDDEN);
+        break;
+    }
+    lv_label_set_text(lbl_focus_sub, buf);
+}
+
+// Start (setup) / start the next block (done). Shared by the button, PWR and
+// the serial command.
+static bool focus_do_start(void) {
+    if (!focus_start(&focus, lv_tick_get())) return false;
+    Serial.printf("focus: block started (%u min)\n", focus.length_min);
+    render_focus();
+    return true;
+}
+
+static void focus_finished(void) {
+    apps_focus_counter_store(focus.blocks, focus.blocks_day);
+    Serial.printf("focus: block done — %u today (day %lu)\n", focus.blocks, (unsigned long)focus.blocks_day);
+    focus_bell_start();
+    render_focus();
+}
+
+// Called every loop from ui_tick_anim(), whatever screen is up: a block keeps
+// counting in the background and rings when it ends.
+static void focus_tick_ui(void) {
+    if (focus.phase != FOCUS_RUNNING) return;
+    if (focus_tick(&focus, lv_tick_get(), clock_day_now())) {
+        focus_finished();
+        return;
+    }
+    if (current_screen != SCREEN_FOCUS) return;
+    int sec = (int)((focus_remaining_ms(&focus) + 999) / 1000);
+    if (sec != focus_shown_sec) render_focus();
+}
+
+static void focus_btn_cb(lv_event_t* e) {
+    (void)e;
+    if (gesture_seen || alert_active) return;
+    focus_do_start();
+}
+
+// Tap on the Focus screen: setup → ±5 by half (right +, left −); running or
+// paused → pause / resume. Done is handled by the button only.
+static void focus_tap_cb(lv_event_t* e) {
+    (void)e;
+    if (gesture_seen || alert_active) return;
+    if (focus.phase == FOCUS_SETUP) {
+        lv_point_t p = { L.scr_w / 2, 0 };
+        lv_indev_t* indev = lv_indev_active();
+        if (indev) lv_indev_get_point(indev, &p);
+        if (focus_adjust(&focus, p.x >= L.scr_w / 2 ? +1 : -1)) render_focus();
+        return;
+    }
+    if (focus_toggle_pause(&focus, lv_tick_get())) render_focus();
+}
+
+// Long press while running or paused: cancel back to setup without counting.
+static void focus_long_press_cb(lv_event_t* e) {
+    (void)e;
+    if (gesture_seen || alert_active) return;
+    if (focus_cancel(&focus)) {
+        Serial.println("focus: block cancelled");
+        render_focus();
+    }
+}
+
+static void init_focus_screen(lv_obj_t* scr) {
+    focus_container = lv_obj_create(scr);
+    lv_obj_set_size(focus_container, L.scr_w, L.scr_h);
+    lv_obj_set_pos(focus_container, 0, 0);
+    lv_obj_set_style_bg_opa(focus_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(focus_container, 0, 0);
+    lv_obj_set_style_pad_all(focus_container, 0, 0);
+    lv_obj_clear_flag(focus_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(focus_container, focus_tap_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(focus_container, focus_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
+    lv_obj_add_flag(focus_container, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t* title = lv_label_create(focus_container);
+    lv_label_set_text(title, "Focus");
+    lv_obj_set_style_text_font(title, L.title_font, 0);
+    lv_obj_set_style_text_color(title, COL_ACCENT, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, L.title_y);
+
+    // Vertical budget, bottom-up: start button, the "Block N today" line, the
+    // ring fills whatever is left under the title.
+    const int btn_h = lv_font_get_line_height(L.pill_font) + 2 * L.pill_pad_y + 8;
+    const int btn_y = L.scr_h - L.margin - btn_h;
+    const int sub_h = lv_font_get_line_height(L.anim_font);
+    const int sub_y = btn_y - L.panel_pad_y - sub_h;
+    int ring = sub_y - L.panel_pad_y - L.content_y;
+    if (ring > L.content_w) ring = L.content_w;
+    const int arc_w = L.small_icons ? 8 : 14;
+
+    focus_arc = lv_arc_create(focus_container);
+    lv_obj_set_size(focus_arc, ring, ring);
+    lv_obj_set_pos(focus_arc, (L.scr_w - ring) / 2, L.content_y);
+    lv_arc_set_rotation(focus_arc, 270);          // start at 12 o'clock
+    lv_arc_set_bg_angles(focus_arc, 0, 360);
+    lv_arc_set_range(focus_arc, 0, 1000);
+    lv_arc_set_value(focus_arc, 1000);
+    lv_arc_set_mode(focus_arc, LV_ARC_MODE_NORMAL);
+    lv_obj_remove_style(focus_arc, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(focus_arc, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the container
+    lv_obj_set_style_arc_width(focus_arc, arc_w, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(focus_arc, arc_w, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(focus_arc, COL_BAR_BG, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(focus_arc, COL_ACCENT, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(focus_arc, true, LV_PART_INDICATOR);
+
+    // lv_obj_align() is persistent (style align), so the labels stay
+    // centered when their text width changes; the offsets put them at the
+    // ring's center rather than the screen's.
+    const int ring_dy = (L.content_y + ring / 2) - L.scr_h / 2;
+    lbl_focus_time = lv_label_create(focus_container);
+    lv_obj_set_style_text_font(lbl_focus_time, L.pct_font, 0);
+    lv_obj_set_style_text_color(lbl_focus_time, COL_TEXT, 0);
+    lv_obj_align(lbl_focus_time, LV_ALIGN_CENTER, 0, ring_dy - lv_font_get_line_height(L.prov_font) / 2);
+
+    lbl_focus_hint = lv_label_create(focus_container);
+    lv_obj_set_style_text_font(lbl_focus_hint, L.pace_font, 0);
+    lv_obj_set_style_text_color(lbl_focus_hint, COL_DIM, 0);
+    lv_obj_align(lbl_focus_hint, LV_ALIGN_CENTER, 0, ring_dy + lv_font_get_line_height(L.pct_font) / 2 + 4);
+
+    lbl_focus_sub = lv_label_create(focus_container);
+    lv_obj_set_style_text_font(lbl_focus_sub, L.anim_font, 0);
+    lv_obj_set_style_text_color(lbl_focus_sub, COL_ACCENT, 0);
+    lv_obj_align(lbl_focus_sub, LV_ALIGN_TOP_MID, 0, sub_y);
+
+    btn_focus = lv_button_create(focus_container);
+    lv_obj_set_size(btn_focus, L.content_w / 2, btn_h);
+    lv_obj_set_pos(btn_focus, L.margin + L.content_w / 4, btn_y);
+    lv_obj_set_style_bg_color(btn_focus, COL_ACCENT, 0);
+    lv_obj_set_style_bg_opa(btn_focus, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(btn_focus, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_shadow_width(btn_focus, 0, 0);
+    lv_obj_add_event_cb(btn_focus, focus_btn_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lbl_focus_btn = lv_label_create(btn_focus);
+    lv_obj_set_style_text_font(lbl_focus_btn, L.pill_font, 0);
+    lv_obj_set_style_text_color(lbl_focus_btn, COL_TEXT, 0);
+    lv_obj_center(lbl_focus_btn);
+
+    focus_bell_timer = lv_timer_create(focus_bell_cb, FOCUS_BELL_CLIP_MS + FOCUS_BELL_GAP_MS, NULL);
+    lv_timer_pause(focus_bell_timer);
+
+    uint8_t blocks; uint32_t day;
+    apps_focus_counter_load(&blocks, &day);
+    focus_init(&focus, blocks, day);
+    render_focus();
+}
+
+// ---- App center ----
+
+static void app_tile_cb(lv_event_t* e) {
+    if (gesture_seen || alert_active) return;
+    int app = (int)(intptr_t)lv_event_get_user_data(e);
+    ui_show_screen(app == APP_FOCUS ? SCREEN_FOCUS : SCREEN_USAGE);
+}
+
+// Tile geometry: squares side by side, centered as a group; hidden tiles
+// (disabled apps) leave the row and the rest re-center.
+static void layout_apps(void) {
+    if (!apps_container) return;
+    int tile = (L.content_w - L.usage_panel_gap) / 2;
+    if (tile > L.content_w / 2) tile = L.content_w / 2;
+    const int avail_h = L.scr_h - L.content_y - L.margin;
+    if (tile > avail_h) tile = avail_h;
+    const int n = apps_enabled_count();
+    const int row_w = n * tile + (n - 1) * L.usage_panel_gap;
+    int x = (L.scr_w - row_w) / 2;
+    const int y = L.content_y + (avail_h - tile) / 2;
+    for (int i = 0; i < APP_COUNT; i++) {
+        if (!app_tiles[i]) continue;
+        if (!apps_enabled((app_id_t)i)) { lv_obj_add_flag(app_tiles[i], LV_OBJ_FLAG_HIDDEN); continue; }
+        lv_obj_clear_flag(app_tiles[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(app_tiles[i], x, y);
+        lv_obj_set_size(app_tiles[i], tile, tile);
+        x += tile + L.usage_panel_gap;
+    }
+}
+
+// The Focus glyph: a ring with two hands, drawn with LVGL primitives (no
+// bitmap). `px` is the glyph box.
+static void make_timer_glyph(lv_obj_t* parent, int px) {
+    lv_obj_t* ring = lv_arc_create(parent);
+    lv_obj_set_size(ring, px, px);
+    lv_obj_align(ring, LV_ALIGN_TOP_MID, 0, 0);
+    lv_arc_set_rotation(ring, 270);
+    lv_arc_set_bg_angles(ring, 0, 360);
+    lv_arc_set_range(ring, 0, 360);
+    lv_arc_set_value(ring, 300);                    // a few minutes gone
+    lv_obj_remove_style(ring, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+    const int w = px >= 60 ? 6 : 4;
+    lv_obj_set_style_arc_width(ring, w, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(ring, w, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(ring, COL_BAR_BG, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(ring, COL_ACCENT, LV_PART_INDICATOR);
+
+    static lv_point_precise_t hands[APP_COUNT][3];   // one hand set per tile that asks
+    static int used = 0;
+    lv_point_precise_t* h = hands[used < APP_COUNT ? used++ : 0];
+    const lv_value_precise_t c = px / 2;
+    h[0] = { c + (lv_value_precise_t)(px * 0.22f), c - (lv_value_precise_t)(px * 0.12f) };  // minute hand (~2 o'clock)
+    h[1] = { c, c };
+    h[2] = { c, c - (lv_value_precise_t)(px * 0.32f) };                                       // hour hand (12 o'clock)
+    lv_obj_t* line = lv_line_create(parent);
+    lv_obj_set_size(line, px, px);
+    lv_obj_align(line, LV_ALIGN_TOP_MID, 0, 0);
+    lv_line_set_points(line, h, 3);
+    lv_obj_set_style_line_width(line, w, 0);
+    lv_obj_set_style_line_color(line, COL_TEXT, 0);
+    lv_obj_set_style_line_rounded(line, true, 0);
+    lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE);
+}
+
+static void init_apps_screen(lv_obj_t* scr) {
+    apps_container = lv_obj_create(scr);
+    lv_obj_set_size(apps_container, L.scr_w, L.scr_h);
+    lv_obj_set_pos(apps_container, 0, 0);
+    lv_obj_set_style_bg_opa(apps_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(apps_container, 0, 0);
+    lv_obj_set_style_pad_all(apps_container, 0, 0);
+    lv_obj_clear_flag(apps_container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(apps_container, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t* title = lv_label_create(apps_container);
+    lv_label_set_text(title, "Apps");
+    lv_obj_set_style_text_font(title, L.title_font, 0);
+    lv_obj_set_style_text_color(title, COL_TEXT, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, L.title_y);
+
+    if (L.small_icons) init_icon_dsc_rgb565a8(&tile_clawd_dsc, CLAWD_STILL_SMALL_W, CLAWD_STILL_SMALL_H, clawd_still_small_data);
+    else               init_icon_dsc_rgb565a8(&tile_clawd_dsc, CLAWD_STILL_W, CLAWD_STILL_H, clawd_still_data);
+    const int glyph = L.small_icons ? CLAWD_STILL_SMALL_H + 8 : CLAWD_STILL_H + 24;
+
+    for (int i = 0; i < APP_COUNT; i++) {
+        lv_obj_t* tile = make_panel(apps_container, 0, 0, 10, 10);
+        lv_obj_clear_flag(tile, LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(tile, app_tile_cb, LV_EVENT_SHORT_CLICKED, (void*)(intptr_t)i);
+        // Icon box: fixed height so the label lands at the same y on both tiles.
+        lv_obj_t* box = lv_obj_create(tile);
+        lv_obj_set_size(box, glyph, glyph);
+        lv_obj_align(box, LV_ALIGN_TOP_MID, 0, L.panel_pad_y);
+        lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(box, 0, 0);
+        lv_obj_set_style_pad_all(box, 0, 0);
+        lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+        if (i == APP_METER) {
+            lv_obj_t* img = lv_image_create(box);
+            lv_image_set_src(img, &tile_clawd_dsc);
+            lv_obj_center(img);
+            lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
+        } else {
+            make_timer_glyph(box, glyph);
+        }
+        lv_obj_t* name = lv_label_create(tile);
+        lv_label_set_text(name, apps_name((app_id_t)i));
+        lv_obj_set_style_text_font(name, L.pill_font, 0);
+        lv_obj_set_style_text_color(name, COL_TEXT, 0);
+        lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -L.panel_pad_y);
+        app_tiles[i] = tile;
+    }
+    layout_apps();
+}
+
+// Alert text on the app center / Focus screens (the usage status line is
+// hidden there). Shown only while an alert is active on one of them.
+static void apply_alert_overlay(void) {
+    if (!lbl_overlay_alert) return;
+    const bool show = alert_active && (current_screen == SCREEN_APPS || current_screen == SCREEN_FOCUS);
+    if (show) lv_obj_clear_flag(lbl_overlay_alert, LV_OBJ_FLAG_HIDDEN);
+    else      lv_obj_add_flag(lbl_overlay_alert, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void init_alert_overlay(lv_obj_t* scr) {
+    lbl_overlay_alert = lv_label_create(scr);
+    lv_label_set_text(lbl_overlay_alert, "");
+    lv_obj_set_style_text_font(lbl_overlay_alert, L.anim_font, 0);
+    lv_obj_set_style_text_color(lbl_overlay_alert, COL_ACCENT, 0);
+    lv_obj_set_style_bg_color(lbl_overlay_alert, COL_BG, 0);
+    lv_obj_set_style_bg_opa(lbl_overlay_alert, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_align(lbl_overlay_alert, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(lbl_overlay_alert, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_width(lbl_overlay_alert, L.content_w);
+    lv_obj_align(lbl_overlay_alert, LV_ALIGN_BOTTOM_MID, 0, L.anim_y);
+    lv_obj_add_flag(lbl_overlay_alert, LV_OBJ_FLAG_HIDDEN);
+}
+
 // ======== Public API ========
 
 static int load_picked_view(void);
@@ -1137,6 +1527,9 @@ void ui_init(void) {
     init_battery_icons();
 
     init_usage_screen(scr);
+    apps_init();
+    init_apps_screen(scr);
+    init_focus_screen(scr);
     splash_init(scr);
 
     if (splash_get_root()) {
@@ -1174,6 +1567,7 @@ void ui_init(void) {
     }
 
     init_alert();
+    init_alert_overlay(scr);
     apply_usage_layout(LAYOUT_BARS);
     picked_view = load_picked_view();
     visible_view = picked_view;
@@ -1625,6 +2019,7 @@ static void update_view_state(void) {
 }
 
 void ui_tick_anim(void) {
+    focus_tick_ui();   // a running block counts down on every screen
     if (current_screen != SCREEN_USAGE) return;
     update_view_state();
     if (view_state == 1) splash_mini_tick();   // animate the sleeping creature on the idle screen
@@ -1742,9 +2137,22 @@ bool ui_handle_swipe(lv_dir_t dir) {
         if (dir == LV_DIR_RIGHT)      { splash_prev(); return true; }
         return false;
     case SCREEN_USAGE:
+        // Single-button boards have no side button: a swipe down that starts
+        // in the header opens the app center instead of the splash.
+        if (dir == LV_DIR_BOTTOM && board_caps().button_count < 2 && apps_enabled_count() > 1) {
+            lv_indev_t* indev = lv_indev_active();
+            lv_point_t p = { 0, L.scr_h };
+            if (indev) lv_indev_get_point(indev, &p);
+            if (p.y < L.content_y) { ui_show_screen(SCREEN_APPS); return true; }
+        }
         if (vertical)                 { ui_show_screen(SCREEN_SPLASH); return true; }
         if (dir == LV_DIR_LEFT)       return ui_carousel_next();
         if (dir == LV_DIR_RIGHT)      return ui_carousel_prev();
+        return false;
+    case SCREEN_FOCUS:
+        // Setup: swipe up +5 / down −5. Running, paused and done ignore swipes.
+        if (dir == LV_DIR_TOP)        { if (focus_adjust(&focus, +1)) { render_focus(); return true; } return false; }
+        if (dir == LV_DIR_BOTTOM)     { if (focus_adjust(&focus, -1)) { render_focus(); return true; } return false; }
         return false;
     default:
         return false;
@@ -1753,6 +2161,8 @@ bool ui_handle_swipe(lv_dir_t dir) {
 
 void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
+    if (apps_container)  lv_obj_add_flag(apps_container, LV_OBJ_FLAG_HIDDEN);
+    if (focus_container) lv_obj_add_flag(focus_container, LV_OBJ_FLAG_HIDDEN);
     splash_hide();
     if (screen != SCREEN_SPLASH) {
         // Leaving the splash ends mascot mode and the parade: the next plain
@@ -1764,18 +2174,23 @@ void ui_show_screen(screen_t screen) {
     switch (screen) {
     case SCREEN_SPLASH:  splash_show(); break;
     case SCREEN_USAGE:   lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN); break;
+    case SCREEN_APPS:    layout_apps(); lv_obj_clear_flag(apps_container, LV_OBJ_FLAG_HIDDEN); break;
+    case SCREEN_FOCUS:   render_focus(); lv_obj_clear_flag(focus_container, LV_OBJ_FLAG_HIDDEN); break;
     default: break;
     }
 
-    splash_mascot_set_visible(screen != SCREEN_SPLASH);
+    // The corner mascot / still logo belong to the meter only.
+    splash_mascot_set_visible(screen == SCREEN_USAGE);
     if (logo_img) {
-        if (screen == SCREEN_SPLASH) lv_obj_add_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
-        else                          lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
+        if (screen == SCREEN_USAGE) lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
+        else                        lv_obj_add_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
     }
 
     if (screen != SCREEN_SPLASH) prev_non_splash_screen = screen;
+    if (screen == SCREEN_USAGE || screen == SCREEN_FOCUS) last_app_screen = screen;
     current_screen = screen;
     apply_battery_visibility();
+    apply_alert_overlay();
 }
 
 void ui_toggle_splash(void) {
@@ -1845,6 +2260,8 @@ void ui_show_alert(const char* message) {
     lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_width(lbl_anim, L.content_w);
     lv_label_set_text(lbl_anim, message);
+    if (lbl_overlay_alert) lv_label_set_text(lbl_overlay_alert, message);
+    apply_alert_overlay();
     lv_timer_reset(alert_timer);
     lv_timer_resume(alert_timer);
 }
@@ -1856,4 +2273,52 @@ void ui_hide_alert(void) {
     lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(lbl_anim, LV_SIZE_CONTENT);
     lv_timer_pause(alert_timer);
+    apply_alert_overlay();
+}
+
+// ---- App center and Focus public API (H12) ----
+
+bool ui_apps_toggle(void) {
+    if (current_screen == SCREEN_APPS) {
+        ui_show_screen(apps_enabled(APP_FOCUS) || last_app_screen == SCREEN_USAGE ? last_app_screen : SCREEN_USAGE);
+        return true;
+    }
+    if (apps_enabled_count() < 2) return false;   // only Meter: nothing to pick from
+    ui_show_screen(SCREEN_APPS);
+    return true;
+}
+
+void ui_apps_refresh(void) {
+    layout_apps();
+    // Focus got disabled while it was up: back to the meter.
+    if (!apps_enabled(APP_FOCUS) && (current_screen == SCREEN_FOCUS || last_app_screen == SCREEN_FOCUS)) {
+        last_app_screen = SCREEN_USAGE;
+        if (current_screen == SCREEN_FOCUS) ui_show_screen(SCREEN_USAGE);
+    }
+}
+
+bool ui_focus_running(void) {
+    return focus.phase == FOCUS_RUNNING;
+}
+
+bool ui_focus_pwr_press(void) {
+    if (current_screen != SCREEN_FOCUS) return false;
+    return focus_do_start();
+}
+
+bool ui_focus_command(const char* action) {
+    if (!action) return false;
+    bool ok = false;
+    if (strcmp(action, "start") == 0 || strcmp(action, "next") == 0) ok = focus_do_start();
+    else if (strcmp(action, "pause") == 0)  ok = focus_toggle_pause(&focus, lv_tick_get());
+    else if (strcmp(action, "cancel") == 0) ok = focus_cancel(&focus);
+    else if (strcmp(action, "plus") == 0)   ok = focus_adjust(&focus, +1);
+    else if (strcmp(action, "minus") == 0)  ok = focus_adjust(&focus, -1);
+    else if (strcmp(action, "finish") == 0) {
+        ok = focus_finish_now(&focus, clock_day_now());
+        if (ok) { focus_finished(); return true; }
+    }
+    else return false;
+    if (ok) render_focus();
+    return ok;
 }

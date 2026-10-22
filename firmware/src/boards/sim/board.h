@@ -10,7 +10,8 @@
 //   1..9                 jump to scenario state N (pauses playback)
 //   d                    toggle BLE connected/disconnected
 //   b (hold)             PRIMARY button  (BOOT — HID Space PTT on hardware)
-//   n (hold)             SECONDARY button (HID Shift+Tab on hardware)
+//   n                    SECONDARY button (side button: app center <-> last
+//                        app; HID Shift+Tab when side_btn = hid, as on hardware)
 //   p                    PWR button (short press; hold ~3s + release = pair)
 //   c                    toggle charging       - / =   battery down / up 5%
 //   u                    toggle no battery (USB power only → plug-zap icon)
@@ -30,6 +31,9 @@
 // hand-off). Both do what the serial `screen splash <p>` / `parade on`
 // commands do on hardware (ble_sim.cpp). SIM_SLOT=0-4 starts with that
 // usage view picked (4 = Fable) (as if the user had swiped to it before a reboot).
+// SIM_SCREEN=apps|focus opens the app center / Focus at ~1 s (serial `screen
+// apps|focus`); SIM_FOCUS=start|done then starts a block or finishes one at
+// once (serial `focus start` / `focus finish`).
 
 #define BOARD_NAME  "Simulator 480x480"
 #define LCD_WIDTH   480
