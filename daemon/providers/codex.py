@@ -8,19 +8,64 @@ no auth. Bars are keyed by ``window_minutes`` (<= 10 h -> "5h", longer ->
 the weekly window as ``primary`` with ``secondary: null``. The mapping is
 tolerant because Codex does not always report exactly 300/10080. A window the
 plan does not report yields no bar at all (so no ``s/sr`` on weekly-only plans).
+
+Reset credits (``rc``/``ru``/``rm``) are the one network call: with the Codex
+CLI's own OAuth token from ``$CODEX_HOME/auth.json`` (``auth_mode: chatgpt``;
+read-only, never refreshed) the daemon asks the ``wham`` endpoints how many
+credits the account holds, how many it spent in the trailing 30 days and when
+the soonest held one expires. The answer is cached for an hour per process;
+any failure omits the three keys and logs once, the local usage still goes out.
+``codex_credits = off`` in the config skips the call altogether.
 """
 
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
-from .base import DetectResult, ProviderResult, tilde, window_bar
+import httpx
+
+from .base import (
+    DetectResult, ProviderResult, ResetCredits, iso_to_epoch, minutes_until, tilde, window_bar,
+)
 
 MAX_AGE_DAYS = 7
 # Windows up to this many minutes land on the short ("5h") bar, longer ones on
 # the weekly bar. Nominal values are 300 and 10080.
 SHORT_WINDOW_MAX_MINUTES = 600
+
+USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+HISTORY_URL = CREDITS_URL + "/history"
+USER_AGENT = "toknmon-daemon"
+# The wham endpoints are slow even when healthy (3-4 s measured upstream); the
+# call runs once an hour, so a generous timeout costs little.
+TIMEOUT = 20.0
+CREDITS_TTL_S = 3600
+# Only "used" events this recent count towards ``ru``.
+USED_WINDOW_S = 30 * 86400
+CONFIG_KEY = "codex_credits"
+OFF_VALUES = {"off", "false", "no", "0"}
+
+# Config accessor injected by the main module (``read_config_value``), same
+# hook as kimi.py / grok.py. Default: no config.
+read_config: Callable[[str], str | None] = lambda key: None
+
+
+def _default_log(msg: str) -> None:
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+# Log sink (same line format as the daemon's ``log``); tests capture it.
+log: Callable[[str], None] = _default_log
+_warned: set[str] = set()
+
+
+def _warn_once(msg: str) -> None:
+    if msg not in _warned:
+        _warned.add(msg)
+        log(msg)
 
 
 def codex_home() -> Path:
@@ -122,9 +167,161 @@ def parse_rate_limits(limits: dict, now: float) -> ProviderResult:
     return ProviderResult(id="codex", bars=bars, status=status)
 
 
-async def poll(now: float | None = None) -> ProviderResult:
+# --- reset credits -----------------------------------------------------------
+
+def credits_enabled() -> bool:
+    """``codex_credits`` config key; absent or anything but off/false/no/0 is on."""
+    value = read_config(CONFIG_KEY)
+    return value is None or value.strip().lower() not in OFF_VALUES
+
+
+def read_auth(home: Path) -> tuple[str, str | None] | None:
+    """``(access_token, account_id)`` from ``auth.json`` when the Codex CLI is
+    signed in with ChatGPT (``auth_mode == "chatgpt"``); None for an API-key
+    login, a missing or unreadable file, or a missing token. The file is only
+    ever read."""
+    try:
+        blob = json.loads((home / "auth.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(blob, dict) or blob.get("auth_mode") != "chatgpt":
+        return None
+    tokens = blob.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    token = tokens.get("access_token")
+    if not isinstance(token, str) or not token:
+        return None
+    account = tokens.get("account_id")
+    return token, account if isinstance(account, str) and account else None
+
+
+def _headers(token: str, account_id: str | None) -> dict[str, str]:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT,
+        "OpenAI-Beta": "codex-1",
+        "originator": "Codex Desktop",
+    }
+    if account_id:
+        headers["ChatGPT-Account-Id"] = account_id
+    return headers
+
+
+class _FetchError(Exception):
+    """One failed endpoint; the message is a log-safe reason (never a token)."""
+
+
+async def _get_json(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> dict:
+    name = url.removeprefix(CREDITS_URL.rsplit("/", 1)[0] + "/")
+    try:
+        resp = await client.get(url, headers=headers)
+    except httpx.HTTPError as e:
+        raise _FetchError(f"{name}: request failed: {type(e).__name__}") from None
+    if resp.status_code >= 400:
+        raise _FetchError(f"{name}: HTTP {resp.status_code}")
+    try:
+        body = resp.json()
+    except ValueError:
+        raise _FetchError(f"{name}: invalid JSON") from None
+    if not isinstance(body, dict):
+        raise _FetchError(f"{name}: unexpected response shape")
+    return body
+
+
+def _event_epoch(event: dict) -> float | None:
+    for key in ("occurred_at", "created_at", "used_at", "timestamp", "at"):
+        epoch = iso_to_epoch(event.get(key))
+        if epoch is not None:
+            return epoch
+    return None
+
+
+def parse_credits(usage: dict, credits: dict, history: dict, now: float) -> tuple[int, int, float | None]:
+    """``(held, used in the trailing 30 days, soonest expiry epoch or None)``
+    from the three endpoint bodies. Raises :class:`_FetchError` when the usage
+    body lacks the count; the other two tolerate missing lists."""
+    bucket = usage.get("rate_limit_reset_credits")
+    try:
+        held = int((bucket or {}).get("available_count"))
+    except (TypeError, ValueError, AttributeError):
+        raise _FetchError("usage: unexpected response shape (no available_count)") from None
+    expiries = []
+    items = credits.get("credits")
+    for c in items if isinstance(items, list) else []:
+        if isinstance(c, dict) and c.get("status") == "available":
+            epoch = iso_to_epoch(c.get("expires_at"))
+            if epoch is not None:
+                expiries.append(epoch)
+    used = 0
+    events = history.get("events")
+    for e in events if isinstance(events, list) else []:
+        if not isinstance(e, dict) or e.get("kind") != "used":
+            continue
+        when = _event_epoch(e)
+        # An undated event is inside the server's own trailing window.
+        if when is None or now - when <= USED_WINDOW_S:
+            used += 1
+    return held, used, (min(expiries) if held > 0 and expiries else None)
+
+
+async def fetch_reset_credits(client: httpx.AsyncClient, token: str, account_id: str | None,
+                              now: float) -> tuple[int, int, float | None]:
+    """The three GETs behind ``rc``/``ru``/``rm``; raises :class:`_FetchError`."""
+    headers = _headers(token, account_id)
+    usage = await _get_json(client, USAGE_URL, headers)
+    credits = await _get_json(client, CREDITS_URL, headers)
+    history = await _get_json(client, HISTORY_URL, headers)
+    return parse_credits(usage, credits, history, now)
+
+
+def _empty_cache() -> dict:
+    # ``at``: epoch of the last fetch (success or failure); ``value``: the
+    # parsed triple, or None after a failure. Both are held for CREDITS_TTL_S.
+    return {"at": None, "value": None}
+
+
+_credits_cache: dict = _empty_cache()
+
+
+async def reset_credits(client: httpx.AsyncClient | None, home: Path, now: float) -> ResetCredits | None:
+    """Cached reset credits for the payload, or None when disabled, signed out
+    or failed (each reason logged once). ``rm`` is derived from the cached
+    expiry at call time so it keeps aging between fetches."""
+    if not credits_enabled():
+        return None
+    auth = read_auth(home)
+    if auth is None:
+        _warn_once(f"Codex: reset credits unavailable ({tilde(home / 'auth.json')} has no ChatGPT "
+                   "sign-in); showing local usage only")
+        return None
+    cache = _credits_cache
+    if cache["at"] is None or now - cache["at"] >= CREDITS_TTL_S:
+        token, account_id = auth
+        own_client = client is None
+        client = client or httpx.AsyncClient(timeout=TIMEOUT)
+        try:
+            value = await fetch_reset_credits(client, token, account_id, now)
+        except _FetchError as e:
+            _warn_once(f"Codex: reset credits unavailable ({e}); showing local usage only")
+            value = None
+        finally:
+            if own_client:
+                await client.aclose()
+        cache["at"], cache["value"] = now, value
+    if cache["value"] is None:
+        return None
+    held, used, expires_epoch = cache["value"]
+    return held, used, (minutes_until(expires_epoch, now) if expires_epoch is not None else None)
+
+
+async def poll(now: float | None = None, client: httpx.AsyncClient | None = None) -> ProviderResult:
     now = time.time() if now is None else now
-    limits = latest_rate_limits(codex_home() / "sessions", now)
+    home = codex_home()
+    limits = latest_rate_limits(home / "sessions", now)
     if limits is None:
         return ProviderResult(id="codex", bars=[], ok=False)
-    return parse_rate_limits(limits, now)
+    res = parse_rate_limits(limits, now)
+    res.credits = await reset_credits(client, home, now)
+    return res

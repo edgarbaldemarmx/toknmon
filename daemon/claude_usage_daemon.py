@@ -35,6 +35,7 @@ try:
         AUTO, PROVIDERS, detect, parse_providers_setting, resolve_providers, to_payload,
     )
     from daemon.providers import claude as claude_provider
+    from daemon.providers import codex as codex_provider
     from daemon.providers import grok as grok_provider
     from daemon.providers import kimi as kimi_provider
 except ImportError:  # running as a script from daemon/
@@ -42,6 +43,7 @@ except ImportError:  # running as a script from daemon/
         AUTO, PROVIDERS, detect, parse_providers_setting, resolve_providers, to_payload,
     )
     from providers import claude as claude_provider
+    from providers import codex as codex_provider
     from providers import grok as grok_provider
     from providers import kimi as kimi_provider
 
@@ -295,6 +297,7 @@ def read_config_value(key: str) -> str | None:
 # every other key); the package cannot import this module itself.
 kimi_provider.read_config = read_config_value
 grok_provider.read_config = read_config_value
+codex_provider.read_config = read_config_value
 
 
 def is_valid_device_name(name) -> bool:
@@ -971,17 +974,18 @@ def take_clears() -> dict[str, float]:
 
 def encode_payload(payload: dict, limit: int) -> bytes:
     """JSON-encode for one write-without-response of at most `limit` bytes.
-    Shortens the alert message, then drops it, then drops the model label
-    (the board falls back to "Fable"), until it fits."""
+    Shortens the alert message, then drops it, then drops the Codex reset
+    credits (`rc`/`ru`/`rm` together: the board hides the ledger), then the
+    model label (the board falls back to "Fable"), until it fits."""
     data = json.dumps(payload, separators=(",", ":")).encode()
     msg = payload.get("m", "")
     while len(data) > limit and msg:
         msg = msg[: max(0, len(msg) - (len(data) - limit) - 3)].rstrip()
         payload = {**payload, "m": msg + "..." if msg else ""}
         data = json.dumps(payload, separators=(",", ":")).encode()
-    for key in ("m", "fl"):
-        if len(data) > limit and key in payload:
-            payload = {k: v for k, v in payload.items() if k != key}
+    for keys in (("m",), ("rc", "ru", "rm"), ("fl",)):
+        if len(data) > limit and any(k in payload for k in keys):
+            payload = {k: v for k, v in payload.items() if k not in keys}
             data = json.dumps(payload, separators=(",", ":")).encode()
     return data
 

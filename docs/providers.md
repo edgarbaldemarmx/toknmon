@@ -184,14 +184,35 @@ One JSON object per provider per poll, written to the BLE RX characteristic
 | `f`, `fr` | model-scoped weekly window (Fable) percent and minutes; Claude only, only when present |
 | `fl` | that window's model name (printable ASCII, at most 11 characters; dropped after `m` when a write would overflow); the board shows "Fable" without it |
 | `st` | status string from the API (`allowed`, …) |
+| `rc` | Codex reset credits held (integer); Codex only, omitted when the credits are unavailable |
+| `ru` | Codex reset credits used in the trailing 30 days (integer); Codex only, omitted with `rc` |
+| `rm` | minutes until the soonest held Codex reset credit expires; omitted when nothing is held or the expiry is unknown |
 | `ok` | `true` when the poll succeeded; `false` carries no numbers and marks the slot unavailable |
 | `t`, `tf` | host local time (epoch seconds with the UTC offset applied) and hour format (`12`/`24`) for the on-screen clock |
 | `c` | chime on session reset (`chime = on`); Claude only |
 | `b`, `m`, `x` | attention alert: beep once, message text, end the alert; Claude only |
 | `acct` | account kind (`pro`, `ent`, …); Claude only |
 
-Payloads stay under 180 bytes. The firmware acks on the TX characteristic
-(`…0003`) and asks for a refresh on `…0004` once per connection.
+Payloads stay under 180 bytes; when one would still overflow a write, the
+daemon shortens `m`, then drops `m`, then `rc`/`ru`/`rm` together, then `fl`.
+The firmware acks on the TX characteristic (`…0003`) and asks for a refresh
+on `…0004` once per connection.
+
+### Codex reset credits
+
+OpenAI grants Codex users **reset credits** ("banked resets"): each one clears
+an exhausted rate limit early and expires 30 days after it was granted. The
+daemon reports them as `rc` (held), `ru` (used in the trailing 30 days) and
+`rm` (minutes until the soonest held credit expires). This is the Codex
+provider's only network call: it reads the Codex CLI's own ChatGPT sign-in from
+`${CODEX_HOME:-~/.codex}/auth.json` (`auth_mode: chatgpt`; the file is only
+read, the token is never refreshed, and an API-key login has no credits) and
+asks `https://chatgpt.com/backend-api/wham/usage`,
+`…/wham/rate-limit-reset-credits` and `…/wham/rate-limit-reset-credits/history`
+once an hour per daemon process. Any failure (sign-in missing, HTTP error,
+timeout, unexpected response) is logged once, the three keys are omitted and
+the local rollout usage still goes out. Set `codex_credits = off` in the config
+to never make the call.
 
 ## Adding a provider
 

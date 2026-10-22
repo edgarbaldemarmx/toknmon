@@ -23,6 +23,11 @@ from pathlib import Path
 Bar = tuple[str, int, int]  # (label, percent 0-100, minutes until reset)
 
 
+# (credits held, credits used in the trailing 30 days, minutes until the
+# soonest held credit expires or None when unknown) -> ``rc``/``ru``/``rm``.
+ResetCredits = tuple[int, int, int | None]
+
+
 @dataclass
 class ProviderResult:
     id: str
@@ -30,6 +35,9 @@ class ProviderResult:
     status: str = "allowed"
     ok: bool = True
     extra: dict = field(default_factory=dict)
+    # Codex reset credits; None when the provider has none or the fetch failed
+    # (the keys are then absent from the payload).
+    credits: ResetCredits | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +63,7 @@ WEEKLY_KEYS = ("w", "wr")
 MODEL_KEYS = ("f", "fr")
 MODEL_LABEL_KEY = "fl"
 MODEL_LABEL_MAX = 11   # the firmware's label buffer holds 11 chars + NUL
+CREDIT_KEYS = ("rc", "ru", "rm")   # held, used (30 days), minutes to soonest expiry
 _KEYS_BY_LABEL = {"5h": SESSION_KEYS, "Current": SESSION_KEYS, "Weekly": WEEKLY_KEYS}
 
 
@@ -74,7 +83,9 @@ def to_payload(res: ProviderResult) -> dict:
     """Map a result to the BLE payload. A failed result is the minimal
     ``{"p": id, "ok": false}`` so the device can mark that provider stale.
     Only present bars emit keys; the first bar claiming a key pair wins. The
-    model-scoped bar also sends its label as ``fl``."""
+    model-scoped bar also sends its label as ``fl``. Reset credits, when the
+    result carries them, go out as ``rc``/``ru`` and ``rm`` (the latter only
+    when the expiry is known)."""
     if not res.ok:
         return {"p": res.id, "ok": False}
     payload: dict = {"p": res.id}
@@ -87,6 +98,12 @@ def to_payload(res: ProviderResult) -> dict:
         if (pct_key, reset_key) == MODEL_KEYS and model_label(label):
             payload[MODEL_LABEL_KEY] = model_label(label)
     payload["st"] = res.status
+    if res.credits is not None:
+        held, used, expires_mins = res.credits
+        payload["rc"] = held
+        payload["ru"] = used
+        if expires_mins is not None:
+            payload["rm"] = expires_mins
     payload.update(res.extra)
     payload["ok"] = True
     return payload
