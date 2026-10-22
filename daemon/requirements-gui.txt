@@ -1,0 +1,5 @@
+# ToknMon macOS menu-bar app (optional, on top of requirements-macos.txt).
+# install-mac.sh --gui installs these into daemon/.venv; tools/build_mac_app.sh
+# needs them to build ToknMon.app. rumps pulls in pyobjc.
+rumps>=0.4
+py2app>=0.28
