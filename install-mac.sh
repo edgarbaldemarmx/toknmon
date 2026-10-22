@@ -26,6 +26,10 @@
 #                         usage meter plus the Focus timer in the app center;
 #                         'meter' hides Focus and the app center. Stored as the
 #                         `apps` config key and pushed to the board over BLE.
+#   --no-gui              Skip the ToknMon menu-bar app (built with py2app into
+#                         ~/Applications/ToknMon.app and started at login). The
+#                         app edits the same config file; the daemon works
+#                         without it.
 #   --no-prime            Skip the Bluetooth permission-priming daemon run.
 #   -h, --help            Show this help and exit.
 #
@@ -44,6 +48,12 @@ LEGACY_PLIST="$HOME/Library/LaunchAgents/$LEGACY_LABEL.plist"
 VENV_DIR="$SCRIPT_DIR/daemon/.venv"
 DAEMON_PY="$SCRIPT_DIR/daemon/claude_usage_daemon.py"
 REQUIREMENTS="$SCRIPT_DIR/daemon/requirements-macos.txt"
+REQUIREMENTS_GUI="$SCRIPT_DIR/daemon/requirements-gui.txt"
+MENUBAR_LABEL="com.toknmon.menubar"
+MENUBAR_PLIST_SRC="$SCRIPT_DIR/daemon/$MENUBAR_LABEL.plist"
+MENUBAR_PLIST_DST="$HOME/Library/LaunchAgents/$MENUBAR_LABEL.plist"
+MENUBAR_APP="$HOME/Applications/ToknMon.app"
+BUILD_APP="$SCRIPT_DIR/tools/build_mac_app.sh"
 LOG_DIR="$HOME/Library/Logs"
 LOG_OUT="$LOG_DIR/toknmon.out.log"
 LOG_ERR="$LOG_DIR/toknmon.err.log"
@@ -63,6 +73,7 @@ NO_PRIME=0
 OPT_PROVIDERS=""
 OPT_DEVICE_NAME=""
 OPT_APPS=""
+WITH_GUI=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --yes|-y) ASSUME_YES=1 ;;
@@ -82,6 +93,8 @@ while [ $# -gt 0 ]; do
             [ -n "${1:-}" ] || { echo "Error: --apps needs a value (meter or suite)" >&2; exit 2; }
             OPT_APPS="$1" ;;
         --apps=*) OPT_APPS="${1#*=}" ;;
+        --no-gui) WITH_GUI=0 ;;
+        --gui) WITH_GUI=1 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; echo "" >&2; usage >&2; exit 2 ;;
     esac
@@ -493,7 +506,7 @@ retire_legacy_agent() {
 echo "=== ToknMon macOS install ==="
 echo ""
 
-echo "[1/6] Checking prerequisites..."
+echo "[1/7] Checking prerequisites..."
 command -v curl >/dev/null || { echo "Error: curl is required"; exit 1; }
 
 # The daemon uses Python 3.10+ syntax (PEP 604 `X | None`). macOS ships an
@@ -536,7 +549,7 @@ fi
 echo "  OK"
 echo ""
 
-echo "[2/6] Creating Python virtualenv at daemon/.venv ..."
+echo "[2/7] Creating Python virtualenv at daemon/.venv ..."
 # Recreate the venv if it's missing or was built with an interpreter older
 # than 3.10 (e.g. a previous run that picked the system python3).
 if [ -d "$VENV_DIR" ] && ! py_ge_310 "$VENV_DIR/bin/python"; then
@@ -548,11 +561,14 @@ if [ ! -d "$VENV_DIR" ]; then
 fi
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
 "$VENV_DIR/bin/pip" install --quiet -r "$REQUIREMENTS"
+if [ "$WITH_GUI" = 1 ]; then
+    "$VENV_DIR/bin/pip" install --quiet -r "$REQUIREMENTS_GUI"
+fi
 PYTHON_BIN="$VENV_DIR/bin/python"
 echo "  OK ($PYTHON_BIN)"
 echo ""
 
-echo "[3/6] Rendering launchd plist..."
+echo "[3/7] Rendering launchd plist..."
 mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
 sed \
     -e "s|__PYTHON_BIN__|${PYTHON_BIN}|g" \
@@ -569,7 +585,7 @@ echo ""
 # providers to poll, which apps the board offers, plus the optional clock
 # display, session-reset chime and attention beep. All re-read by the daemon
 # each poll.
-echo "[4/6] Configuring the daemon..."
+echo "[4/7] Configuring the daemon..."
 migrate_legacy_config
 configure_device_name
 configure_config_dirs
@@ -580,7 +596,7 @@ configure_chime
 configure_beep
 echo ""
 
-echo "[5/6] Bluetooth permission check..."
+echo "[5/7] Bluetooth permission check..."
 if [ "$NO_PRIME" = 1 ]; then
     echo "  Skipped (--no-prime). If macOS never asked for Bluetooth access, run"
     echo "  once in a terminal and grant it when prompted:  $PYTHON_BIN $DAEMON_PY"
@@ -633,7 +649,7 @@ if command -v blueutil >/dev/null 2>&1; then
 fi
 echo ""
 
-echo "[6/6] Loading launchd service..."
+echo "[6/7] Loading launchd service..."
 retire_legacy_agent
 # Modern launchctl vocabulary (bootout/bootstrap, macOS 10.11+); fall back to
 # the legacy load/unload pair only if bootstrap is refused on this system.
@@ -645,6 +661,37 @@ else
     launchctl unload "$PLIST_DST" 2>/dev/null || true
     launchctl load -w "$PLIST_DST"
     echo "  Loaded (launchctl load -w)."
+fi
+echo ""
+
+echo "[7/7] Menu-bar app..."
+install_menubar_app() {
+    local out
+    out="$(mktemp -d /tmp/toknmon-app.XXXXXX)"
+    if ! OUT="$out" bash "$BUILD_APP" >"$out/build.log" 2>&1; then
+        echo "  Build failed; the daemon is installed without the menu-bar app."
+        echo "  Log: $out/build.log  (retry later with: OUT=/tmp/toknmon-app bash tools/build_mac_app.sh)"
+        return 0
+    fi
+    mkdir -p "$HOME/Applications"
+    launchctl bootout "gui/$(id -u)/$MENUBAR_LABEL" 2>/dev/null || true
+    pkill -x ToknMon 2>/dev/null || true
+    rm -rf "$MENUBAR_APP"
+    cp -R "$out/dist/ToknMon.app" "$MENUBAR_APP"
+    sed -e "s|__HOME__|${HOME}|g" "$MENUBAR_PLIST_SRC" > "$MENUBAR_PLIST_DST"
+    if launchctl bootstrap "gui/$(id -u)" "$MENUBAR_PLIST_DST" 2>/dev/null; then
+        echo "  Installed $(_tilde "$MENUBAR_APP") and started it (launchctl bootstrap)."
+    else
+        launchctl unload "$MENUBAR_PLIST_DST" 2>/dev/null || true
+        launchctl load -w "$MENUBAR_PLIST_DST"
+        echo "  Installed $(_tilde "$MENUBAR_APP") and started it (launchctl load -w)."
+    fi
+    rm -rf "$out"
+}
+if [ "$WITH_GUI" = 1 ]; then
+    install_menubar_app
+else
+    echo "  Skipped (--no-gui)."
 fi
 echo ""
 
@@ -663,3 +710,6 @@ echo "  tail -F $(_tilde "$LOG_OUT")                       # live logs"
 echo "  launchctl kickstart -k gui/\$(id -u)/$SERVICE_LABEL    # restart now"
 echo "  launchctl bootout gui/\$(id -u)/$SERVICE_LABEL         # stop and unload"
 echo "  launchctl bootstrap gui/\$(id -u) $(_tilde "$PLIST_DST")   # load again"
+if [ "$WITH_GUI" = 1 ]; then
+echo "  open $(_tilde "$MENUBAR_APP")                             # menu-bar app (settings)"
+fi
