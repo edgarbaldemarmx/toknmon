@@ -43,6 +43,13 @@ struct UsageData {
     int session_reset_mins;  // minutes until reset
     float weekly_pct;        // 7-day utilization (Pro/Max only; 0 for Enterprise)
     int weekly_reset_mins;   // minutes until weekly reset (Pro/Max only)
+    // Reset credits (Codex "banked resets", H11): the payload carried "rc"
+    // or "ru". Absent keys mean the daemon could not fetch them (or the
+    // provider has none), so the ledger is hidden, like a missing window.
+    bool has_credits;
+    int reset_credits;           // credits held ("rc")
+    int reset_credits_used;      // credits used in the trailing 30 days ("ru")
+    int reset_credits_exp_mins;  // minutes until the soonest held credit expires ("rm"); -1 = unknown
     bool has_third;          // payload carried "f": a third, model-scoped weekly bar
     float third_pct;         // scoped weekly utilization ("f")
     int third_reset_mins;    // minutes until the scoped weekly reset ("fr")

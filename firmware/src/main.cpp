@@ -151,6 +151,12 @@ static parse_result_t parse_json(const char* json, UsageData* slots_out, int* ou
         out->session_pct == 0.0f && out->session_reset_mins == 0) {
         out->has_session = false;
     }
+    // Reset credits ("rc" held, "ru" used, "rm" minutes to the soonest
+    // expiry): same semantics as the windows, absent = none for this slot.
+    out->has_credits = !doc["rc"].isNull() || !doc["ru"].isNull();
+    out->reset_credits = doc["rc"] | 0;
+    out->reset_credits_used = doc["ru"] | 0;
+    out->reset_credits_exp_mins = doc["rm"] | -1;
     // Optional third bar: a model-scoped weekly limit ("f"/"fr"), labelled by
     // "fl" when the daemon sends one, "Fable" otherwise.
     out->has_third = !doc["f"].isNull();

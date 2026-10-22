@@ -152,8 +152,13 @@ payload.
   rides on this payload only.
 - **Codex**: the dot grid (one dot = 1 % of the weekly window), the percentage
   in large type and the reset time; on plans with a 5-hour window a compact
-  bar sits under the grid. The grid needs PSRAM (all S3 boards); C6 boards
-  fall back to bars.
+  bar sits under the grid. When the payload carries reset credits (`rc`/`ru`,
+  see [Codex reset credits](#codex-reset-credits)) a "Resets" ledger sits
+  between the header and the grid: the number held in large type, one cell
+  per credit (filled = held, hollow = used in the last 30 days, "+N" past ten)
+  and "Next expires in Xd/Xh", "All used" or "Available". The grid needs
+  PSRAM (all S3 boards); C6 boards fall back to bars with a one-line
+  "Resets: N held, M used".
 - **Kimi**: Current and Weekly bars in the Kimi palette.
 - **Grok**: the dot grid (one dot = 1 % of the credit window), the
   percentage in large type and the reset time, in cool silver. Grok has no

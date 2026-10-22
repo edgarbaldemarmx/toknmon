@@ -1,0 +1,16 @@
+# Codex reset-credit ledger (H11) — every state of the "Resets" band on the dot grid.
+# Lines 1-2 open the usage view through an alert and clear it (the sim boots on the splash;
+# see gallery.jsonl). Capture with SIM_SLOT=1 (Codex): the states play in order, 6 s each, or
+# jump with 1-9. Headless: SIM_SCENARIO=sim/credits.jsonl SIM_SLOT=1 SIM_AUTOSHOT_MS=<ms>.
+{"name":"claude (alert opens usage)","hold_ms":0,"p":"claude","s":17.0,"sr":110,"w":73.0,"wr":860,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24,"m":"credits"}
+{"name":"claude (clear alert)","hold_ms":0,"p":"claude","s":17.0,"sr":110,"w":73.0,"wr":860,"st":"allowed","acct":"pro","ok":true,"t":1785474000,"tf":24,"x":true}
+# No "rc"/"ru": the ledger is hidden and the grid keeps its full height.
+{"name":"codex (no credits)","hold_ms":6000,"p":"codex","w":37,"wr":5000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+# 2 held, 1 used, soonest expiry in 20000 min → "Next expires in 13d".
+{"name":"codex (2 held, 1 used, 13d)","hold_ms":6000,"p":"codex","w":37,"wr":5000,"rc":2,"ru":1,"rm":20000,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+# Under 48 h the expiry reads in hours; 12 credits overflow the 10 cells → "+2"; 5h row below the grid.
+{"name":"codex (3 held, 9 used, 25h, with 5h)","hold_ms":6000,"p":"codex","s":12.0,"sr":240,"w":40.0,"wr":5000,"rc":3,"ru":9,"rm":1500,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+# Nothing held, some used → "All used".
+{"name":"codex (all used)","hold_ms":6000,"p":"codex","w":37,"wr":5000,"rc":0,"ru":3,"st":"allowed","ok":true,"t":1785474000,"tf":24}
+# Held but no "rm" (expiry unknown) → "Available".
+{"name":"codex (available, expiry unknown)","hold_ms":6000,"p":"codex","w":37,"wr":5000,"rc":4,"ru":0,"st":"allowed","ok":true,"t":1785474000,"tf":24}

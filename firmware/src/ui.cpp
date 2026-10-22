@@ -315,6 +315,19 @@ static lv_obj_t* lbl_dots_reset;              // "Resets in …" for the weekly 
 static lv_obj_t* bar_dots_session;            // compact 5h bar under the grid
 static lv_obj_t* lbl_dots_session;            // "5h - 12% - Resets in …" beside the bar
 static bool      dots_with_session = false;   // geometry currently laid out for the 5h row
+// Reset-credit ledger (H11): a band between the header row and the grid,
+// reserved only while the visible payload carries credits, so a payload
+// without them keeps today's geometry. Objects are created once in
+// build_dots_group(); layout_dots() shows/hides the band, place_credits()
+// flows the pieces after render_credits() sets their text.
+#define CREDIT_CELLS_MAX 10
+static lv_obj_t* lbl_credits_num;                   // credits held, big figure in the accent
+static lv_obj_t* lbl_credits_title;                 // "Resets"
+static lv_obj_t* credit_cells[CREDIT_CELLS_MAX];    // one per credit: lit = held, hollow = used
+static lv_obj_t* lbl_credits_more;                  // "+N" past CREDIT_CELLS_MAX
+static lv_obj_t* lbl_credits_line;                  // "Next expires in 3d" / "All used" / "Available"
+static bool      dots_with_credits = false;         // geometry currently laid out for the band
+static lv_obj_t* lbl_bars_credits = nullptr;        // bars layout: "Resets: N held, M used" in the weekly panel
 // Enterprise-only widgets inside panel_session
 static lv_obj_t* lbl_session_pct_sym = nullptr;  // "%" in smaller font
 static lv_obj_t* lbl_spending_desc = nullptr;     // "of your monthly budget"
@@ -522,8 +535,8 @@ static void usage_tap_cb(lv_event_t* e);
 static void usage_long_press_cb(lv_event_t* e);
 static void gesture_cb(lv_event_t* e);
 static void apply_usage_layout(usage_layout_t mode);
-static void layout_dots(bool with_session);
-static void dots_geometry(bool with_session, int* pitch, int* dia, int* grid);
+static void layout_dots(bool with_session, bool with_credits);
+static void dots_geometry(bool with_session, bool with_credits, int* pitch, int* dia, int* grid);
 static void style_pill_geometry(lv_obj_t* pill, const lv_font_t* font, int16_t px, int16_t py);
 
 static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
@@ -709,10 +722,44 @@ static void build_dots_group(lv_obj_t* parent) {
     lv_obj_set_style_text_font(lbl_dots_reset, L.dense_reset_font, 0);
     lv_obj_set_style_text_color(lbl_dots_reset, COL_DIM, 0);
 
-    // The buffer is sized for the largest grid (no 5h row) and reused, with a
-    // smaller canvas size, when the row is present.
+    // Reset-credit ledger: big figure left, "Resets" + cells on the first
+    // line and the expiry line under them. Hidden until layout_dots() gets
+    // a payload with credits.
+    lbl_credits_num = lv_label_create(dots_group);
+    lv_label_set_text(lbl_credits_num, "0");
+    lv_obj_set_style_text_font(lbl_credits_num, L.pct_font, 0);
+    lv_obj_set_style_text_color(lbl_credits_num, COL_TEXT, 0);
+
+    lbl_credits_title = lv_label_create(dots_group);
+    lv_label_set_text(lbl_credits_title, "Resets");
+    lv_obj_set_style_text_font(lbl_credits_title, L.dense_reset_font, 0);
+    lv_obj_set_style_text_color(lbl_credits_title, COL_DIM, 0);
+
+    for (int i = 0; i < CREDIT_CELLS_MAX; i++) {
+        lv_obj_t* c = lv_obj_create(dots_group);
+        lv_obj_set_style_radius(c, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_pad_all(c, 0, 0);
+        lv_obj_set_style_border_width(c, 2, 0);
+        lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(c, LV_OBJ_FLAG_CLICKABLE);   // taps go to the carousel
+        credit_cells[i] = c;
+    }
+
+    lbl_credits_more = lv_label_create(dots_group);
+    lv_label_set_text(lbl_credits_more, "");
+    lv_obj_set_style_text_font(lbl_credits_more, L.dense_reset_font, 0);
+    lv_obj_set_style_text_color(lbl_credits_more, COL_DIM, 0);
+
+    lbl_credits_line = lv_label_create(dots_group);
+    lv_label_set_text(lbl_credits_line, "");
+    lv_obj_set_style_text_font(lbl_credits_line, L.dense_reset_font, 0);
+    lv_obj_set_style_text_color(lbl_credits_line, COL_DIM, 0);
+
+    // The buffer is sized for the largest grid (no 5h row, no ledger) and
+    // reused, with a smaller canvas size, when either is present.
     int pitch, dia, grid;
-    dots_geometry(false, &pitch, &dia, &grid);
+    dots_geometry(false, false, &pitch, &dia, &grid);
     dots_buf = (uint16_t*)heap_caps_malloc((size_t)grid * grid * 2, MALLOC_CAP_SPIRAM);
     if (dots_buf) {
         dots_canvas = lv_canvas_create(dots_group);
@@ -726,8 +773,14 @@ static void build_dots_group(lv_obj_t* parent) {
     lv_obj_set_style_text_font(lbl_dots_session, L.dense_reset_font, 0);
     lv_obj_set_style_text_color(lbl_dots_session, COL_DIM, 0);
 
-    layout_dots(false);
+    layout_dots(false, false);
     lv_obj_add_flag(dots_group, LV_OBJ_FLAG_HIDDEN);   // apply_usage_layout decides
+}
+
+// Height the ledger band takes out of the grid: one big-figure line plus the
+// row gap. Zero while the band is hidden, so the grid keeps its geometry.
+static int credits_band_h(bool with_credits) {
+    return with_credits ? lv_font_get_line_height(L.pct_font) + L.usage_panel_gap / 2 : 0;
 }
 
 // Vertical budget of the dots view: from the top of the percentage row to
@@ -738,11 +791,12 @@ static int dots_bottom(void)   { return L.scr_h + L.anim_y - lv_font_get_line_he
 
 // Grid geometry for the available height: the largest 10×10 square that fits
 // between the percentage row and the status line, less the compact 5h row
-// when the slot has a session window. Dots are 3/4 of the pitch.
-static void dots_geometry(bool with_session, int* pitch, int* dia, int* grid) {
+// when the slot has a session window and the ledger band when it carries
+// reset credits. Dots are 3/4 of the pitch.
+static void dots_geometry(bool with_session, bool with_credits, int* pitch, int* dia, int* grid) {
     const int reset_h = lv_font_get_line_height(L.dense_reset_font);
     const int sess_h  = with_session ? (reset_h + L.usage_panel_gap / 2) : 0;
-    int avail = dots_bottom() - dots_grid_top() - sess_h;
+    int avail = dots_bottom() - dots_grid_top() - sess_h - credits_band_h(with_credits);
     if (avail > L.content_w) avail = L.content_w;
     if (avail < DOT_COLS) avail = DOT_COLS;
     *pitch = avail / DOT_COLS;
@@ -842,24 +896,61 @@ static void place_dots_session_bar(void) {
     lv_obj_set_pos(bar_dots_session, bar_x, sess_y + (reset_h - L.dense_bar_h) / 2);
 }
 
+// Flow the ledger pieces for the current texts: the big figure at the left
+// margin, "Resets" and the cells on its first line, the expiry line under
+// them. Called after render_credits() changed any text.
+static void place_credits(void) {
+    const int band_y  = dots_grid_top();
+    const int band_h  = lv_font_get_line_height(L.pct_font);
+    const int reset_h = lv_font_get_line_height(L.dense_reset_font);
+    const int cell    = reset_h * 2 / 3;
+    const int gap     = cell / 2;
+    lv_obj_set_pos(lbl_credits_num, L.margin, band_y);
+    lv_obj_update_layout(lbl_credits_num);
+    const int col_x = L.margin + lv_obj_get_width(lbl_credits_num) + L.panel_pad_x;
+    const int line1_y = band_y + 2;
+    lv_obj_set_pos(lbl_credits_title, col_x, line1_y);
+    lv_obj_update_layout(lbl_credits_title);
+    int x = col_x + lv_obj_get_width(lbl_credits_title) + L.panel_pad_x / 2;
+    const int cell_y = line1_y + (reset_h - cell) / 2;
+    for (int i = 0; i < CREDIT_CELLS_MAX; i++) {
+        lv_obj_set_size(credit_cells[i], cell, cell);
+        lv_obj_set_pos(credit_cells[i], x, cell_y);
+        if (!lv_obj_has_flag(credit_cells[i], LV_OBJ_FLAG_HIDDEN)) x += cell + gap;
+    }
+    lv_obj_set_pos(lbl_credits_more, x + gap, line1_y);
+    lv_obj_set_pos(lbl_credits_line, col_x, band_y + band_h - reset_h);
+}
+
 // Place the dots view. Top row: big weekly percentage left, "Weekly" pill +
-// reset time right. Grid centered in the remaining height; 5h row at the bottom.
-static void layout_dots(bool with_session) {
+// reset time right. Then the reset-credit ledger band when the payload
+// carries credits. Grid centered in the remaining height; 5h row at the bottom.
+static void layout_dots(bool with_session, bool with_credits) {
     if (!dots_group) return;
     dots_with_session = with_session;
+    dots_with_credits = with_credits;
     const int row_gap = L.usage_panel_gap / 2;
     const int pill_h  = lv_font_get_line_height(L.dense_pill_font) + 2 * L.dense_pill_pad_y;
     const int reset_h = lv_font_get_line_height(L.dense_reset_font);
     const int bottom  = dots_bottom();
-    const int grid_top = dots_grid_top();
+    const int grid_top = dots_grid_top() + credits_band_h(with_credits);
 
     lv_obj_set_pos(lbl_dots_pct, L.margin, dots_row_top());
     lv_obj_align(lbl_dots_pill, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top());
     lv_obj_align(lbl_dots_reset, LV_ALIGN_TOP_RIGHT, -L.margin, dots_row_top() + pill_h + 4);
 
+    lv_obj_t* ledger[] = { lbl_credits_num, lbl_credits_title, lbl_credits_more, lbl_credits_line };
+    for (lv_obj_t* o : ledger) {
+        if (with_credits) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+        else              lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (!with_credits) {
+        for (lv_obj_t* c : credit_cells) lv_obj_add_flag(c, LV_OBJ_FLAG_HIDDEN);
+    }
+
     const int sess_h = with_session ? (reset_h + row_gap) : 0;
     const int avail  = bottom - grid_top - sess_h;
-    dots_geometry(with_session, &dots_pitch, &dots_dia, &dots_grid);
+    dots_geometry(with_session, with_credits, &dots_pitch, &dots_dia, &dots_grid);
     if (dots_canvas) {
         // Same buffer, possibly a smaller canvas: the buffer was sized for
         // the no-session grid, which is the larger of the two.
@@ -960,6 +1051,14 @@ static void init_usage_screen(lv_obj_t* scr) {
                      &bar_weekly, &lbl_weekly_reset);
     // Recolor enabled so enterprise period box can color pace and reset separately
     lv_label_set_recolor(lbl_weekly_reset, true);
+    // Reset credits on boards without the dot grid: one small line at the
+    // bottom-right of the weekly panel, hidden until a payload carries them.
+    lbl_bars_credits = lv_label_create(panel_weekly);
+    lv_label_set_text(lbl_bars_credits, "");
+    lv_obj_set_style_text_font(lbl_bars_credits, L.pace_font, 0);
+    lv_obj_set_style_text_color(lbl_bars_credits, COL_DIM, 0);
+    lv_obj_align(lbl_bars_credits, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_add_flag(lbl_bars_credits, LV_OBJ_FLAG_HIDDEN);
 
     // Third panel (scoped weekly limit). Positioned by apply_usage_layout();
     // hidden until a payload with has_third is visible.
@@ -1206,7 +1305,7 @@ static usage_layout_t layout_for(int idx, const UsageData* data) {
 // Render Claude's model-scoped weekly limit into the dots view as Clawds.
 static void render_fable(const UsageData* data) {
     const ProviderTheme th = provider_theme(PROVIDER_CLAUDE);
-    if (dots_with_session) layout_dots(false);
+    if (dots_with_session || dots_with_credits) layout_dots(false, false);
     int f_pct = (int)(data->third_pct + 0.5f);
     if (f_pct < 0) f_pct = 0;
     if (f_pct > 100) f_pct = 100;
@@ -1218,12 +1317,55 @@ static void render_fable(const UsageData* data) {
     if (f_pct != dots_filled || dots_view != UI_VIEW_FABLE) draw_clawds(f_pct, th);
 }
 
+// The ledger's one-line verdict. Expiry is reported in whole days from 48 h
+// up and in hours (rounded up, so a held credit never reads "0h") below.
+static void format_credits_line(const UsageData* data, char* buf, size_t len) {
+    const int held = data->reset_credits, used = data->reset_credits_used;
+    const int mins = data->reset_credits_exp_mins;
+    if (held <= 0 && used > 0)  snprintf(buf, len, "All used");
+    else if (held <= 0)         buf[0] = '\0';   // nothing held, nothing used
+    else if (mins < 0)          snprintf(buf, len, "Available");
+    else if (mins >= 48 * 60)   snprintf(buf, len, "Next expires in %dd", mins / 1440);
+    else                        snprintf(buf, len, "Next expires in %dh", (mins + 59) / 60);
+}
+
+// Render the reset-credit ledger: the held count as the big figure, one
+// cell per credit (lit = held, hollow = used; the first CREDIT_CELLS_MAX
+// only, the rest as "+N"), and the verdict line.
+static void render_credits(const UsageData* data, const ProviderTheme& th) {
+    int held = data->reset_credits < 0 ? 0 : data->reset_credits;
+    int used = data->reset_credits_used < 0 ? 0 : data->reset_credits_used;
+    const int total = held + used;
+    lv_label_set_text_fmt(lbl_credits_num, "%d", held);
+    lv_obj_set_style_text_color(lbl_credits_num, th.accent, 0);
+    for (int i = 0; i < CREDIT_CELLS_MAX; i++) {
+        lv_obj_t* c = credit_cells[i];
+        if (i >= total) { lv_obj_add_flag(c, LV_OBJ_FLAG_HIDDEN); continue; }
+        lv_obj_clear_flag(c, LV_OBJ_FLAG_HIDDEN);
+        const bool lit = (i < held);
+        lv_obj_set_style_bg_color(c, th.accent, 0);
+        lv_obj_set_style_bg_opa(c, lit ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_color(c, th.accent, 0);
+        lv_obj_set_style_border_opa(c, lit ? LV_OPA_COVER : LV_OPA_50, 0);
+    }
+    if (total > CREDIT_CELLS_MAX) lv_label_set_text_fmt(lbl_credits_more, "+%d", total - CREDIT_CELLS_MAX);
+    else                          lv_label_set_text(lbl_credits_more, "");
+    char line[32];
+    format_credits_line(data, line, sizeof(line));
+    lv_label_set_text(lbl_credits_line, line);
+    place_credits();
+}
+
 // Render a Codex or Grok payload into the dots view: weekly % as filled dots (one
-// per percent, left→right then top→bottom), plus the compact 5h row when
-// the plan has a session window.
+// per percent, left→right then top→bottom), the reset-credit ledger when the
+// payload carries credits, plus the compact 5h row when the plan has a
+// session window.
 static void render_dots(int idx, const UsageData* data) {
     const ProviderTheme th = provider_theme(idx);
-    if (dots_with_session != data->has_session) layout_dots(data->has_session);
+    if (dots_with_session != data->has_session || dots_with_credits != data->has_credits) {
+        layout_dots(data->has_session, data->has_credits);
+    }
+    if (data->has_credits) render_credits(data, th);
 
     int w_pct = (int)(data->weekly_pct + 0.5f);
     if (w_pct < 0) w_pct = 0;
@@ -1436,6 +1578,15 @@ static void show_view(int idx) {
         lv_obj_set_style_bg_color(bar_weekly, pct_color(data->weekly_pct, idx), LV_PART_INDICATOR);
         format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
         lv_label_set_text(lbl_weekly_reset, buf);
+    }
+
+    // Reset credits without the dot grid (C6): one text line in the weekly panel.
+    if (data->has_credits) {
+        lv_label_set_text_fmt(lbl_bars_credits, "Resets: %d held, %d used",
+                              data->reset_credits, data->reset_credits_used);
+        lv_obj_clear_flag(lbl_bars_credits, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(lbl_bars_credits, LV_OBJ_FLAG_HIDDEN);
     }
 
     if (layout_dense) {
