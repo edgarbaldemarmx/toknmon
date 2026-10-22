@@ -17,6 +17,15 @@
 #   Unset (default) = ToknMon
 # device_name = ToknMon
 
+# Apps enabled on the device (suite). The daemon pushes this and device_name to
+# the board as a config payload whenever they change (and once per connection),
+# so the board follows the config without reflashing. The menu-bar app edits
+# this key from its "Apps" submenu.
+#   meter        = the usage meter only
+#   meter,focus  = the meter plus the Focus timer (default)
+#   Unknown names are ignored with one log line; meter is always included.
+# apps = meter,focus
+
 # Poll more than one Claude config dir and show whichever plan is currently
 # active. Use this if you run separate plans from different config dirs (e.g. a
 # personal plan in ~/.claude and a work plan in ~/.claude-work, selected via

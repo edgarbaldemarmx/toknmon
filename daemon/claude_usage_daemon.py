@@ -75,6 +75,10 @@ CONFIG_DIR = Path.home() / ".config" / "toknmon"
 LEGACY_CONFIG_DIR = Path.home() / ".config" / "claude-usage-monitor"
 SAVED_ADDR_FILE = CONFIG_DIR / "ble-address"
 CONFIG_FILE = CONFIG_DIR / "config"
+# What the daemon last pushed to the board (`apps`, `device_name`) and the
+# status mirror the menu-bar app reads instead of opening BLE itself (H13).
+STATE_FILE = CONFIG_DIR / "state.json"
+STATUS_FILE = CONFIG_DIR / "status.json"
 # Written by Claude Code hooks: `attention` holds {"m", "s"} (message, session
 # id) when a session needs the user, and `clear-<session id>` is touched when
 # that session moves on. Kept at the legacy path on purpose: it is shared with
@@ -336,6 +340,177 @@ def accepted_device_names() -> set[str]:
 
 def is_device_name(name: str | None) -> bool:
     return name is not None and name in accepted_device_names()
+
+
+# ---------------------------------------------------------------------------
+# Device configuration push (H13): `apps` + `device_name` -> {"p":"cfg", ...}
+# ---------------------------------------------------------------------------
+
+APPS_KNOWN = ("meter", "focus")   # canonical order; the meter is never optional
+DEFAULT_APPS = "meter,focus"
+_last_apps_warning: str | None = None
+_last_name_warning: str | None = None
+
+
+def parse_apps(raw: str | None, log=log) -> str:
+    """Normalise the `apps` config value: comma-separated, case-insensitive,
+    canonical order, `meter` always included, unknown names dropped with one
+    log line. ``None``/empty means :data:`DEFAULT_APPS`."""
+    if raw is None or not raw.strip():
+        return DEFAULT_APPS
+    wanted = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    unknown = sorted(wanted - set(APPS_KNOWN))
+    if unknown:
+        log(f"Ignoring unknown apps in config: {', '.join(unknown)} "
+            f"(known: {', '.join(APPS_KNOWN)})")
+    wanted.add("meter")
+    return ",".join(app for app in APPS_KNOWN if app in wanted)
+
+
+def read_apps() -> str:
+    """Effective `apps` value, re-read from the config every poll; the
+    unknown-name warning fires once per distinct raw value."""
+    global _last_apps_warning
+    raw = read_config_value("apps")
+
+    def _warn_once(msg: str) -> None:
+        global _last_apps_warning
+        if raw != _last_apps_warning:
+            _last_apps_warning = raw
+            log(msg)
+
+    return parse_apps(raw, log=_warn_once)
+
+
+def push_device_name() -> str | None:
+    """The `device_name` to push to the board: the configured value, the
+    default when unset, or ``None`` (not sent) when invalid, logged once per
+    distinct bad value. Discovery keeps using :func:`read_device_name`."""
+    global _last_name_warning
+    val = read_config_value("device_name")
+    if val is None:
+        return DEFAULT_DEVICE_NAME
+    if is_valid_device_name(val):
+        return val
+    if val != _last_name_warning:
+        _last_name_warning = val
+        log(f"Not pushing invalid device_name {val!r} to the board "
+            f"(1-{DEVICE_NAME_MAX_LEN} printable ASCII, no '#')")
+    return None
+
+
+def write_json_atomic(path: Path, data: dict) -> None:
+    """Write ``data`` as JSON via temp file + rename, mode 0600."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, separators=(",", ":"))
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def load_json(path: Path) -> dict:
+    """Read a JSON object from ``path``; anything else (missing, corrupt, not
+    an object) reads as ``{}``."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+class ConfigPusher:
+    """Decides when the board needs a ``{"p":"cfg", ...}`` write.
+
+    ``state`` mirrors :data:`STATE_FILE`: the ``ap``/``n`` values last written
+    successfully. :meth:`pending` returns the payload with only the changed
+    keys, or the full config right after :meth:`on_connect` (a reconnected
+    board may have been re-flashed, so the state is per link, not per daemon
+    start); ``p`` comes first so today's firmware, which ignores unknown
+    provider ids, is unaffected. :meth:`mark_sent` runs only after a
+    successful write, so a failed write stays pending.
+    """
+
+    def __init__(self, state_file: Path = STATE_FILE) -> None:
+        self.state_file = state_file
+        self.state = load_json(state_file)
+        self.fresh_link = False
+
+    def on_connect(self) -> None:
+        self.fresh_link = True
+
+    def pending(self, apps: str, name: str | None) -> dict | None:
+        payload: dict = {"p": "cfg"}
+        if self.fresh_link or self.state.get("ap") != apps:
+            payload["ap"] = apps
+        if name is not None and (self.fresh_link or self.state.get("n") != name):
+            payload["n"] = name
+        return payload if len(payload) > 1 else None
+
+    def mark_sent(self, payload: dict) -> None:
+        self.state.update({k: payload[k] for k in ("ap", "n") if k in payload})
+        self.fresh_link = False
+        try:
+            write_json_atomic(self.state_file, self.state)
+        except OSError as e:
+            log(f"Could not save {self.state_file}: {e}")
+
+
+def with_config_payload(pusher: ConfigPusher, payloads: list[dict]) -> list[dict]:
+    """Prepend the pending config write (if any) to this cycle's provider
+    payloads; the provider payloads themselves are untouched."""
+    cfg = pusher.pending(read_apps(), push_device_name())
+    return [cfg, *payloads] if cfg else payloads
+
+
+# ---------------------------------------------------------------------------
+# status.json: what the menu-bar app shows without opening BLE
+# ---------------------------------------------------------------------------
+
+STATUS_KEYS = ("ok", "s", "sr", "w", "wr", "f", "fr", "fl", "rc", "ru", "rm", "st")
+_last_provider_status: dict[str, dict] = {}
+
+
+def build_status(connected: bool, device_name: str, apps: str, payloads: list[dict] | None,
+                 *, now: float | None = None, pid: int | None = None) -> dict:
+    """The status document. ``payloads`` are this cycle's writes (``None``
+    keeps the previous providers, e.g. on disconnect); per provider only the
+    :data:`STATUS_KEYS` present in its payload are kept, so alert extras and
+    anything else never leak into the file."""
+    global _last_provider_status
+    if payloads is not None:
+        providers: dict[str, dict] = {}
+        for item in payloads:
+            pid_ = item.get("p", "claude")
+            if pid_ == "cfg":
+                continue
+            providers[pid_] = {k: item[k] for k in STATUS_KEYS if k in item}
+        _last_provider_status = providers
+    return {
+        "ts": int(time.time() if now is None else now),
+        "connected": bool(connected),
+        "device_name": device_name,
+        "apps": apps,
+        "providers": dict(_last_provider_status),
+        "daemon_pid": os.getpid() if pid is None else pid,
+    }
+
+
+def write_status(connected: bool, device_name: str, apps: str,
+                 payloads: list[dict] | None) -> None:
+    """Write :data:`STATUS_FILE` atomically; never raises (the mirror is a
+    convenience, the BLE loop must not depend on it)."""
+    try:
+        write_json_atomic(STATUS_FILE, build_status(connected, device_name, apps, payloads))
+    except Exception as e:  # noqa: BLE001 - best effort by design
+        log(f"Could not write status file {STATUS_FILE}: {e}")
 
 
 def read_token_for(config_dir: Path) -> str | None:
@@ -1163,6 +1338,9 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
     take_clears()
     session = Session(client)
     await session.setup_refresh_subscription()
+    pusher = ConfigPusher()
+    pusher.on_connect()
+    write_status(True, read_device_name(), read_apps(), None)
 
     last_poll = 0.0
     used_successfully = False
@@ -1233,14 +1411,18 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
                 # retries next tick instead of throttling a healthy link for a
                 # full POLL_INTERVAL.
                 payloads = await collect_payloads(providers, payload, dead, extra)
-                for i, item in enumerate(payloads):
+                # The device config ({"p":"cfg"}) rides in its own write ahead
+                # of the providers, only when something changed (H13).
+                for i, item in enumerate(with_config_payload(pusher, payloads)):
                     if i:
                         await asyncio.sleep(0.35)
                     pid = item.get("p", "claude")
                     if not await session.write_payload(item, tag=pid):
                         continue
                     last_poll = time.time()
-                    if pid == "claude":
+                    if pid == "cfg":
+                        pusher.mark_sent(item)
+                    elif pid == "claude":
                         # Alert extras ride on the Claude payload; only a
                         # successful Claude write counts them as delivered.
                         alert_unsent = clear_unsent = alert_poll_used = False
@@ -1248,6 +1430,7 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
                             used_successfully = True
                     elif item.get("ok"):
                         used_successfully = True
+                write_status(True, read_device_name(), read_apps(), payloads)
 
             try:
                 await asyncio.wait_for(session.refresh_requested.wait(), timeout=TICK)
@@ -1260,6 +1443,7 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
             pass
 
     log("Device disconnected" if not stop_event.is_set() else "Stopping")
+    write_status(False, read_device_name(), read_apps(), None)
     return used_successfully
 
 
@@ -1290,6 +1474,7 @@ async def main() -> None:
         skip_addr = None
         if not target:
             log(f"Device not found, retrying in {backoff}s...")
+            write_status(False, read_device_name(), read_apps(), None)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=backoff)
             except asyncio.TimeoutError:
