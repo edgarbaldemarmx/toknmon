@@ -29,7 +29,7 @@
 #   --no-gui              Skip the ToknMon menu-bar app (built with py2app into
 #                         ~/Applications/ToknMon.app and started at login). The
 #                         app edits the same config file; the daemon works
-#                         without it.
+#                         without it. --gui (the default) re-enables it.
 #   --no-prime            Skip the Bluetooth permission-priming daemon run.
 #   -h, --help            Show this help and exit.
 #

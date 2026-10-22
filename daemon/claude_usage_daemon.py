@@ -383,13 +383,15 @@ def read_apps() -> str:
 
 
 def push_device_name() -> str | None:
-    """The `device_name` to push to the board: the configured value, the
-    default when unset, or ``None`` (not sent) when invalid, logged once per
-    distinct bad value. Discovery keeps using :func:`read_device_name`."""
+    """The `device_name` to push to the board: the configured value, or
+    ``None`` (not sent) when the key is unset or the value is invalid; an
+    invalid value is logged once per distinct bad value. An unset key means
+    the user never chose a name here, so the board keeps whatever name it
+    was given over serial. Discovery keeps using :func:`read_device_name`."""
     global _last_name_warning
     val = read_config_value("device_name")
     if val is None:
-        return DEFAULT_DEVICE_NAME
+        return None
     if is_valid_device_name(val):
         return val
     if val != _last_name_warning:

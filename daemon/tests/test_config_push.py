@@ -166,9 +166,13 @@ def test_invalid_name_is_not_sent(tmp_path):
 # device name for the push
 # ---------------------------------------------------------------------------
 
-def test_push_device_name_defaults_when_unset(tmp_path, monkeypatch):
-    monkeypatch.setattr(mod, "CONFIG_FILE", tmp_path / "config")
-    assert push_device_name() == DEFAULT_DEVICE_NAME
+def test_push_device_name_unset_is_not_pushed(tmp_path, monkeypatch):
+    """No `device_name` in the config: the board keeps its serial-set name
+    instead of being renamed to the default on the first link."""
+    cfg = tmp_path / "config"
+    cfg.write_text("providers = auto\n")
+    monkeypatch.setattr(mod, "CONFIG_FILE", cfg)
+    assert push_device_name() is None
 
 
 def test_push_device_name_reads_valid_value(tmp_path, monkeypatch):
