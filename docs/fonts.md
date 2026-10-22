@@ -69,6 +69,10 @@ npx --yes lv_font_conv@1.5.3 --font "$F/Inter-Regular.ttf" -r 0x20-0x7E,0xB7,0x2
 # 15 px Regular — credit metadata, 5h reset, footer verb (+ "·" and "…")
 npx --yes lv_font_conv@1.5.3 --font "$F/Inter-Regular.ttf" -r 0x20-0x7E,0xB7,0x2026 \
   --size 15 --format lvgl --bpp 4 --no-compress -o $O/font_inter_15.c --lv-include "lvgl.h"
+# 22 px Regular — status footer verb and "Pick an app" (+ "·" and "…"); added after
+# the user found the 15 px footer unreadable on the panel
+npx --yes lv_font_conv@1.5.3 --font "$F/Inter-Regular.ttf" -r 0x20-0x7E,0xB7,0x2026 \
+  --size 22 --format lvgl --bpp 4 --no-compress -o $O/font_inter_22.c --lv-include "lvgl.h"
 # 13 px SemiBold — small-caps labels, provider label, clock (+ "·")
 npx --yes lv_font_conv@1.5.3 --font "$F/Inter-SemiBold.ttf" -r 0x20-0x7E,0xB7 \
   --size 13 --format lvgl --bpp 4 --no-compress -o $O/font_inter_13.c --lv-include "lvgl.h"

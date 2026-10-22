@@ -577,7 +577,7 @@ void loop() {
     //   PRIMARY   → HID Space  (Claude Code voice-mode PTT)
     //   SECONDARY → app center ↔ last app (default), or HID Shift+Tab when
     //               NVS side_btn = hid (only if the board has one)
-    //   PWR       → on splash: cycle animations; on Focus: start / start next;
+    //   PWR       → on splash: cycle animations; on Focus: mirrors the action button (start / pause / resume / next);
     //               elsewhere: cycle brightness; hold ~3s + release: pairing mode
     // First press from sleep is consumed as a wake-only event by
     // idle_consume_wake_press(); the normal action fires from the second

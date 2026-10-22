@@ -31,6 +31,7 @@ LV_FONT_DECLARE(font_mono_18);
 LV_FONT_DECLARE(font_inter_92);
 LV_FONT_DECLARE(font_inter_60);
 LV_FONT_DECLARE(font_inter_29);
+LV_FONT_DECLARE(font_inter_22);
 LV_FONT_DECLARE(font_inter_17);
 LV_FONT_DECLARE(font_inter_15);
 LV_FONT_DECLARE(font_inter_13);
@@ -51,7 +52,8 @@ struct Layout {
     const lv_font_t* mod_sign_font;    // "%" after the number, remaining / 5h figures (29 px)
     const lv_font_t* mod_label_font;   // WEEKLY USAGE, provider label, clock (13 px semibold)
     const lv_font_t* mod_reset_font;   // "Resets in …", "used", "remaining" (17 px)
-    const lv_font_t* mod_small_font;   // credit metadata, 5h reset, footer verb (15 px)
+    const lv_font_t* mod_small_font;   // credit metadata, 5h reset (15 px)
+    const lv_font_t* footer_font;      // status verb, "N blocks today", "Pick an app" (22 px; the user could not read 15 px on the panel)
     int16_t title_y;
     int16_t content_y;
     int16_t content_w;
@@ -125,6 +127,7 @@ static void compute_layout(const BoardCaps& c) {
     L.mod_label_font = &font_inter_13;
     L.mod_reset_font = &font_inter_17;
     L.mod_small_font = &font_inter_15;
+    L.footer_font    = &font_inter_22;
 
     // Values shared by the two original breakpoints; the small branch below
     // overrides them wholesale.
@@ -247,6 +250,7 @@ static void compute_layout(const BoardCaps& c) {
         L.mod_label_font = &font_inter_13;
         L.mod_reset_font = &font_inter_13;
         L.mod_small_font = &font_inter_13;
+        L.footer_font    = &font_inter_17;
         L.small_icons = true;
         L.batt_w = ICON_BATTERY_SMALL_W;
         L.batt_y = (int16_t)(45.0f * L.sy + 0.5f) - L.batt_w / 2;
@@ -795,16 +799,16 @@ static void build_idle_group(lv_obj_t* parent) {
 #define MOD_SIGN_GAP       10    // between the measured numeric run and "%"
 #define MOD_SIGN_BASE      208
 #define MOD_USED_BASE      202   // "used", right-aligned at the inset
-#define MOD_TRACK_Y        234
-#define MOD_TRACK_H        12
+#define MOD_TRACK_Y        229   // design 234 with a 12 px track; 22 px keeps the same centre
+#define MOD_TRACK_H        22    // design 12; thicker per user feedback on the panel
 #define MOD_RESET_BASE     279
 #define MOD_PANEL_Y        308   // credit panel
 #define MOD_PANEL_H        108
 #define MOD_PANEL_PAD      16    // panel inner inset (x 48 / 432)
 #define MOD_CREDIT_BASE    337   // RESET CREDITS / N available
-#define MOD_SEG_Y          351
+#define MOD_SEG_Y          349   // design 351 (12 px) → 16 px, same centre
 #define MOD_SEG_W          56
-#define MOD_SEG_H          12
+#define MOD_SEG_H          16    // design 12; thicker with the bars
 #define MOD_SEG_PITCH      64    // 56 + 8
 #define MOD_META_BASE      396
 #define MOD_REMAIN_BASE    351   // "63%"; "remaining" one px higher
@@ -812,13 +816,13 @@ static void build_idle_group(lv_obj_t* parent) {
 #define MOD_LOWER_RULE_Y   404
 #define MOD_WIN_LABEL_BASE 337   // CURRENT · 5H
 #define MOD_WIN_PCT_BASE   340
-#define MOD_WIN_TRACK_Y    352
+#define MOD_WIN_TRACK_Y    347   // design 352 (12 px) → 22 px, same centre
 #define MOD_WIN_RESET_BASE 392
 #define MOD_GRID_Y         226   // Fable: the Clawd grid stands in for the track and reset line
 #define MOD_GRID_H         200
 #define MOD_FOOT_DOT_X     36    // status dot centre
 #define MOD_FOOT_DOT_Y     444
-#define MOD_FOOT_DOT_D     6
+#define MOD_FOOT_DOT_D     8     // design 6; scaled with the 22 px footer text
 #define MOD_FOOT_TEXT_X    48
 #define MOD_FOOT_TEXT_BASE 449
 #define HDR_TITLE_BASE     60
@@ -1010,7 +1014,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     const int d = MX(MOD_FOOT_DOT_D) < 4 ? 4 : MX(MOD_FOOT_DOT_D);
     footer_dot = make_box(usage_container, MX(MOD_FOOT_DOT_X) - d / 2, MY(MOD_FOOT_DOT_Y) - d / 2, d, d,
                           COL_ACCENT, LV_RADIUS_CIRCLE);
-    lbl_anim = make_label(usage_container, L.mod_small_font, COL_DIM, "");
+    lbl_anim = make_label(usage_container, L.footer_font, COL_DIM, "");
     place_text(lbl_anim, MOD_FOOT_TEXT_X, MOD_FOOT_TEXT_BASE);
 }
 
@@ -1378,7 +1382,7 @@ static void init_focus_screen(lv_obj_t* scr) {
     // cancel hint right-aligned while a block is counting.
     const int d = MX(MOD_FOOT_DOT_D) < 4 ? 4 : MX(MOD_FOOT_DOT_D);
     make_box(focus_container, MX(MOD_FOOT_DOT_X) - d / 2, MY(MOD_FOOT_DOT_Y) - d / 2, d, d, THEME_FOCUS, LV_RADIUS_CIRCLE);
-    lbl_focus_blocks = make_label(focus_container, L.mod_small_font, COL_DIM, "");
+    lbl_focus_blocks = make_label(focus_container, L.footer_font, COL_DIM, "");
     place_text(lbl_focus_blocks, MOD_FOOT_TEXT_X, MOD_FOOT_TEXT_BASE);
     lbl_focus_hold = make_label(focus_container, L.mod_label_font, COL_DIM, "Hold timer to cancel");
     place_text_right(lbl_focus_hold, FX_HOLD_RIGHT, MOD_FOOT_TEXT_BASE);
@@ -1515,7 +1519,7 @@ static void init_apps_screen(lv_obj_t* scr) {
     // Footer: dot + hint, like the usage status line.
     const int d = MX(MOD_FOOT_DOT_D) < 4 ? 4 : MX(MOD_FOOT_DOT_D);
     make_box(apps_container, MX(MOD_FOOT_DOT_X) - d / 2, MY(MOD_FOOT_DOT_Y) - d / 2, d, d, COL_DIM, LV_RADIUS_CIRCLE);
-    lbl_apps_footer = make_label(apps_container, L.mod_small_font, COL_DIM, "Pick an app");
+    lbl_apps_footer = make_label(apps_container, L.footer_font, COL_DIM, "Pick an app");
     place_text(lbl_apps_footer, MOD_FOOT_TEXT_X, MOD_FOOT_TEXT_BASE);
     layout_apps();
 }
