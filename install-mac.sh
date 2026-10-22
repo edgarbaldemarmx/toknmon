@@ -562,7 +562,10 @@ fi
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
 "$VENV_DIR/bin/pip" install --quiet -r "$REQUIREMENTS"
 if [ "$WITH_GUI" = 1 ]; then
-    "$VENV_DIR/bin/pip" install --quiet -r "$REQUIREMENTS_GUI"
+    if ! "$VENV_DIR/bin/pip" install --quiet -r "$REQUIREMENTS_GUI"; then
+        echo "  Menu-bar app dependencies failed to install; continuing without the app (--no-gui)."
+        WITH_GUI=0
+    fi
 fi
 PYTHON_BIN="$VENV_DIR/bin/python"
 echo "  OK ($PYTHON_BIN)"
@@ -677,14 +680,21 @@ install_menubar_app() {
     launchctl bootout "gui/$(id -u)/$MENUBAR_LABEL" 2>/dev/null || true
     pkill -x ToknMon 2>/dev/null || true
     rm -rf "$MENUBAR_APP"
-    cp -R "$out/dist/ToknMon.app" "$MENUBAR_APP"
+    if ! cp -R "$out/dist/ToknMon.app" "$MENUBAR_APP"; then
+        echo "  Could not copy the app to $(_tilde "$MENUBAR_APP"); the daemon is installed without the menu-bar app."
+        echo "  Build left in: $out"
+        return 0
+    fi
     sed -e "s|__HOME__|${HOME}|g" "$MENUBAR_PLIST_SRC" > "$MENUBAR_PLIST_DST"
     if launchctl bootstrap "gui/$(id -u)" "$MENUBAR_PLIST_DST" 2>/dev/null; then
         echo "  Installed $(_tilde "$MENUBAR_APP") and started it (launchctl bootstrap)."
     else
         launchctl unload "$MENUBAR_PLIST_DST" 2>/dev/null || true
-        launchctl load -w "$MENUBAR_PLIST_DST"
-        echo "  Installed $(_tilde "$MENUBAR_APP") and started it (launchctl load -w)."
+        if launchctl load -w "$MENUBAR_PLIST_DST"; then
+            echo "  Installed $(_tilde "$MENUBAR_APP") and started it (launchctl load -w)."
+        else
+            echo "  Installed $(_tilde "$MENUBAR_APP") but launchd refused to start it; open it from Finder once."
+        fi
     fi
     rm -rf "$out"
 }

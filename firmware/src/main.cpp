@@ -321,8 +321,9 @@ static void set_device_name(char* text) {
     // Idempotent: the daemon replays its config packet on every BLE link, so
     // a name equal to the stored one must not store or restart (a restart
     // would open a new link, replay the packet and loop forever).
-    String current = prefs.getString(BLE_NAME_NVS_KEY, "");
-    if (current == text) {
+    char current[BLE_DEVICE_NAME_MAX_LEN + 8] = {0};
+    prefs.getString(BLE_NAME_NVS_KEY, current, sizeof(current));
+    if (strcmp(current, text) == 0) {
         prefs.end();
         Serial.printf("BLE: name unchanged (\"%s\")\n", text);
         return;

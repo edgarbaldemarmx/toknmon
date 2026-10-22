@@ -1421,10 +1421,13 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
                     pid = item.get("p", "claude")
                     if not await session.write_payload(item, tag=pid):
                         continue
-                    last_poll = time.time()
                     if pid == "cfg":
+                        # Not a poll result: a delivered config packet must not
+                        # throttle the provider writes that follow it.
                         pusher.mark_sent(item)
-                    elif pid == "claude":
+                        continue
+                    last_poll = time.time()
+                    if pid == "claude":
                         # Alert extras ride on the Claude payload; only a
                         # successful Claude write counts them as delivered.
                         alert_unsent = clear_unsent = alert_poll_used = False

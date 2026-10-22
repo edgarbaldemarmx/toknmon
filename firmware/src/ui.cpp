@@ -2291,9 +2291,14 @@ bool ui_apps_toggle(void) {
 void ui_apps_refresh(void) {
     layout_apps();
     // Focus got disabled while it was up: back to the meter.
-    if (!apps_enabled(APP_FOCUS) && (current_screen == SCREEN_FOCUS || last_app_screen == SCREEN_FOCUS)) {
-        last_app_screen = SCREEN_USAGE;
-        if (current_screen == SCREEN_FOCUS) ui_show_screen(SCREEN_USAGE);
+    if (!apps_enabled(APP_FOCUS)) {
+        // A block that was still counting would otherwise ring the bell from
+        // an app the host just switched off.
+        if (focus_cancel(&focus)) Serial.println("focus: block cancelled (app disabled)");
+        if (current_screen == SCREEN_FOCUS || last_app_screen == SCREEN_FOCUS) {
+            last_app_screen = SCREEN_USAGE;
+            if (current_screen == SCREEN_FOCUS) ui_show_screen(SCREEN_USAGE);
+        }
     }
 }
 

@@ -66,7 +66,7 @@ bool apps_set_list(const char* csv) {
     bool changed = false;
     for (int i = 0; i < APP_COUNT; i++) if (next[i] != enabled[i]) changed = true;
     memcpy(enabled, next, sizeof(enabled));
-    store_list();
+    if (changed) store_list();   // the cfg packet is replayed on every link; skip the NVS write when nothing moved
     return changed;
 }
 
