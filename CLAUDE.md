@@ -44,7 +44,7 @@ Connects to a host daemon over BLE; the daemon polls each enabled provider (Clau
 - Touch: **CST9220** via I2C (SDA=15, SCL=14, INT=11, addr=0x5A)
 - PMU: **AXP2101** on same I2C bus (addr=0x34) — battery, USB VBUS, PWR button IRQ
 - IMU: **QMI8658** on same I2C bus (addr=0x6B) — accelerometer for auto-rotation
-- Buttons: GPIO 0 (left → Space/voice-mode), GPIO 18 (right → Shift+Tab/mode-toggle), AXP PKEY (middle → cycle screens; on splash → cycle animations)
+- Buttons: GPIO 0 (left → Space/voice-mode), GPIO 18 (right → app center toggle since H12; `sidebtn hid` restores Shift+Tab/mode-toggle), AXP PKEY (middle → cycle screens / brightness; on splash → cycle animations; on Focus → start / start next)
 
 ### AMOLED-1.8 (newer port)
 **Two hardware revisions ship under this name; the firmware probes I2C at boot and picks drivers automatically (`board_rev()`):**
@@ -111,6 +111,8 @@ firmware/src/
   splash.{h,cpp}            — 20×20 pixel-art engine. CELL = min(W,H)/20, centered.
   ble.{h,cpp}               — NimBLE peripheral: custom data service + HID keyboard
   data.h                    — UsageData struct
+  apps.{h,cpp}              — enabled-apps list (NVS `apps`, payload `ap`) and side-button mode (`side_btn`)
+  focus_logic.{h,cpp}       — Focus block-timer state machine (pure C++, tested natively by tools/test/shell/test_focus_logic.sh)
   icons.h                   — icon arrays. Battery (5×) are RGB565A8 with alpha; rest are raw RGB565.
   logo.h                    — 80×80 RGB565 logo
   font_*.c                  — pre-compiled LVGL 9 bitmap fonts (Tiempos 56/34, Styrene 48/28/24/20/16/14/12, Mono 32/18)
@@ -120,7 +122,7 @@ daemon/                     — macOS host daemon (claude_usage_daemon.py + prov
 tools/                      — asset converters, fetch_official_clawd.sh, tests (see tools/README.md)
 docs/porting/               — adding-a-board.md, hal-contract.md, capability-flags.md
 docs/simulator.md           — desktop simulator usage (controls, scenarios, env hooks)
-docs/odd/                   — design log: one feature document per milestone (H0–H10)
+docs/odd/                   — design log: one feature document per milestone (H0–H13)
 ```
 
 Each board folder contains: `board.h` (pins, I2C addresses, `BOARD_HAS_*` flags),

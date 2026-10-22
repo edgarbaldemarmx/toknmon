@@ -88,4 +88,5 @@ redistributed as loose media.
 | --- | --- |
 | `screens/hw-codex-credits.png` | Waveshare 2.16 over USB (`./screenshot.sh … --screen usage:codex`) with the H11 daemon: the reset-credit ledger above the Codex dot grid |
 | `screens/hw-codex-pet-rocky.png` | Waveshare 2.16, `screen splash codex` + `splash next` until `codex.pet-rocky` |
+| `screens/hw-apps.png`, `screens/hw-focus-setup.png`, `screens/hw-focus-running.png`, `screens/hw-focus-done.png` | Waveshare 2.16 over USB, serial `screen apps`, `screen focus`, `focus start`, `focus finish` |
 | `screens/menubar-app.png` | **Rendered preview**, not a screen capture: the menu's lines come from `daemon/gui/model.py` fed with a live `status.json`, drawn with Pillow (macOS does not let a script open an NSMenu without Accessibility access). Replace with a real capture when convenient. |

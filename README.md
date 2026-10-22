@@ -190,7 +190,7 @@ The board boots on the **splash** (animations) and swipes to the **meter**
 | **PWR button** (middle) | next animation | cycle brightness |
 | **PWR held ~3 s, then released** | pairing mode (clears the bond, advertises again) | same |
 | **BOOT button** (left) | hold: **Space** over Bluetooth HID (Claude Code push-to-talk) | same |
-| **Secondary button** (right) | **Shift+Tab** over Bluetooth HID (Claude Code mode toggle) | same |
+| **Side button** (right) | opens the **app center** (Meter, Focus); press again to go back. `sidebtn hid` over serial restores the old **Shift+Tab** HID key | same |
 
 - **Carousel**: the meter stays on the provider you picked (tap or swipe to
   page; the pick survives a reboot); a slot is live for 90 s after its last
@@ -202,6 +202,22 @@ The board boots on the **splash** (animations) and swipes to the **meter**
 - **Parade**: every live provider's mascot gets 20 s on stage in turn; a
   vertical swipe ends it. It never starts on its own: the meter stays up
   until you touch it (serial `parade on` starts it).
+- **App center and Focus** (H12): the side button shows one tile per enabled
+  app. **Focus** is a block timer for deep work: pick a block (25 min by
+  default, 5 to 120 in 5-minute steps: tap the right half or swipe up for +5,
+  left half or swipe down for −5), press **Start** (or PWR), and the ring
+  empties while the countdown runs; tap pauses, a long press cancels. At zero
+  the bell rings three times, the screen says **Done · Block N today** and
+  **Start next** begins another block of the same length. The daily counter
+  survives reboots and resets when the daemon's clock says the day changed.
+  The host decides which apps the board offers (`apps = meter` hides Focus
+  and the app center; the menu-bar app toggles it). Details:
+  [`docs/apps.md`](docs/apps.md).
+
+| <img src="docs/media/screens/hw-apps.png" width="220" alt="App center with the Meter and Focus tiles on the real panel"> | <img src="docs/media/screens/hw-focus-setup.png" width="220" alt="Focus setup: 25:00 inside the ring, 0 blocks today, Start"> | <img src="docs/media/screens/hw-focus-running.png" width="220" alt="Focus running: 24:58, Block 2 today"> | <img src="docs/media/screens/hw-focus-done.png" width="220" alt="Focus done: Done, Block 2 today, Start next"> |
+| --- | --- | --- | --- |
+| app center | Focus: setup | Focus: running | Focus: done |
+
 - **Attention alerts**: with the Claude Code hooks installed
   ([how](docs/install-macos.md#attention-alerts-from-claude-code-optional)),
   Clawd walks on and waves when a session waits for you.

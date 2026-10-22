@@ -19,8 +19,30 @@ H0–H10); the entries below summarize them.
   Null Signal, Rocky, Seedy, Stacky) join Codex's full-screen splash set;
   `tools/fetch_codex_pets.sh` + `tools/convert_pet_spritesheet.py` build the
   grids from the sprite sheets (not committed, see `NOTICE.md`).
+- **App center and Focus timer** (H12): the side button opens an app center
+  with a tile per enabled app. Focus runs deep-work blocks of 5–120 minutes
+  in 5-minute steps (default 25), rings the bell three times at the end,
+  counts the blocks of the day (NVS, day from the daemon clock) and starts
+  the next block with one tap. Serial: `screen apps|focus`, `focus …`,
+  `apps`, `sidebtn apps|hid`; sim: `SIM_SCREEN`, `SIM_FOCUS`.
+- **BLE config packets** (H12/H13): the daemon sends `{"p":"cfg","ap":…,"n":…}`
+  when the `apps` or `device_name` config changes (and once per link); the
+  board stores the app list and renames itself without a USB cable.
+- **macOS menu-bar app** (H13): `ToknMon.app` (Python, rumps, built with
+  py2app) shows each provider's last numbers and the link state from the
+  daemon's new `~/.config/toknmon/status.json`, and edits the config in
+  place: device name, apps, providers, chime/beep, clock; restart daemon,
+  open config/logs. `install-mac.sh` builds and starts it (`--no-gui`
+  skips); CI publishes a DMG.
 - `install-mac.sh --apps meter|suite` and the `apps` config key choose
   between the usage meter alone and the full suite (meter + Focus timer).
+
+### Changed
+
+- The side button (GPIO18 on the 2.16) now opens the app center; its
+  Shift+Tab HID key is opt-in (`sidebtn hid`).
+- A device name equal to the stored one is ignored instead of restarting the
+  board (the config packet is replayed on every link).
 
 ## [1.0.0] — 2026-10-21
 

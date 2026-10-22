@@ -16,11 +16,14 @@ Objective: the side button opens an app center (Meter, Focus); Focus is a block 
 
 | ID | Specs | Route | Status | Commit |
 | --- | --- | --- | --- | --- |
-| T1 | S1.1–S1.4, S1.6 (firmware apps + Focus) | inline or one writer after H11 T2 lands (same `ui.cpp`/`main.cpp`) | open | |
-| T2 | S1.5 (`ap`/`n` firmware side) | same unit as T1 | open | |
-| T3 | hardware flash, bell test, screenshots, docs | inline (parent) | open | |
+| T1 | S1.1–S1.4, S1.6 (firmware apps + Focus) | delegated writer E (parallel with H13 writer D; disjoint surfaces) | done | `aaa9a02` (state machine + tests), `f292478` (screens, cfg, sim, docs), `e91906a` (CI) |
+| T2 | S1.5 (`ap`/`n` firmware side) | same unit as T1 | done | `f292478` (+ idempotent name fix, see L4) |
+| T3 | hardware flash, bell test, screenshots, docs | inline (parent) | done (bell cadence heard by nobody: 3 `chime` calls logged) | README/CLAUDE.md/CHANGELOG commit |
 
 ## Log
 
 - **L1** See `toknmon-h11-codex-credits-pets.md` L1–L3 (request, research, authorization).
 - **L2** Hardware facts (explorer, 2026-10-21): buttons BOOT GPIO0 (HID Space PTT), GPIO18 (HID Shift+Tab), PWR via AXP2101 PKEY (short = next anim / brightness, 3 s hold = pairing); ES8311 codec, one bell clip in `chime.cpp` (`chime_play()` ignores calls while playing); no RTC, wall clock from `t`/`tf` advanced with `lv_tick` (`ui.cpp:1486-1500`); NVS ns `clawdmeter` keys `dev_name`, `brt_idx`, `slot`.
+- **L3** T1/T2 evidence (writer E): RED `test_focus_logic.sh` failed to compile (module missing) → GREEN 44 PASS; builds sim, 216 (`RAM 34.5 % / Flash 75.5 %`), 216 C6, LCD-4 all SUCCESS; sim captures of the app center (two tiles; one tile after `ap:"meter,bogus"`), Focus setup/running/done/alert; differential check against the pre-change sim binary: Codex usage pixel-identical, Claude differs only in the spinner glyph, `UI:` logs identical; `Desk #2` over cfg → `BLE: name rejected`. Serial QA beyond spec: `focus start|pause|cancel|next|finish|plus|minus`. Risk: item 3 (shared dispatch/parser), covered by the differential captures and the untouched BOOT/PWR/pair code.
+- **L4** Parent hardware check (2.16 flashed): `apps` → `meter,focus`, `sidebtn` → `apps`; captures of the app center, Focus setup (25:00, ring, "0 blocks today", Start), running (24:58, "Block 2 today"), done ("Done · Block 2 today", Start next) in `docs/media/screens/hw-apps.png`, `hw-focus-*.png`; `focus finish` logs `focus: block done — 2 today (day 0)`. **Bug found and fixed**: the daemon replays its cfg packet on every BLE link and `set_device_name()` stored + restarted even when the name was unchanged, so the board rebooted ~7 s after every connection (daemon log 00:28:40–00:28:57: Connected → Sending[cfg] → disconnected, three times). Fix: compare with the stored name and return `BLE: name unchanged` (in `f292478`); after reflashing, the 00:29:13 link stayed up (no disconnect in the following minutes).
+- **L5** Not verified by a human: the bell cadence (three `sound_hal_play_reset()` calls 2.8 s apart, clip 2.4 s) and the physical side-button press; both are driven by the same code the serial commands exercised. The "day" is 0 until the daemon clock is on (`clock = off` in the user's config), so the counter will not reset at midnight until the clock is enabled; documented in `docs/apps.md`.
