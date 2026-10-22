@@ -87,6 +87,9 @@ jobs:
       - name: Shell installer --apps tests
         run: bash tools/test/shell/test_install_apps.sh
 
+      - name: Focus timer state-machine tests (C++)
+        run: bash tools/test/shell/test_focus_logic.sh
+
       # The converter only needs ImageMagick for `--verify`; the plain run
       # regenerates firmware/src/custom_animations.h from assets/animations.
       # The committed header must match what the converter produces.
