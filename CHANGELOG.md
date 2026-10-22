@@ -9,6 +9,8 @@ H0–H10); the entries below summarize them.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-22
+
 ### Added
 
 - **Codex reset credits** (H11): the daemon reads OpenAI's reset credits with
@@ -226,6 +228,7 @@ First public release of the fork. Everything below is relative to upstream
 - The attention-hook flags still live under `~/.config/claude-usage-monitor`
   (shared with `daemon/attention-hook.sh`).
 
-[Unreleased]: https://github.com/edgarbaldemarmx/toknmon/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/edgarbaldemarmx/toknmon/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/edgarbaldemarmx/toknmon/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/edgarbaldemarmx/toknmon/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/edgarbaldemarmx/toknmon/releases/tag/v0.1.0
