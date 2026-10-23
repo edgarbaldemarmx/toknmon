@@ -20,9 +20,22 @@ long-press brings up the animations.
 It is a fork of [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) by
 Hermann Bjorgvin, which monitors Claude Code only. ToknMon adds the
 multi-provider daemon, the per-provider screens and mascots, mascot mode, the
-parade, gesture navigation, a configurable Bluetooth name and the tooling to
+parade, gesture navigation, Codex reset credits and pets, a Focus timer, a
+macOS menu-bar app, a configurable Bluetooth name and the tooling to
 draw your own animations as text. It is a personal project: issues and pull
 requests are welcome, support is best-effort.
+
+### Showreel
+
+<p align="center">
+  <a href="https://github.com/edgarbaldemarmx/toknmon/releases/download/v1.1.0/ToknMon-showreel.mp4">
+    <img src="docs/media/showreel-preview.webp" width="720" alt="Showreel preview: four ToknMon boards with Claude, Codex, Kimi and Grok converge into one, then the Claude and Codex usage pages">
+  </a>
+  <br>
+  <sub>A 12-second preview. The full 48-second showreel, with its original chiptune soundtrack:
+  <a href="https://github.com/edgarbaldemarmx/toknmon/releases/download/v1.1.0/ToknMon-showreel.mp4">1920×1080</a> ·
+  <a href="https://github.com/edgarbaldemarmx/toknmon/releases/download/v1.1.0/ToknMon-showreel-vertical.mp4">1080×1920 (vertical)</a></sub>
+</p>
 
 ## Contents
 
@@ -342,7 +355,7 @@ daemon/     macOS daemon (claude_usage_daemon.py, providers/, launchd template, 
 assets/     animation text grids, font and icon sources
 tools/      converters (grid → header, official Clawd → header, PNG → LVGL), gallery script, tests
 docs/       guides (install, flashing, providers, controls, animations, troubleshooting, simulator, development),
-            porting/, media/ (screenshots, GIFs), odd/ (design log H0–H8)
+            porting/, media/ (screenshots, GIFs), odd/ (design log H0–H14)
 ```
 
 ## Roadmap
@@ -355,7 +368,6 @@ docs/       guides (install, flashing, providers, controls, animations, troubles
   attention alert.
 - Reactive animations: mascots that react to usage pace and resets for Codex
   and Kimi the way Clawd does for Claude.
-- Releases with prebuilt firmware images.
 
 ## Credits
 

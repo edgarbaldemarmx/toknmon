@@ -5,9 +5,15 @@ All notable changes to ToknMon are documented here. The format follows
 [Semantic Versioning](https://semver.org/).
 
 Milestones are tracked in `docs/odd/` (one feature document per milestone,
-H0–H10); the entries below summarize them.
+H0–H14); the entries below summarize them.
 
 ## [Unreleased]
+
+### Added
+
+- README showreel: a 12-second animated preview (`docs/media/showreel-preview.webp`)
+  linking to the full 48-second showreel with its soundtrack, attached to the
+  v1.1.0 release in landscape and vertical cuts.
 
 ## [1.1.0] — 2026-10-22
 

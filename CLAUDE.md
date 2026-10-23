@@ -122,7 +122,7 @@ daemon/                     — macOS host daemon (claude_usage_daemon.py + prov
 tools/                      — asset converters, fetch_official_clawd.sh, tests (see tools/README.md)
 docs/porting/               — adding-a-board.md, hal-contract.md, capability-flags.md
 docs/simulator.md           — desktop simulator usage (controls, scenarios, env hooks)
-docs/odd/                   — design log: one feature document per milestone (H0–H13)
+docs/odd/                   — design log: one feature document per milestone (H0–H14)
 ```
 
 Each board folder contains: `board.h` (pins, I2C addresses, `BOARD_HAS_*` flags),
