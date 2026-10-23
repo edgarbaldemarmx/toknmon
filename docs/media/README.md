@@ -6,6 +6,11 @@ with synthetic data (no account, device name, or token appears anywhere);
 `hw-*.png` files are framebuffer dumps from a real Waveshare AMOLED 2.16
 taken with `./screenshot.sh`.
 
+`showreel-preview.webp` is a 12-second cut (3.6–15.8 s, 960×540, 15 fps) of the
+showreel attached to the v1.1.0 release, encoded as animated WebP with Pillow
+(a GIF of the same cut weighs 12–19 MB because of the gradients and grain).
+The showreel itself is rendered outside the repo and is not regenerated here.
+
 ## Regenerate
 
 ```bash
