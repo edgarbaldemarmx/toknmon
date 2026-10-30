@@ -11,6 +11,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import rumps
@@ -23,6 +25,11 @@ CONFIG_FILE = CONFIG_DIR / "config"
 STATUS_FILE = CONFIG_DIR / "status.json"
 LOG_FILE = Path.home() / "Library" / "Logs" / "toknmon.err.log"
 DAEMON_LABEL = "com.toknmon.daemon"
+PLIST_FILE = Path.home() / "Library" / "LaunchAgents" / f"{DAEMON_LABEL}.plist"
+LAUNCHCTL_TIMEOUT = 15
+# A daemon whose interpreter is gone exits within a second of the bootstrap;
+# checking after this long reports that instead of a false success.
+RESTART_SETTLE_SECONDS = 3
 HERE = Path(__file__).resolve().parent
 # The 36x36 variant renders crisply on retina menu bars (rumps scales the
 # template icon to 20 pt); the 18x18 glyph is the fallback.
@@ -56,6 +63,62 @@ def _run(*cmd: str) -> None:
         rumps.alert("ToknMon", f"Could not run {' '.join(cmd)}: {e}")
 
 
+def _launchctl(*args: str, timeout: float = LAUNCHCTL_TIMEOUT) -> subprocess.CompletedProcess | None:
+    try:
+        return subprocess.run(["launchctl", *args], capture_output=True, text=True,
+                              timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _first_line(text: str) -> str:
+    """launchctl's error without its "Try re-running … as root" hint."""
+    lines = text.strip().splitlines()
+    return lines[0].rstrip(".") if lines else ""
+
+
+def daemon_info(label: str = DAEMON_LABEL) -> dict | None:
+    """The agent's top-level ``launchctl print`` fields, or None when launchd
+    does not know it."""
+    result = _launchctl("print", f"gui/{os.getuid()}/{label}", timeout=3)
+    if result is None or result.returncode != 0:
+        return None
+    return model.parse_launchctl_print(result.stdout)
+
+
+def program_exists(info: dict | None) -> bool:
+    program = (info or {}).get("program")
+    return not program or os.path.exists(program)
+
+
+def restart_daemon_agent(label: str = DAEMON_LABEL, plist: Path = PLIST_FILE) -> str | None:
+    """Reload the agent the way install-mac.sh does (bootout + bootstrap,
+    ``load -w`` if bootstrap is refused) and return why the daemon is not
+    running afterwards, or None. ``kickstart -k`` is not enough: once the
+    venv's interpreter is gone, launchd parks the agent in ``spawn
+    scheduled`` (exit 78) and kickstart can hang. Blocks for a few seconds,
+    so the app runs it off the main thread."""
+    if not plist.exists():
+        return model.restart_problem(None, installed=False)
+    domain = f"gui/{os.getuid()}"
+    _launchctl("bootout", f"{domain}/{label}")
+    deadline = time.monotonic() + LAUNCHCTL_TIMEOUT
+    while daemon_info(label) is not None and time.monotonic() < deadline:
+        time.sleep(0.5)
+    load_error = ""
+    result = _launchctl("bootstrap", domain, str(plist))
+    if result is None or result.returncode != 0:
+        load_error = _first_line(result.stderr) if result is not None else "launchctl failed or timed out"
+        # `load -w` exits 0 even when it prints "Load failed", so keep its
+        # stderr for the alert and let the state check below decide.
+        fallback = _launchctl("load", "-w", str(plist))
+        if fallback is not None and fallback.stderr.strip():
+            load_error = f"{load_error}; load -w: {_first_line(fallback.stderr)}"
+    time.sleep(RESTART_SETTLE_SECONDS)
+    info = daemon_info(label)
+    return model.restart_problem(info, program_exists=program_exists(info), load_error=load_error)
+
+
 class ToknMonApp(rumps.App):
     def __init__(self) -> None:
         super().__init__(model.APP_NAME, icon=str(ICON), template=True, quit_button="Quit")
@@ -66,6 +129,10 @@ class ToknMonApp(rumps.App):
         # for insert_before() while the visible text follows the status.
         self.device_item = rumps.MenuItem("Device")
         self.device_key = self.device_item.title
+        self.daemon_item = rumps.MenuItem("Daemon")   # no callback: informational
+        self._restart_thread: threading.Thread | None = None
+        self._restart_timer: rumps.Timer | None = None
+        self._restart_problem: str | None = None
         self._build_menu()
         self.refresh(None)
         rumps.Timer(self.refresh, REFRESH_SECONDS).start()
@@ -97,6 +164,7 @@ class ToknMonApp(rumps.App):
 
         self.menu = [
             self.device_item,
+            self.daemon_item,
             None,
             rumps.MenuItem("Device name…", callback=self.rename_device),
             apps_menu,
@@ -122,6 +190,9 @@ class ToknMonApp(rumps.App):
             for item in self.status_items:
                 self.menu.insert_before(self.device_key, item)
         self.device_item.title = model.device_line(status, config_name=config.get("device_name"))
+        if not self._restarting():
+            info = daemon_info()
+            self.daemon_item.title = model.daemon_line(info, program_exists=program_exists(info))
         self.focus_item.state = int(model.focus_enabled(config.get("apps")))
         for pid_or_auto, checked in model.provider_states(config.get("providers")).items():
             item = self.auto_item if pid_or_auto == "auto" else self.provider_items[pid_or_auto]
@@ -173,8 +244,34 @@ class ToknMonApp(rumps.App):
     def select_clock(self, sender) -> None:
         self._set("clock", model.clock_value(sender.title))
 
+    def _restarting(self) -> bool:
+        return self._restart_thread is not None and self._restart_thread.is_alive()
+
     def restart_daemon(self, _sender) -> None:
-        _run("launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{DAEMON_LABEL}")
+        if self._restarting():
+            return
+        self.daemon_item.title = model.DAEMON_RESTARTING
+        self._restart_problem = None
+        self._restart_thread = threading.Thread(target=self._restart_worker, daemon=True)
+        self._restart_thread.start()
+        # A click right after the previous restart finished, before its timer
+        # ticked, must not leave two timers showing the same alert.
+        if self._restart_timer is not None:
+            self._restart_timer.stop()
+        self._restart_timer = rumps.Timer(self._restart_finished, 0.5)
+        self._restart_timer.start()
+
+    def _restart_worker(self) -> None:
+        self._restart_problem = restart_daemon_agent()
+
+    def _restart_finished(self, timer) -> None:
+        # rumps timers fire on the main thread, where alerts must be shown.
+        if self._restarting():
+            return
+        timer.stop()
+        self.refresh(None)
+        if self._restart_problem:
+            rumps.alert("ToknMon", self._restart_problem)
 
     def open_config(self, _sender) -> None:
         if not CONFIG_FILE.exists():

@@ -16,12 +16,13 @@ it. It lives in `~/Applications/ToknMon.app` and is started at login by the
 | --- | --- |
 | One line per provider, e.g. `Claude · 5h 32% · week 61%`, `Codex · week 37% · resets 2 held` | the last values the daemon sent for that provider; `no data` when the last poll failed; providers absent from `status.json` are not listed. Refreshed every 10 s. |
 | `Device: <name> · connected / offline` | the board's Bluetooth name from the config and whether the daemon currently holds the BLE link |
+| `Daemon: running / stopped · exit N / stopped · Python missing / stopped / not loaded` | the launch agent's state from `launchctl print gui/$UID/com.toknmon.daemon`. `Python missing` means the venv's interpreter is gone (typically after a Homebrew Python upgrade): run `./install-mac.sh` again. Refreshed every 10 s. |
 | `Device name…` | a dialog to rename the board (1–18 printable ASCII characters, no `#`). The daemon pushes the new name to the board on its next poll; the board stores it and restarts its advertising, so re-pairing is not needed. |
 | `Apps ▸ Meter / Focus` | which apps the board offers. Meter is always on; unchecking Focus hides the Focus timer and the app center (config key `apps`). |
 | `Providers ▸ Auto / Claude / Codex / Kimi / Grok` | `Auto` polls every provider whose CLI is installed and logged in; checking individual providers pins an explicit list (config key `providers`). |
 | `Sound ▸ Chime / Beep` | the session-reset chime and the attention beep on the board (`chime`, `beep`) |
 | `Clock ▸ Off / Auto / 12h / 24h` | the clock in the board's title (`clock`) |
-| `Restart daemon` | `launchctl kickstart -k gui/$UID/com.toknmon.daemon` |
+| `Restart daemon` | reloads the agent like the installer (`launchctl bootout` + `bootstrap` of `~/Library/LaunchAgents/com.toknmon.daemon.plist`, `load -w` if bootstrap is refused), in the background, then checks that the daemon is running; if not, an alert says why (Python missing, launchd refused the plist, or the exit code, with a pointer to the logs) |
 | `Open config file` / `Open logs` | open `~/.config/toknmon/config` in your editor / `~/Library/Logs/toknmon.err.log` |
 | `About ToknMon` / `Quit` | version from `daemon/VERSION`; Quit stops the app until the next login (the daemon keeps running) |
 

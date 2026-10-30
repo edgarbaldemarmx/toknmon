@@ -14,6 +14,9 @@ H0–H14); the entries below summarize them.
 - README showreel: a 12-second animated preview (`docs/media/showreel-preview.webp`)
   linking to the full 48-second showreel with its soundtrack, attached to the
   v1.1.0 release in landscape and vertical cuts.
+- Menu-bar app: a `Daemon:` line under `Device:` shows the launch agent's
+  state (`running`, `stopped · exit N`, `stopped · Python missing`,
+  `not loaded`).
 
 ### Changed
 
@@ -39,6 +42,11 @@ H0–H14); the entries below summarize them.
   daemon (exit 78), leaving the board without data. The installer now skips
   virtualenv interpreters, and a re-run rebuilds a venv tied to a Homebrew
   keg before it breaks.
+- **Menu-bar `Restart daemon` doing nothing**: it fired `launchctl kickstart
+  -k` without checking the outcome, which cannot revive an agent launchd has
+  parked after exit 78 (kickstart can even hang). It now reloads the agent
+  like the installer (`bootout` + `bootstrap`) in the background and shows
+  an alert when the daemon is still not running, naming the cause.
 
 ## [1.1.0] — 2026-10-22
 

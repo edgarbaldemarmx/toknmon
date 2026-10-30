@@ -325,7 +325,7 @@ The most common ones; the full list is in
 | Symptom | Fix |
 | --- | --- |
 | Daemon never gets past startup | The clone is under `~/Documents` (or similar): grant the venv's Python access under Privacy & Security → Files and Folders, or move the clone to `~/toknmon` |
-| Board stopped updating after `brew upgrade` | Run `./install-mac.sh` again: it rebuilds `daemon/.venv`, which an older install could tie to the Python version Homebrew just removed |
+| Board stopped updating after `brew upgrade` (`Daemon: stopped` in the menu bar) | Run `./install-mac.sh` again: it rebuilds `daemon/.venv`, which an older install could tie to the Python version Homebrew just removed |
 | Board missing or wrongly named in Bluetooth after a rename | Unpair and pair again; macOS caches the name with the bond |
 | Two daemons fighting over the board | A Clawdmeter-era agent is still loaded: `./install-mac.sh` retires it, or `launchctl bootout gui/$(id -u)/com.user.claude-usage-daemon` |
 | Kimi slot stays empty | Log in once with the Kimi Code CLI; the daemon refreshes the token from then on |
