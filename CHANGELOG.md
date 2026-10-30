@@ -31,6 +31,15 @@ H0–H14); the entries below summarize them.
   block at 0 %; `s`/`sr` (and `w`/`wr`) are now omitted when the account has
   no such window.
 
+- **macOS daemon dying after `brew upgrade`**: `install-mac.sh` took the
+  first `python3.13` on `PATH`, which can be a virtualenv (PlatformIO's penv
+  sits ahead of Homebrew on many machines); `daemon/.venv` then linked to the
+  versioned `Cellar/python@3.x/<patch>` keg, so the next Homebrew Python
+  upgrade deleted its interpreter and launchd could no longer start the
+  daemon (exit 78), leaving the board without data. The installer now skips
+  virtualenv interpreters, and a re-run rebuilds a venv tied to a Homebrew
+  keg before it breaks.
+
 ## [1.1.0] — 2026-10-22
 
 ### Added
