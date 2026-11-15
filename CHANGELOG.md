@@ -15,6 +15,14 @@ H0–H14); the entries below summarize them.
   linking to the full 48-second showreel with its soundtrack, attached to the
   v1.1.0 release in landscape and vertical cuts.
 
+### Fixed
+
+- Claude: the daemon sends only the windows `/api/oauth/usage` reports. Verified
+  Ultra accounts (formerly Max 20x) have no five-hour limit, and their payload
+  carried an empty `s: 0, sr: 0` window that the board drew as a `CURRENT · 5H`
+  block at 0 %; `s`/`sr` (and `w`/`wr`) are now omitted when the account has
+  no such window.
+
 ## [1.1.0] — 2026-10-22
 
 ### Added

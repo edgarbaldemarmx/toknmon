@@ -1,0 +1,29 @@
+# ToknMon — Claude accounts without a 5-hour window: weekly and Fable on one page
+
+Objective: an account whose `/api/oauth/usage` reports no 5-hour window (verified Ultra) gets one Claude page with the weekly figure and the Fable limit; every account that still has the 5-hour window keeps today's pages. Branch `feat/claude-ultra-weekly-fable` from `main` `c6f4520`; delivery: one PR (forecast ≈ 250 authored lines); runners `daemon/.venv/bin/python -m pytest daemon/tests -q`, `pio run -d firmware -e sim` + `bash tools/test/shell/test_sim_sticky_view.sh`, `pio run -d firmware -e waveshare_amoled_216` / `-e waveshare_amoled_216_c6`.
+
+## Specs
+
+- **S1** — Daemon sends only the windows the plan has (L1: "Solo si tienes el plan base que si hay weekly usage entonces si se tendria que activar"). The Claude provider emits `s`/`sr` only when `limits[]` carries a `session` entry and `w`/`wr` only when it carries `weekly_all`; the scoped limit (`f`/`fr`/`fl`) keeps its current rule. A body with both windows produces the same payload as before.
+- **S2** — One page without the 5-hour window (L3: "en mi caso como ya no tengo 5h limit en esta cuenta, me gustaría que automático en una ventana me de la semanal y la de fable"). When Claude's payload has the weekly window and the scoped limit but no 5-hour window, the Claude view shows the weekly figure and, where the `CURRENT · 5H` block goes, a block for the scoped limit (label `<FL> · WEEKLY`, e.g. `FABLE · WEEKLY`, with its percentage, track and reset time). The separate Fable view is not offered: paging skips it, `slot 4` is refused, and a picked Fable view shows the Claude view. Boards without the Fable grid (C6) show the same module instead of the three-panel stack.
+- **S3** — Everyone with the 5-hour window is unaffected (L3: "¿Cómo podemos hacer para no afectar a quien no tenga ultra y siga teniendo ventana de 5hrs?" and "Pero si cambio a una que si tenga 5h limit aparezca normal como ahorita"). With `s` in the payload, the Claude and Fable views render exactly as before (pixel-identical sim captures against `main`), and a picked Fable view comes back as soon as the 5-hour window returns.
+- **S4** — Docs: README features row, `docs/providers.md`, `docs/controls.md`, `docs/troubleshooting.md`, `CLAUDE.md` (usage carousel section), CHANGELOG `[Unreleased]`.
+- Out of scope (noted, unchanged behavior): the rate-limit header probe used only when `/api/oauth/usage` fails reads a missing 5-hour header as an Enterprise account; the multi-account pick (`config_dirs`) ranks accounts by `s`, so an account without the window never counts as rising (it already sent `s: 0`); the splash rate groups and the session-reset chime follow `s` (already 0 for these accounts).
+
+## Tasks
+
+| ID | Specs | Route | Status | Commit |
+| --- | --- | --- | --- | --- |
+| T1 | S1 (+ S4 daemon docs) | inline | done (L4) | T1 commit |
+| T2 | S2, S3 (+ S4 firmware docs) | inline | pending | — |
+| T3 | verify T1+T2 (Risk item 3: BLE payload contract; item 6: firmware rendering has only sim checks) + hardware capture | independent verifier, parent flashes | pending | — |
+
+Route evidence: Writer trigger not met. T1 is under 100 changed lines (inline by rule); T2 is one firmware unit, and there is no second independent unit of several minutes to run beside it.
+
+## Log
+
+- **L1** (2026-11-15, user, verbatim): "Claude hizo una modificación y quito límites semanales para suscripciones pro y max (revísalo y valídalo), entonces en ese caso ya esta de más la abrra de weekly usage de claude y la pantalla solitaria de fable, entonces hay que hacer ese ajuste. Solo si tienes el plan base que si hay weekly usage entonces si se tendria que activar"
+- **L2** Validation. Anthropic's support pages contradict the premise: "The Max 20x plan is now called the Ultra plan", "Verified Ultra accounts don't have a five-hour limit", "Ultra plans have a weekly usage limit that applies across all models, and a separate weekly limit for Fable" (support.claude.com articles 17728952 and 11647753); Pro and Max are unchanged. Live `GET /api/oauth/usage` for the user's account (2026-11-15): `limits[]` = `weekly_all` 35 % + `weekly_scoped` Fable 42 %, no `session` entry, `five_hour: null`. `parse_usage()` still appended a `Current` bar at 0/0, so the board drew an empty `CURRENT · 5H` block; the firmware already treats a missing `s` as "no 5-hour window" (`main.cpp` `has_session`).
+- **L3** (2026-11-15, user, verbatim, answering the proposal to send only the reported windows): "¿Cómo podemos hacer para no afectar a quien no tenga ultra y siga teniendo ventana de 5hrs? en mi caso como ya no tengo 5h limit en esta cuenta, me gustaría que automático en una ventana me de la semanal y la de fable. Pero si cambio a una que si tenga 5h limit aparezca normal como ahorita"
+- **L4** T1 evidence. RED: 3 new tests in `daemon/tests/test_providers_claude.py` fail (`s`/`sr` present at 0/0 without a `session` item; `w`/`wr` at 0/0 without `weekly_all`; same through `poll_api`), 14 existing pass. GREEN: 17 pass; full suite 395 passed, 2 skipped (main: 392 + the 3 new). Differential check of `to_payload(parse_usage(body))` against `main`'s `claude.py`: identical for all three windows and for session + weekly; differs only by the dropped keys for the Ultra body (no `s`/`sr`) and a session-only body (no `w`/`wr`).
+- Next step: T2.

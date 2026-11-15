@@ -205,7 +205,7 @@ One JSON object per provider per poll, written to the BLE RX characteristic
 | --- | --- |
 | `p` | provider id (`claude`, `codex`, `kimi`, `grok`); missing means `claude` (compatible with Clawdmeter payloads) |
 | `s`, `sr` | session (5h) percent used and minutes until it resets; omitted when the plan has no such window |
-| `w`, `wr` | weekly percent used and minutes until reset (Grok: its credit window, weekly or monthly) |
+| `w`, `wr` | weekly percent used and minutes until reset (Grok: its credit window, weekly or monthly); omitted when the plan has no such window |
 | `f`, `fr` | model-scoped weekly window (Fable) percent and minutes; Claude only, only when present |
 | `fl` | that window's model name (printable ASCII, at most 11 characters; dropped after `m` when a write would overflow); the board shows "Fable" without it |
 | `st` | status string from the API (`allowed`, …) |
