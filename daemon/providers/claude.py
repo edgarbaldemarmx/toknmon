@@ -74,8 +74,12 @@ def _status_of(items: list[dict]) -> str:
 
 
 def parse_usage(body: dict, now: float | None = None) -> ProviderResult:
-    """Map the ``limits[]`` array to bars: session -> 0, weekly_all -> 1, and
-    the first model-scoped weekly limit -> 2 (label = model display name).
+    """Map the ``limits[]`` array to bars, in order: session ("Current"),
+    weekly_all ("Weekly") and the first model-scoped weekly limit (label =
+    model display name). Only the windows the account reports become bars:
+    verified Ultra accounts have no five-hour limit and report no ``session``
+    item, so the payload carries no ``s``/``sr`` and the board drops its 5h
+    block instead of drawing an empty one.
 
     Raises :class:`UsageUnavailable` when neither ``session`` nor
     ``weekly_all`` is present (e.g. an Enterprise account answering 200 with
@@ -99,11 +103,12 @@ def parse_usage(body: dict, now: float | None = None) -> ProviderResult:
     if not by_kind:
         raise UsageUnavailable("limits[] has no session or weekly_all window")
 
-    def bar(label: str, item: dict | None):
-        item = item or {}
+    def bar(label: str, item: dict):
         return window_bar(label, item.get("percent", 0), iso_to_epoch(item.get("resets_at")), now)
 
-    bars = [bar("Current", by_kind.get("session")), bar("Weekly", by_kind.get("weekly_all"))]
+    bars = [bar(label, by_kind[kind])
+            for kind, label in (("session", "Current"), ("weekly_all", "Weekly"))
+            if kind in by_kind]
     if scoped is not None:
         bars.append(bar(str(scoped["scope"]["model"]["display_name"]), scoped))
     status = _status_of([i for i in (by_kind.get("session"), by_kind.get("weekly_all")) if i])

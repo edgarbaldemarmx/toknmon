@@ -202,3 +202,68 @@ def test_main_module_poll_api_falls_back_on_empty_limits(monkeypatch):
     monkeypatch.setattr(mod, "CONFIG_FILE", Path("/nonexistent/config"))
     payload = _run(mod.poll_api("tok"))
     assert payload["acct"] == "ent"
+
+
+def _without(kind: str) -> dict:
+    return {"limits": [item for item in FIXTURE["limits"] if item["kind"] != kind]}
+
+
+def test_poll_without_session_window_sends_no_5h_keys():
+    """Verified Ultra accounts have no five-hour limit: ``limits[]`` carries
+    ``weekly_all`` and the scoped limit but no ``session``. The payload must
+    omit ``s``/``sr`` (the board then drops the 5h block) instead of a 0/0
+    window, and keep the weekly and Fable windows."""
+    body = _without("session")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    res = _run(claude.poll("tok", client=_client(handler), now=NOW))
+    weekly_mins = int(round((_iso_epoch("2026-10-12T20:59:59Z") - NOW) / 60))
+    assert res.bars == [("Weekly", 73, weekly_mins), ("Fable", 1, weekly_mins)]
+    payload = to_payload(res)
+    assert "s" not in payload and "sr" not in payload
+    assert (payload["w"], payload["wr"]) == (73, weekly_mins)
+    assert (payload["f"], payload["fr"], payload["fl"]) == (1, weekly_mins, "Fable")
+    assert payload["st"] == "allowed"
+    assert payload["acct"] == "pro"
+    assert payload["ok"] is True
+
+
+def test_poll_without_weekly_window_sends_no_weekly_keys():
+    """The weekly window follows the same rule: no ``weekly_all`` item, no
+    ``w``/``wr`` keys."""
+    body = {"limits": [FIXTURE["limits"][0]]}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    res = _run(claude.poll("tok", client=_client(handler), now=NOW))
+    assert res.bars == [("Current", 17, 110)]
+    payload = to_payload(res)
+    assert (payload["s"], payload["sr"]) == (17, 110)
+    assert "w" not in payload and "wr" not in payload
+    assert "f" not in payload
+
+
+def test_main_module_poll_api_omits_5h_keys_without_session_window(monkeypatch):
+    """End to end through ``poll_api``: the BLE payload of an account without
+    the five-hour window has no ``s``/``sr``."""
+    import daemon.claude_usage_daemon as mod
+
+    body = _without("session")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(claude.httpx, "AsyncClient",
+                        lambda **kw: real_client(transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(mod, "CONFIG_FILE", Path("/nonexistent/config"))
+    payload = _run(mod.poll_api("tok"))
+    assert payload["p"] == "claude"
+    assert "s" not in payload and "sr" not in payload
+    # poll_api uses the wall clock, so the fixture's past resets read 0 %;
+    # only the presence of the weekly and Fable windows matters here.
+    assert "w" in payload and "wr" in payload
+    assert "f" in payload and payload["fl"] == "Fable"

@@ -71,14 +71,18 @@ through the whole catalog, custom animations included (`claude.bike`).
   screen).
 - **Claude**: weekly on top, a compact `CURRENT · 5H` block (track,
   percentage, reset) under it; title in terracotta; the Clawd corner mascot,
-  which walks off and back, lurks and acts depending on the pace.
+  which walks off and back, lurks and acts depending on the pace. An account
+  without a five-hour limit (verified Ultra) gets a `FABLE · WEEKLY` block
+  there instead, so weekly and Fable share one page.
 - **Fable**: when the subscription has a model-scoped weekly limit, it gets
   its own view right after Claude: the track gives way to a 5×4 grid of
   large Clawds across the working width, one per 5 %, filled in
   terracotta; the title is the model name the daemon sends (`fl`, "Fable"
   when absent) tagged `CLAUDE`, with the reset time right of the figure.
   Boards without the canvas (the C6 ports) keep it as a third bar on the
-  Claude view.
+  Claude view. Without a five-hour window there is no Fable view: paging
+  skips it, `slot 4` is refused, and a picked Fable view shows Claude until
+  the window comes back.
 - **Codex**: weekly track in the white (monochrome) accent; a `RESET
   CREDITS` panel when the account has reset credits, otherwise "N%
   remaining"; the Bsod pet in the corner.

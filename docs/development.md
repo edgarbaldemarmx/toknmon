@@ -22,7 +22,7 @@ firmware/
     hal/                    board-agnostic interfaces
     boards/<name>/          one folder per board (display, touch, input, power, imu, caps)
     boards/sim/             SDL2 desktop simulator + Arduino shims
-  sim/                      scenario.jsonl (dev), gallery.jsonl (docs captures)
+  sim/                      scenario.jsonl (dev), gallery.jsonl (docs captures), no-session.jsonl (Claude without a 5h window)
 daemon/
   claude_usage_daemon.py    macOS daemon (bleak); poll loop, config, BLE, HID fallback, stale-bond repair
   providers/                claude.py, codex.py, kimi.py, grok.py, base.py (ProviderResult → payload)

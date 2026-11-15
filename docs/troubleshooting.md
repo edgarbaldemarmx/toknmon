@@ -24,6 +24,7 @@ console (115200 baud) prints every BLE event and payload.
 | `token expired`, `HTTP 401` | Run `claude` and log in again; the daemon re-reads the Keychain on the next poll |
 | `Warning: Claude Code OAuth token not found in Keychain` at install | Log in to Claude Code first (service `Claude Code-credentials`), or make sure `~/.claude/.credentials.json` exists |
 | No Fable bar | The subscription has no model-scoped weekly window; the bar appears only when `/api/oauth/usage` reports one |
+| No `CURRENT · 5H` block; Fable sits on the Claude page and its own page is gone | Expected on accounts without a five-hour limit (verified Ultra): `/api/oauth/usage` reports no session window, so the daemon sends no `s`/`sr` and the Claude page shows the weekly figure with a `FABLE · WEEKLY` block. The usual pages come back when the account has the five-hour window again. A `CURRENT · 5H` block stuck at 0 % means the daemon predates this change: update the clone and run `./install-mac.sh` |
 | Wrong plan shown with several Claude accounts | Set `config_dirs = ~/.claude, ~/.claude-work`; the daemon shows the plan whose usage rose most recently |
 
 ### Codex

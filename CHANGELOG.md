@@ -15,6 +15,22 @@ H0–H14); the entries below summarize them.
   linking to the full 48-second showreel with its soundtrack, attached to the
   v1.1.0 release in landscape and vertical cuts.
 
+### Changed
+
+- Claude accounts without a five-hour limit (verified Ultra) get one Claude
+  page: the weekly figure on top and a `FABLE · WEEKLY` block where the
+  `CURRENT · 5H` block goes; the separate Fable page is not offered while the
+  five-hour window is absent and comes back with it. Accounts with the
+  five-hour window render exactly as before.
+
+### Fixed
+
+- Claude: the daemon sends only the windows `/api/oauth/usage` reports. Verified
+  Ultra accounts (formerly Max 20x) have no five-hour limit, and their payload
+  carried an empty `s: 0, sr: 0` window that the board drew as a `CURRENT · 5H`
+  block at 0 %; `s`/`sr` (and `w`/`wr`) are now omitted when the account has
+  no such window.
+
 ## [1.1.0] — 2026-10-22
 
 ### Added

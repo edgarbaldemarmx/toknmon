@@ -6,7 +6,7 @@ them as a carousel with a palette and a mascot of their own.
 
 | Provider | Config id | Data source | Network | What the board shows |
 | --- | --- | --- | --- | --- |
-| Claude Code | `claude` | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token (Keychain service `Claude Code-credentials`, or `~/.claude/.credentials.json`) | one GET per poll, **no token spend** | **Weekly** on top and a compact **Current · 5h** block, plus a separate **Fable** view (the model-scoped weekly limit as a grid of small Clawds) when the subscription has one; reset countdowns; the Clawd corner mascot |
+| Claude Code | `claude` | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token (Keychain service `Claude Code-credentials`, or `~/.claude/.credentials.json`) | one GET per poll, **no token spend** | **Weekly** on top and a compact **Current · 5h** block, plus a separate **Fable** view (the model-scoped weekly limit as a grid of small Clawds) when the subscription has one (accounts without a five-hour limit get Fable in the 5h block's place instead); reset countdowns; the Clawd corner mascot |
 | OpenAI Codex CLI | `codex` | newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` modified in the last 7 days | **none** (local files only) | the weekly percentage in large type over a full-width track, the reset time, and the **RESET CREDITS** panel when the account has reset credits (otherwise "N% remaining"); the Bsod pet mascot |
 | Kimi Code | `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest token in `~/.kimi-code/credentials/*.json` | one GET per poll, plus a token refresh when needed | the same weekly + **Current · 5h** module in pastel blue; the crescent-moon mascot |
 | Grok Build CLI | `grok` | `GET ${GROK_CLI_CHAT_PROXY_BASE_URL:-https://cli-chat-proxy.grok.com/v1}/billing?format=credits` with the `key` in `${GROK_HOME:-~/.grok}/auth.json`; fallback: the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` when it is newer than 6 h | one GET per poll, plus a token refresh (Grok's own OIDC protocol) when needed | the weekly credit percentage in large type over a full-width track and "N% remaining" (Grok has no 5-hour window); the black-hole Grokbot-style ball mascot |
@@ -158,7 +158,11 @@ footer is a dot in the accent plus the status verb.
 
 - **Claude** (terracotta): the weekly window on top; under the reset line a
   compact `CURRENT · 5H` block with its own track, percentage and reset time.
-  The corner Clawd plays busier acts as your usage rate climbs. An attention
+  Accounts without a five-hour limit (verified Ultra plans report no
+  `session` window, so the payload has no `s`) show the model-scoped limit
+  there instead, as a `FABLE · WEEKLY` block (the `fl` label in capitals),
+  and the separate Fable view is not offered until the five-hour window
+  comes back. The corner Clawd plays busier acts as your usage rate climbs. An attention
   alert from Claude Code (see
   [`install-macos.md`](install-macos.md#attention-alerts-from-claude-code-optional))
   rides on this payload only.
@@ -168,7 +172,8 @@ footer is a dot in the accent plus the status verb.
   working width, one per 5 % (`round(pct / 5)` filled, 0–20), filled in
   terracotta with the rest in the track colour; the reset time sits under
   the figure row, above the grid. On the C6 boards (no canvas) it stays a
-  third bar on the Claude view.
+  third bar on the Claude view. Without a five-hour window it joins the
+  Claude view on every board (see above).
 - **Codex** (monochrome, the white accent): weekly track and, when the
   payload carries reset credits (`rc`/`ru`, see
   [Codex reset credits](#codex-reset-credits)), a `RESET CREDITS` panel:
@@ -205,7 +210,7 @@ One JSON object per provider per poll, written to the BLE RX characteristic
 | --- | --- |
 | `p` | provider id (`claude`, `codex`, `kimi`, `grok`); missing means `claude` (compatible with Clawdmeter payloads) |
 | `s`, `sr` | session (5h) percent used and minutes until it resets; omitted when the plan has no such window |
-| `w`, `wr` | weekly percent used and minutes until reset (Grok: its credit window, weekly or monthly) |
+| `w`, `wr` | weekly percent used and minutes until reset (Grok: its credit window, weekly or monthly); omitted when the plan has no such window |
 | `f`, `fr` | model-scoped weekly window (Fable) percent and minutes; Claude only, only when present |
 | `fl` | that window's model name (printable ASCII, at most 11 characters; dropped after `m` when a write would overflow); the board shows "Fable" without it |
 | `st` | status string from the API (`allowed`, …) |
