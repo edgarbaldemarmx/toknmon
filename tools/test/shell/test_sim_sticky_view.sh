@@ -5,14 +5,18 @@
 # Each case seeds the picked view with SIM_SLOT, plays the gallery scenario
 # (every provider lands in the first pass, Claude first) and reads the
 # firmware's serial log: "UI: restored picked view N" at boot and
-# "UI: showing view N" whenever the view on screen changes. SIM_PROGRAM
-# overrides the binary (e.g. a build of an older commit for a RED run).
+# "UI: showing view N" whenever the view on screen changes. The no-session
+# cases play the same data for a Claude account without a 5-hour window
+# (firmware/sim/no-session.jsonl), where Fable joins the Claude view.
+# SIM_PROGRAM overrides the binary (e.g. a build of an older commit for a RED
+# run).
 # Prints one PASS/FAIL line per case and exits non-zero on any failure.
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PROGRAM="${SIM_PROGRAM:-$REPO_ROOT/firmware/.pio/build/sim/program}"
 SCENARIO="$REPO_ROOT/firmware/sim/gallery.jsonl"
+NO_SESSION="$REPO_ROOT/firmware/sim/no-session.jsonl"
 RUN_MS=12000   # past the 8 s the removed carousel took to rotate
 KILL_S=60      # a run that has not exited by then is killed and fails
 TMP_DIR="$(mktemp -d)"
@@ -23,12 +27,12 @@ if [ ! -x "$PROGRAM" ]; then
     exit 1
 fi
 
-# run_sim <case> <slot>: the sim exits on its own after RUN_MS (autoshot);
-# perl's alarm is the portable watchdog (macOS has no `timeout`).
+# run_sim <case> <slot> [scenario]: the sim exits on its own after RUN_MS
+# (autoshot); perl's alarm is the portable watchdog (macOS has no `timeout`).
 run_sim() {
     (cd "$REPO_ROOT/firmware" && \
         SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
-        SIM_SCENARIO="$SCENARIO" SIM_SLOT="$2" \
+        SIM_SCENARIO="${3:-$SCENARIO}" SIM_SLOT="$2" \
         SIM_AUTOSHOT_MS="$RUN_MS" SIM_AUTOSHOT_PATH="$TMP_DIR/$1.bmp" \
         perl -e 'alarm shift; exec @ARGV or die "exec: $!"' "$KILL_S" "$PROGRAM" \
         > "$TMP_DIR/$1.log" 2>&1)
@@ -69,6 +73,8 @@ expect_shown() {   # <case> <expected sequence> <description>
 run_sim stay 0 &
 run_sim restore 3 &
 run_sim fable 4 &
+run_sim merged_claude 0 "$NO_SESSION" &
+run_sim merged_fable 4 "$NO_SESSION" &
 wait
 
 run_ok stay 0 &&
@@ -79,5 +85,18 @@ run_ok restore 3 &&
 # shows at once; without the limit show_view() would fall back to Claude (0).
 run_ok fable 4 &&
     expect_shown fable "" "Fable picked: the Fable view stays up (no fallback to Claude)"
+# No 5-hour window: Fable rides on the Claude view, so a picked Fable view
+# shows Claude, and both picks end on the same page.
+run_ok merged_claude 0 &&
+    expect_shown merged_claude "" "No 5h window, Claude picked: the Claude view stays up"
+run_ok merged_fable 4 &&
+    expect_shown merged_fable "0" "No 5h window, Fable picked: the Claude view (weekly + Fable) stands in"
+if [ -s "$TMP_DIR/merged_claude.bmp" ] && [ -s "$TMP_DIR/merged_fable.bmp" ]; then
+    if cmp -s "$TMP_DIR/merged_claude.bmp" "$TMP_DIR/merged_fable.bmp"; then
+        pass "No 5h window: the Fable pick and the Claude pick capture the same page"
+    else
+        fail "No 5h window: the Fable pick captured a different page than the Claude pick"
+    fi
+fi
 
 [ "$fails" -eq 0 ] || { echo "$fails failure(s)"; exit 1; }

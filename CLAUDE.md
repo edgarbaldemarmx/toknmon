@@ -319,8 +319,14 @@ Fable view is Claude's model-scoped weekly limit (`f`/`fr`, label `fl`)
 drawn by `draw_clawds()` as a 5×4 grid of 12×8-cell Clawd glyphs at scale 4
 (one glyph per 5 %, H14) written straight into the canvas buffer; it exists
 only while Claude's payload carries the limit and the board has the canvas,
-otherwise Claude keeps the dense three-bar layout (C6). `SIM_SLOT=0-4` seeds
-the pick in the simulator.
+otherwise Claude keeps the dense three-bar layout (C6). A Claude payload with
+the weekly window and the limit but no `s` (verified Ultra accounts have no
+five-hour limit) is `fable_merged()`: the Claude view draws the limit as a
+`FABLE · WEEKLY` block in the 5h block's place (module layout on every board),
+the Fable view is not offered, and a picked Fable view shows Claude while the
+pick stays in NVS for when the window returns. `SIM_SLOT=0-4` seeds the pick
+in the simulator; `firmware/sim/no-session.jsonl` is the gallery data without
+the five-hour window.
 
 ### Design system (H14)
 

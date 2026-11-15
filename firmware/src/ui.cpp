@@ -448,8 +448,16 @@ static int fresh_count(void) {
     return n;
 }
 
+// Claude without a 5-hour window (verified Ultra accounts) but with the
+// weekly window and the scoped limit: the Claude view carries both, so the
+// Fable view is not offered. It comes back with the 5-hour window.
+static bool fable_merged(const UsageData* d) {
+    return d->has_third && d->has_weekly && !d->has_session && !d->enterprise;
+}
+
 static bool fable_available(void) {
-    return GRID_AVAILABLE && grid_canvas && slots[PROVIDER_CLAUDE].data.has_third;
+    const UsageData* d = &slots[PROVIDER_CLAUDE].data;
+    return GRID_AVAILABLE && grid_canvas && d->has_third && !fable_merged(d);
 }
 
 static bool view_fresh(int v) {
@@ -1649,6 +1657,13 @@ static void layout_title(void) {
     lv_obj_set_pos(lbl_clock, right - label_w(lbl_clock), text_top(L.mod_label_font, HDR_LABEL_BASE));
 }
 
+// ASCII upper-case copy of `src` into `dst` (truncated, always terminated).
+static void upper_copy(const char* src, char* dst, size_t n) {
+    size_t i = 0;
+    for (; src[i] && i < n - 1; i++) dst[i] = (char)toupper((unsigned char)src[i]);
+    dst[i] = '\0';
+}
+
 // Title of the visible view: the provider name, or the model label on the
 // Fable view.
 static const char* view_title(int v) {
@@ -1663,10 +1678,7 @@ static void refresh_title(void) {
         lv_label_set_text(lbl_title, view_title(visible_view));
         lv_obj_set_style_text_color(lbl_title, provider_color(prov), 0);
         char up[16];
-        const char* name = provider_name(prov);
-        size_t i = 0;
-        for (; name[i] && i < sizeof(up) - 1; i++) up[i] = (char)toupper((unsigned char)name[i]);
-        up[i] = '\0';
+        upper_copy(provider_name(prov), up, sizeof(up));
         lv_label_set_text(lbl_provider, up);
     } else {
         lv_label_set_text(lbl_title, "Usage");
@@ -1711,10 +1723,11 @@ static void apply_usage_layout(usage_layout_t mode) {
 }
 
 // Which layout a view wants: the module everywhere, except Claude carrying
-// the scoped limit on a board without the Fable grid, which stacks the
-// three panels instead.
+// the scoped limit and the 5-hour window on a board without the Fable grid,
+// which stacks the three panels instead.
 static usage_layout_t layout_for(int idx, const UsageData* data) {
-    if (idx == PROVIDER_CLAUDE && data->has_third && !grid_canvas) return LAYOUT_DENSE;
+    if (idx == PROVIDER_CLAUDE && data->has_third && !grid_canvas && !fable_merged(data))
+        return LAYOUT_DENSE;
     return LAYOUT_MODULE;
 }
 
@@ -1781,11 +1794,13 @@ static void render_credits(const UsageData* data, const ProviderTheme& th) {
 
 // Render the visible view into the module. The main figure is the weekly
 // window (the scoped limit on the Fable view, the spending on enterprise
-// accounts); the lower module is the credit panel, the 5-hour block, the
-// Fable grid, or the remaining line.
+// accounts); the lower module is the credit panel, the 5-hour block (the
+// scoped limit's block on Claude without a 5-hour window), the Fable grid,
+// or the remaining line.
 static void render_module(int idx, const UsageData* data, const ProviderTheme& th) {
-    const bool fable = (idx == UI_VIEW_FABLE);
-    const bool ent   = data->enterprise && !fable;
+    const bool fable  = (idx == UI_VIEW_FABLE);
+    const bool ent    = data->enterprise && !fable;
+    const bool merged = (idx == PROVIDER_CLAUDE) && fable_merged(data);
     const char* label = "WEEKLY USAGE";
     const char* used_word = "used";
     bool  known = true;
@@ -1826,7 +1841,7 @@ static void render_module(int idx, const UsageData* data, const ProviderTheme& t
     if (fable)                                             low = LOW_GRID;
     else if (ent)                                          low = LOW_WINDOW;
     else if (data->has_credits)                            low = LOW_CREDITS;
-    else if (data->has_session && data->has_weekly)        low = LOW_WINDOW;
+    else if ((data->has_session && data->has_weekly) || merged) low = LOW_WINDOW;
     else                                                   low = LOW_REMAINING;
 
     set_shown(credit_panel, low == LOW_CREDITS);
@@ -1849,9 +1864,25 @@ static void render_module(int idx, const UsageData* data, const ProviderTheme& t
         render_credits(data, th);
         break;
     case LOW_WINDOW: {
-        const float pct = ent ? (float)data->time_pct : data->session_pct;
+        // The 5-hour window; the billing period on enterprise accounts; the
+        // scoped limit ("FABLE · WEEKLY") when Claude has no 5-hour window.
+        char win_label[32];
+        float pct = data->session_pct;
+        int win_reset = data->session_reset_mins;
+        if (ent) {
+            pct = (float)data->time_pct;
+            snprintf(win_label, sizeof(win_label), "BILLING PERIOD");
+        } else if (merged) {
+            char model[sizeof(data->third_label)];
+            upper_copy(data->third_label[0] ? data->third_label : "Fable", model, sizeof(model));
+            snprintf(win_label, sizeof(win_label), "%s \xC2\xB7 WEEKLY", model);
+            pct = data->third_pct;
+            win_reset = data->third_reset_mins;
+        } else {
+            snprintf(win_label, sizeof(win_label), "CURRENT \xC2\xB7 5H");
+        }
         const int pct_i = pct_round(pct);
-        lv_label_set_text(lbl_win_label, ent ? "BILLING PERIOD" : "CURRENT \xC2\xB7 5H");
+        lv_label_set_text(lbl_win_label, win_label);
         lv_label_set_text_fmt(lbl_win_pct, "%d%%", pct_i);
         lv_obj_set_style_text_color(lbl_win_pct, th.accent, 0);
         place_text_right(lbl_win_pct, 448, MOD_WIN_PCT_BASE);
@@ -1866,7 +1897,7 @@ static void render_module(int idx, const UsageData* data, const ProviderTheme& t
             lv_label_set_text(lbl_win_reset, pace);
             lv_obj_set_style_text_color(lbl_win_reset, color, 0);
         } else {
-            format_reset_time(data->session_reset_mins, buf, sizeof(buf));
+            format_reset_time(win_reset, buf, sizeof(buf));
             lv_label_set_text(lbl_win_reset, buf);
             lv_obj_set_style_text_color(lbl_win_reset, COL_DIM, 0);
         }
@@ -2008,10 +2039,14 @@ void ui_update_slot(int idx, const UsageData* data) {
 
     // The picked view always comes (back) on screen. Until it has data since
     // boot, the first view with data stands in for it; otherwise only the
-    // view on screen re-renders.
-    if (view_provider(picked_view) == idx && view_fresh(picked_view)) {
-        show_view(picked_view);
-    } else if (!view_received(picked_view) && (first || !view_fresh(visible_view))) {
+    // view on screen re-renders. A picked Fable view merged into Claude's
+    // (no 5-hour window) is served by the Claude view; the pick itself stays,
+    // so the Fable view returns with the 5-hour window.
+    const int want = (picked_view == UI_VIEW_FABLE && fable_merged(&slots[PROVIDER_CLAUDE].data))
+                     ? PROVIDER_CLAUDE : picked_view;
+    if (view_provider(want) == idx && view_fresh(want)) {
+        show_view(want);
+    } else if (!view_received(want) && (first || !view_fresh(visible_view))) {
         show_view(idx);
     } else if (view_provider(visible_view) == idx) {
         show_view(visible_view);

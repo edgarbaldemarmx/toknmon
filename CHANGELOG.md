@@ -15,6 +15,14 @@ H0–H14); the entries below summarize them.
   linking to the full 48-second showreel with its soundtrack, attached to the
   v1.1.0 release in landscape and vertical cuts.
 
+### Changed
+
+- Claude accounts without a five-hour limit (verified Ultra) get one Claude
+  page: the weekly figure on top and a `FABLE · WEEKLY` block where the
+  `CURRENT · 5H` block goes; the separate Fable page is not offered while the
+  five-hour window is absent and comes back with it. Accounts with the
+  five-hour window render exactly as before.
+
 ### Fixed
 
 - Claude: the daemon sends only the windows `/api/oauth/usage` reports. Verified
