@@ -212,14 +212,14 @@ def test_about_text_mentions_version_and_upstream():
 # top-level fields sit one tab deep, nested blocks two.
 LAUNCHCTL_RUNNING = """gui/501/com.toknmon.daemon = {
 \tactive count = 1
-\tpath = /Users/me/Library/LaunchAgents/com.toknmon.daemon.plist
+\tpath = /opt/toknmon-test/Library/LaunchAgents/com.toknmon.daemon.plist
 \ttype = LaunchAgent
 \tstate = running
 
-\tprogram = /Users/me/toknmon/daemon/.venv/bin/python
+\tprogram = /opt/toknmon-test/toknmon/daemon/.venv/bin/python
 \targuments = {
-\t\t/Users/me/toknmon/daemon/.venv/bin/python
-\t\t/Users/me/toknmon/daemon/claude_usage_daemon.py
+\t\t/opt/toknmon-test/toknmon/daemon/.venv/bin/python
+\t\t/opt/toknmon-test/toknmon/daemon/claude_usage_daemon.py
 \t}
 
 \tenvironment = {
@@ -241,7 +241,7 @@ def test_parse_launchctl_print_reads_top_level_fields_only():
     info = model.parse_launchctl_print(LAUNCHCTL_RUNNING)
     assert info["state"] == "running"
     assert info["pid"] == "23558"
-    assert info["program"] == "/Users/me/toknmon/daemon/.venv/bin/python"
+    assert info["program"] == "/opt/toknmon-test/toknmon/daemon/.venv/bin/python"
     assert info["last exit code"] == "(never exited)"
     assert "arguments" not in info and "environment" not in info
 
@@ -272,7 +272,7 @@ def test_restart_problem_is_none_when_running():
 def test_restart_problem_names_missing_python_and_the_installer():
     info = model.parse_launchctl_print(LAUNCHCTL_EXIT_78)
     text = model.restart_problem(info, program_exists=False)
-    assert "/Users/me/toknmon/daemon/.venv/bin/python" in text
+    assert "/opt/toknmon-test/toknmon/daemon/.venv/bin/python" in text
     assert "./install-mac.sh" in text
 
 
