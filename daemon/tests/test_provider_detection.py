@@ -71,6 +71,18 @@ def test_detect_codex_needs_a_rollout_log_of_any_age(tmp_path, monkeypatch):
     assert "rollout" not in res.reason or "found" in res.reason.lower()
 
 
+def test_detect_codex_accepts_compressed_rollout_logs(tmp_path, monkeypatch):
+    """Current Codex releases compress finished sessions to
+    ``rollout-*.jsonl.zst``; an install with only those is still detected."""
+    home = _codex_home(tmp_path, monkeypatch)
+    log = home / "sessions" / "2026" / "11" / "05" / "rollout-a.jsonl.zst"
+    log.parent.mkdir(parents=True)
+    log.write_bytes(b"\x28\xb5\x2f\xfd")
+    res = detect("codex")
+    assert res.available is True
+    assert "found" in res.reason.lower()
+
+
 def test_detect_kimi_accepts_an_expired_credential_file(tmp_path, monkeypatch):
     home = _kimi_home(tmp_path, monkeypatch)
     res = detect("kimi")

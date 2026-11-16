@@ -30,6 +30,16 @@ H0–H14); the entries below summarize them.
   carried an empty `s: 0, sr: 0` window that the board drew as a `CURRENT · 5H`
   block at 0 %; `s`/`sr` (and `w`/`wr`) are now omitted when the account has
   no such window.
+- Codex: the meter no longer disappears when the Codex CLI has written no
+  fresh session log. Current Codex releases compress finished sessions to
+  `rollout-*.jsonl.zst` and an idle account writes none, so after a week the
+  daemon sent `ok: false` and the board dropped Codex. With a ChatGPT sign-in
+  the daemon now reads the rate limits from `wham/usage` every 5 minutes (the
+  endpoint the reset credits already used). Uncompressed `rollout-*.jsonl`
+  logs from the last 7 days stay the fallback and cover API-key logins, the
+  newer source wins, and `codex_credits = off` still keeps Codex off the
+  network. `providers = auto` also detects an install whose session logs are
+  all compressed.
 
 ## [1.1.0] — 2026-10-22
 

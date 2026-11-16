@@ -15,7 +15,7 @@ inherited from Clawdmeter, poll Claude only and are untested with ToknMon.
 | macOS 13 (Ventura) or newer with Bluetooth | CoreBluetooth via `bleak`; launchd user agent | — |
 | Python 3.10 or newer (3.13 is what the project is developed on) | the daemon and its tests | `brew install python` or python.org; the installer picks the first of `python3.13` … `python3.10`, then `python3`, found on `PATH` |
 | Claude Code logged in | the Claude provider reads the OAuth token from the Keychain (service `Claude Code-credentials`) | `claude` → `/login` |
-| Codex CLI with at least one session under `~/.codex/sessions` (optional) | the Codex provider reads local session logs; no network, no credentials | run `codex` once |
+| Codex CLI signed in with ChatGPT, with at least one session under `~/.codex/sessions` (optional) | the Codex provider reads the usage live from chatgpt.com with the Codex CLI's own sign-in (read-only, never refreshed), and local session logs as the fallback | run `codex` once and sign in |
 | Kimi Code CLI logged in once (optional) | `~/.kimi-code/credentials/*.json`; the daemon refreshes the token itself afterwards | run `kimi` and log in |
 | Grok Build CLI logged in (optional) | `~/.grok/auth.json`; the daemon refreshes the Grok token itself with Grok's own protocol (under Grok's `auth.json.lock`), and falls back to the CLI's own log only while that value is newer than 6 h | `grok login` |
 | `blueutil` (optional) | automatic repair of a stale Bluetooth bond | `brew install blueutil` (the installer offers it) |
