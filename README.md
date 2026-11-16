@@ -128,7 +128,7 @@ PlatformIO env; shared code never changes. See
 | Provider | What must exist on the Mac |
 | --- | --- |
 | Claude Code | logged in (`claude` → `/login`): the OAuth token lives in the Keychain (service `Claude Code-credentials`) |
-| Codex CLI | at least one session so `~/.codex/sessions/` has a `rollout-*.jsonl` from the last 7 days; no credentials are read |
+| Codex CLI | signed in with ChatGPT and run once: the daemon reads the usage live with that sign-in (read-only, never refreshed); with an API-key login it needs a `rollout-*.jsonl` from the last 7 days in `~/.codex/sessions/` |
 | Kimi Code CLI | logged in once so `~/.kimi-code/credentials/` has a token file; the daemon refreshes the token itself afterwards |
 | Grok Build CLI | logged in (`grok login`) so `~/.grok/auth.json` holds a token; the daemon refreshes it afterwards the way Grok does, under Grok's own `auth.json.lock` |
 
@@ -241,14 +241,14 @@ The board boots on the **splash** (animations) and swipes to the **meter**
 | Provider | Source | Screen |
 | --- | --- | --- |
 | **Claude Code** | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token — one request per poll, no token spend | Current (5h) and Weekly bars, and a **Fable** view (a grid of small Clawds) when the subscription reports a model-scoped window |
-| **Codex CLI** | the newest `rate_limits` entry in `~/.codex/sessions/**/rollout-*.jsonl` (last 7 days) — local files; plus, once an hour, OpenAI's reset credits with the Codex CLI login (`codex_credits = off` disables it) | weekly usage bar, large percentage and reset time; a "Reset credits" panel when the account has reset credits (the 5h window, when a plan has one, yields to the panel) |
+| **Codex CLI** | `GET https://chatgpt.com/backend-api/wham/usage` with the Codex CLI's ChatGPT sign-in, every 5 minutes, so the meter stays current even when Codex has not run for days; plus, once an hour, OpenAI's reset credits. Fallback, and the only source for an API-key login: the newest `rate_limits` entry in `~/.codex/sessions/**/rollout-*.jsonl` (last 7 days). `codex_credits = off` keeps Codex to the local files | weekly usage bar, large percentage and reset time; a "Reset credits" panel when the account has reset credits (the 5h window, when a plan has one, yields to the panel) |
 | **Kimi Code** | `GET https://api.kimi.com/coding/v1/usages` with the token from `~/.kimi-code/credentials`; expired tokens are refreshed through `https://auth.kimi.com/api/oauth/token` and written back like the CLI does | 5h and weekly bars |
 | **Grok Build CLI** | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with the access token from `~/.grok/auth.json`; an expired token is refreshed through `https://auth.x.ai/oauth2/token` and written back like Grok does; when the call still fails, the newest billing line in `~/.grok/logs/unified.jsonl` if it is under 6 h old | weekly credit bar in silver with the remaining percentage (Grok has no 5h window) |
 
 **Detection.** With `providers = auto` (the default) the daemon checks on every
 poll which providers are usable, locally and without network: a Claude Code
-OAuth token in the Keychain or `.credentials.json`, a `rollout-*.jsonl` under
-`~/.codex/sessions`, a credential file under `~/.kimi-code/credentials`, a
+OAuth token in the Keychain or `.credentials.json`, a session log (`rollout-*.jsonl`
+or the compressed `rollout-*.jsonl.zst`) under `~/.codex/sessions`, a credential file under `~/.kimi-code/credentials`, a
 token in `~/.grok/auth.json`. It
 sends only those and logs the set whenever it changes (`Providers (auto):
 claude, codex — kimi skipped: …`). The installer prints the same report with

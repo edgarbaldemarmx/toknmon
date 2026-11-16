@@ -31,7 +31,7 @@ console (115200 baud) prints every BLE event and payload.
 
 | Symptom | Fix |
 | --- | --- |
-| `codex: no data` / slot stale | The Codex provider reads `~/.codex/sessions/**/rollout-*.jsonl` from the last 7 days; run Codex once. A custom `CODEX_HOME` must be visible to the launchd agent (set it in the plist or symlink `~/.codex`) |
+| `codex: no data` / slot stale | The Codex provider reads the usage live with the Codex CLI's ChatGPT sign-in and falls back to uncompressed `~/.codex/sessions/**/rollout-*.jsonl` logs from the last 7 days (the compressed `.jsonl.zst` ones are not read). Look for `Codex: live usage unavailable (…)` in `~/Library/Logs/toknmon.out.log`: `HTTP 401` means the token expired while Codex sat unused, so run Codex once to refresh it. An API-key login or `codex_credits = off` leaves only the local logs: run Codex once. A custom `CODEX_HOME` must be visible to the launchd agent (set it in the plist or symlink `~/.codex`) |
 | Only the dot grid, no 5h bar | The plan reports a weekly window only; the bar appears when `rate_limits` carries a short window |
 
 ### Kimi

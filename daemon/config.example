@@ -48,8 +48,8 @@
 #              claude = an OAuth token in the macOS Keychain ("Claude Code-
 #                       credentials") or in <config_dir>/.credentials.json for
 #                       any dir in config_dirs
-#              codex  = at least one rollout-*.jsonl under
-#                       ${CODEX_HOME:-~/.codex}/sessions (any age)
+#              codex  = at least one rollout-*.jsonl or rollout-*.jsonl.zst
+#                       under ${CODEX_HOME:-~/.codex}/sessions (any age)
 #              kimi   = a credential file with an access token under
 #                       ~/.kimi-code/credentials (an expired token is fine)
 #              grok   = an entry with a "key" in ${GROK_HOME:-~/.grok}/auth.json
@@ -76,15 +76,16 @@
 # providers = auto
 # providers = claude, codex, kimi, grok
 
-# Codex reset credits ("banked resets"): the number of OpenAI reset credits the
-# account holds, how many it spent in the last 30 days and when the soonest one
-# expires, shown next to the Codex dot grid. This is the Codex provider's only
-# network call: it reads the Codex CLI's own ChatGPT sign-in from
-# ${CODEX_HOME:-~/.codex}/auth.json (read-only, never refreshed; an API-key
-# login has no credits) and asks chatgpt.com once an hour. Any failure keeps the
-# local usage and just hides the credits.
-#   on  = fetch the credits (default)
-#   off = never call the network; the Codex slot shows local usage only
+# Codex network calls: live usage and reset credits. With the Codex CLI's own
+# ChatGPT sign-in from ${CODEX_HOME:-~/.codex}/auth.json (read-only, never
+# refreshed; an API-key login has neither) the daemon asks chatgpt.com for the
+# Codex rate limits every 5 minutes, so the meter stays current without recent
+# session logs, and once an hour for the reset credits ("banked resets": how
+# many the account holds, how many it spent in the last 30 days and when the
+# soonest one expires). A failed fetch falls back to the local session logs; a
+# failed hourly credit refresh hides the credits until the next one.
+#   on  = live usage and reset credits (default)
+#   off = never call the network; the Codex slot shows local session logs only
 # codex_credits = on
 
 # Kimi OAuth token endpoint used to refresh an expired Kimi access token (HTTPS

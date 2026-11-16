@@ -7,7 +7,7 @@ them as a carousel with a palette and a mascot of their own.
 | Provider | Config id | Data source | Network | What the board shows |
 | --- | --- | --- | --- | --- |
 | Claude Code | `claude` | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token (Keychain service `Claude Code-credentials`, or `~/.claude/.credentials.json`) | one GET per poll, **no token spend** | **Weekly** on top and a compact **Current · 5h** block, plus a separate **Fable** view (the model-scoped weekly limit as a grid of small Clawds) when the subscription has one (accounts without a five-hour limit get Fable in the 5h block's place instead); reset countdowns; the Clawd corner mascot |
-| OpenAI Codex CLI | `codex` | newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` modified in the last 7 days | **none** (local files only) | the weekly percentage in large type over a full-width track, the reset time, and the **RESET CREDITS** panel when the account has reset credits (otherwise "N% remaining"); the Bsod pet mascot |
+| OpenAI Codex CLI | `codex` | `GET https://chatgpt.com/backend-api/wham/usage` with the Codex CLI's ChatGPT sign-in (`${CODEX_HOME:-~/.codex}/auth.json`); fallback: newest `rate_limits` entry in `${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl` modified in the last 7 days | one GET every 5 minutes plus the hourly reset-credit GETs; **none** with an API-key login or `codex_credits = off` (local files only) | the weekly percentage in large type over a full-width track, the reset time, and the **RESET CREDITS** panel when the account has reset credits (otherwise "N% remaining"); the Bsod pet mascot |
 | Kimi Code | `kimi` | `GET ${KIMI_CODE_BASE_URL:-https://api.kimi.com/coding/v1}/usages` with the freshest token in `~/.kimi-code/credentials/*.json` | one GET per poll, plus a token refresh when needed | the same weekly + **Current · 5h** module in pastel blue; the crescent-moon mascot |
 | Grok Build CLI | `grok` | `GET ${GROK_CLI_CHAT_PROXY_BASE_URL:-https://cli-chat-proxy.grok.com/v1}/billing?format=credits` with the `key` in `${GROK_HOME:-~/.grok}/auth.json`; fallback: the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` when it is newer than 6 h | one GET per poll, plus a token refresh (Grok's own OIDC protocol) when needed | the weekly credit percentage in large type over a full-width track and "N% remaining" (Grok has no 5-hour window); the black-hole Grokbot-style ball mascot |
 
@@ -37,7 +37,7 @@ providers = claude, grok         # Claude and Grok only
   | Provider | Counts as available when |
   | --- | --- |
   | `claude` | an OAuth token exists in the macOS Keychain (`Claude Code-credentials`) or in `<config_dir>/.credentials.json` for any dir in `config_dirs` |
-  | `codex` | at least one `rollout-*.jsonl` exists under `${CODEX_HOME:-~/.codex}/sessions` (any age; polling then reads the last 7 days) |
+  | `codex` | at least one `rollout-*.jsonl`, or a compressed `rollout-*.jsonl.zst`, exists under `${CODEX_HOME:-~/.codex}/sessions` (any age) |
   | `kimi` | a credential file with an access token exists under `~/.kimi-code/credentials` (an expired token is fine, the daemon refreshes it) |
   | `grok` | `${GROK_HOME:-~/.grok}/auth.json` has an entry with a non-empty `key` (an expired token is fine, the daemon refreshes it) |
 
@@ -82,10 +82,17 @@ providers = claude, grok         # Claude and Grok only
   otherwise. Several plans in separate config dirs (`CLAUDE_CONFIG_DIR`) can be
   polled together with `config_dirs = ~/.claude, ~/.claude-work`; the board
   shows the plan whose usage rose most recently.
-- **Codex**: run the Codex CLI once; a `rollout-*.jsonl` with a `rate_limits`
-  entry appears under `~/.codex/sessions/`. Logs older than 7 days are ignored,
-  so a Codex slot goes stale after a week without using Codex. No credentials
-  are read.
+- **Codex**: sign in to the Codex CLI with ChatGPT and run it once. The daemon
+  reads the rate limits live from `wham/usage` with that sign-in, so the slot
+  stays current after weeks without Codex. The token is only read, never
+  refreshed: Codex refreshes it whenever it runs, and a token that expired
+  while Codex sat unused falls back to the local logs until Codex runs again.
+  The local fallback is the newest `rate_limits` entry in an uncompressed
+  `rollout-*.jsonl` under `~/.codex/sessions/` from the last 7 days; current
+  Codex releases compress finished sessions to `rollout-*.jsonl.zst`, which the
+  daemon does not read. With an API-key login or `codex_credits = off` only
+  those local logs count, so the slot goes stale a week after the last Codex
+  session.
 - **Kimi**: log in once with the Kimi Code CLI. Kimi access tokens live about
   15 minutes; when the freshest one is expired or within 60 s of expiring, the
   daemon posts the refresh grant to `kimi_token_url` (default
@@ -233,16 +240,31 @@ on `…0004` once per connection.
 OpenAI grants Codex users **reset credits** ("banked resets"): each one clears
 an exhausted rate limit early and expires 30 days after it was granted. The
 daemon reports them as `rc` (held), `ru` (used in the trailing 30 days) and
-`rm` (minutes until the soonest held credit expires). This is the Codex
-provider's only network call: it reads the Codex CLI's own ChatGPT sign-in from
+`rm` (minutes until the soonest held credit expires).
+
+Every Codex network call uses the Codex CLI's own ChatGPT sign-in from
 `${CODEX_HOME:-~/.codex}/auth.json` (`auth_mode: chatgpt`; the file is only
-read, the token is never refreshed, and an API-key login has no credits) and
-asks `https://chatgpt.com/backend-api/wham/usage`,
-`…/wham/rate-limit-reset-credits` and `…/wham/rate-limit-reset-credits/history`
-once an hour per daemon process. Any failure (sign-in missing, HTTP error,
-timeout, unexpected response) is logged once, the three keys are omitted and
-the local rollout usage still goes out. Set `codex_credits = off` in the config
-to never make the call.
+read, the token is never refreshed, and an API-key login has neither live usage
+nor credits):
+
+- `https://chatgpt.com/backend-api/wham/usage`, at most every 5 minutes. Its
+  `rate_limit.primary_window` / `secondary_window` (`used_percent`,
+  `limit_window_seconds`, `reset_at`, or `reset_after_seconds` when `reset_at`
+  is missing) become the Codex bars with the same rules as the rollout entries
+  (a window up to 10 h is the 5h bar, a longer one the weekly bar). When a
+  rollout entry is newer than the last fetch, the rollout entry wins.
+- `…/wham/rate-limit-reset-credits` and `…/wham/rate-limit-reset-credits/history`,
+  once an hour per daemon process. Together with the
+  `rate_limit_reset_credits.available_count` of the `wham/usage` body at that
+  moment they give `rc`, `ru` and `rm`, which therefore refresh hourly.
+
+Without a ChatGPT sign-in the daemon logs `Codex: reset credits unavailable
+(… has no ChatGPT sign-in)` once and uses the local rollout logs. Any other
+failure (HTTP error such as an expired token, timeout, unexpected response) is
+logged once as `Codex: live usage unavailable (…)` and/or `Codex: reset
+credits unavailable (…)`: the bars fall back to the local rollout logs, and a
+failed hourly credit refresh omits the credit keys until the next one. Set
+`codex_credits = off` in the config to never make a call.
 
 ## Adding a provider
 

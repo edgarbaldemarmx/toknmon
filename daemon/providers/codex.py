@@ -1,24 +1,36 @@
-"""Codex provider: rate limits from the local Codex CLI session logs.
+"""Codex provider: rate limits from ChatGPT's ``wham/usage`` endpoint, with the
+local Codex CLI session logs as the fallback.
 
-Codex writes ``rate_limits`` into ``token_count`` events in
+Live usage: with the Codex CLI's own OAuth token from ``$CODEX_HOME/auth.json``
+(``auth_mode: chatgpt``; read-only, never refreshed) the daemon asks
+``wham/usage`` for the account's ``rate_limit`` windows every 5 minutes. This
+works whether or not Codex ran lately: current Codex releases compress finished
+sessions to ``rollout-*.jsonl.zst``, and an idle account writes no log at all.
+
+Local logs: Codex writes ``rate_limits`` into ``token_count`` events in
 ``${CODEX_HOME:-~/.codex}/sessions/**/rollout-*.jsonl``. We take the line with
-the newest ``timestamp`` across files modified in the last 7 days. No network,
-no auth. Bars are keyed by ``window_minutes`` (<= 10 h -> "5h", longer ->
-"Weekly"), not by the primary/secondary slot, because weekly-only plans report
-the weekly window as ``primary`` with ``secondary: null``. The mapping is
-tolerant because Codex does not always report exactly 300/10080. A window the
-plan does not report yields no bar at all (so no ``s/sr`` on weekly-only plans).
+the newest ``timestamp`` across uncompressed files modified in the last 7 days.
+They cover an API-key login (no live usage) and a failed fetch, and when both
+sources exist the newer one wins, so a turn logged after the last fetch shows
+at once.
 
-Reset credits (``rc``/``ru``/``rm``) are the one network call: with the Codex
-CLI's own OAuth token from ``$CODEX_HOME/auth.json`` (``auth_mode: chatgpt``;
-read-only, never refreshed) the daemon asks the ``wham`` endpoints how many
-credits the account holds, how many it spent in the trailing 30 days and when
-the soonest held one expires. The answer is cached for an hour per process;
-any failure omits the three keys and logs once, the local usage still goes out.
-``codex_credits = off`` in the config skips the call altogether.
+Both sources go through the same mapping. Bars are keyed by the window length
+(<= 10 h -> "5h", longer -> "Weekly"), not by the primary/secondary slot,
+because weekly-only plans report the weekly window as ``primary`` with
+``secondary: null``. The mapping is tolerant because Codex does not always
+report exactly 300/10080 minutes. A window the plan does not report yields no
+bar at all (so no ``s/sr`` on weekly-only plans).
+
+Reset credits (``rc``/``ru``/``rm``) come from the same ``wham/usage`` body plus
+two more ``wham`` endpoints: how many credits the account holds, how many it
+spent in the trailing 30 days and when the soonest held one expires. That
+answer is cached for an hour per process. Any failure is logged once and
+omits what it affects; the token never reaches a log. ``codex_credits = off``
+in the config skips every network call: local logs only.
 """
 
 import json
+import math
 import os
 import time
 from collections.abc import Callable
@@ -39,10 +51,12 @@ USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 HISTORY_URL = CREDITS_URL + "/history"
 USER_AGENT = "toknmon-daemon"
-# The wham endpoints are slow even when healthy (3-4 s measured upstream); the
-# call runs once an hour, so a generous timeout costs little.
+# The wham endpoints are slow even when healthy (3-4 s measured upstream); they
+# run at most every few minutes, so a generous timeout costs little.
 TIMEOUT = 20.0
 CREDITS_TTL_S = 3600
+# Live usage (``wham/usage``) is fetched at most this often.
+USAGE_TTL_S = 300
 # Only "used" events this recent count towards ``ru``.
 USED_WINDOW_S = 30 * 86400
 CONFIG_KEY = "codex_credits"
@@ -74,14 +88,19 @@ def codex_home() -> Path:
 
 def detect() -> DetectResult:
     """The Codex CLI is usable when ``$CODEX_HOME/sessions`` holds at least one
-    ``rollout-*.jsonl`` of any age (polling then only reads the last 7 days)."""
+    session log of any age, plain ``rollout-*.jsonl`` or the compressed
+    ``rollout-*.jsonl.zst`` current releases leave behind."""
     sessions = codex_home() / "sessions"
     shown = tilde(sessions)
     if not sessions.is_dir():
         return DetectResult(False, f"Codex CLI not found: {shown} does not exist. Install the "
                                    "Codex CLI and run it once to create a session log.")
+    found = None
     try:
-        found = next(sessions.rglob("rollout-*.jsonl"), None)
+        for p in sessions.rglob("rollout-*.jsonl*"):
+            if p.name.endswith((".jsonl", ".jsonl.zst")):
+                found = p
+                break
     except OSError:
         found = None
     if found is None:
@@ -107,6 +126,13 @@ def _recent_rollouts(root: Path, now: float) -> list[Path]:
 
 def latest_rate_limits(root: Path, now: float) -> dict | None:
     """Return the ``rate_limits`` dict from the newest matching line, or None."""
+    snapshot = latest_snapshot(root, now)
+    return snapshot[1] if snapshot is not None else None
+
+
+def latest_snapshot(root: Path, now: float) -> tuple[float, dict] | None:
+    """``(epoch of the line's timestamp, rate_limits)`` for the newest matching
+    line, or None. An unparsable timestamp counts as the oldest possible."""
     best_ts = ""
     best: dict | None = None
     for path in _recent_rollouts(root, now):
@@ -129,7 +155,44 @@ def latest_rate_limits(root: Path, now: float) -> dict | None:
                         best_ts, best = ts, limits
         except OSError:
             continue
-    return best
+    if best is None:
+        return None
+    return iso_to_epoch(best_ts) or 0.0, best
+
+
+def live_rate_limits(usage: dict, fetched_at: float) -> dict | None:
+    """Map a ``wham/usage`` body to the rollout ``rate_limits`` shape so
+    :func:`parse_rate_limits` handles both sources alike. ``limit_window_seconds``
+    becomes ``window_minutes``; a missing ``reset_at`` falls back to
+    ``reset_after_seconds`` counted from the fetch. None when no window is
+    usable."""
+    rate_limit = usage.get("rate_limit")
+    if not isinstance(rate_limit, dict):
+        return None
+    out: dict = {}
+    for src, dst in (("primary_window", "primary"), ("secondary_window", "secondary")):
+        w = rate_limit.get(src)
+        if not isinstance(w, dict):
+            continue
+        pct, seconds = w.get("used_percent"), w.get("limit_window_seconds")
+        if not _is_number(pct) or not _is_number(seconds) or seconds <= 0:
+            continue
+        reset = w.get("reset_at")
+        if not _is_number(reset):
+            after = w.get("reset_after_seconds")
+            reset = fetched_at + after if _is_number(after) else None
+        out[dst] = {"used_percent": pct, "window_minutes": int(seconds) // 60, "resets_at": reset}
+    if not out:
+        return None
+    reached = usage.get("rate_limit_reached_type")
+    if isinstance(reached, str) and reached:
+        out["rate_limit_reached_type"] = reached
+    return out
+
+
+def _is_number(value) -> bool:
+    # ``json.loads`` accepts NaN and Infinity; neither is a usable figure.
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def parse_rate_limits(limits: dict, now: float) -> ProviderResult:
@@ -219,6 +282,10 @@ async def _get_json(client: httpx.AsyncClient, url: str, headers: dict[str, str]
         resp = await client.get(url, headers=headers)
     except httpx.HTTPError as e:
         raise _FetchError(f"{name}: request failed: {type(e).__name__}") from None
+    except UnicodeError:
+        # A non-ASCII token (corrupted auth.json) cannot go into a header, and
+        # the encoding error's text carries the header: never let it escape.
+        raise _FetchError(f"{name}: request failed: the token is not ASCII") from None
     if resp.status_code >= 400:
         raise _FetchError(f"{name}: HTTP {resp.status_code}")
     try:
@@ -267,10 +334,10 @@ def parse_credits(usage: dict, credits: dict, history: dict, now: float) -> tupl
 
 
 async def fetch_reset_credits(client: httpx.AsyncClient, token: str, account_id: str | None,
-                              now: float) -> tuple[int, int, float | None]:
-    """The three GETs behind ``rc``/``ru``/``rm``; raises :class:`_FetchError`."""
+                              now: float, usage: dict) -> tuple[int, int, float | None]:
+    """The two GETs behind ``ru``/``rm``, joined with the already fetched
+    ``wham/usage`` body that holds ``rc``; raises :class:`_FetchError`."""
     headers = _headers(token, account_id)
-    usage = await _get_json(client, USAGE_URL, headers)
     credits = await _get_json(client, CREDITS_URL, headers)
     history = await _get_json(client, HISTORY_URL, headers)
     return parse_credits(usage, credits, history, now)
@@ -278,11 +345,53 @@ async def fetch_reset_credits(client: httpx.AsyncClient, token: str, account_id:
 
 def _empty_cache() -> dict:
     # ``at``: epoch of the last fetch (success or failure); ``value``: the
-    # parsed triple, or None after a failure. Both are held for CREDITS_TTL_S.
-    return {"at": None, "value": None}
+    # parsed result, or None after a failure (``error`` then holds the
+    # log-safe reason). Held for CREDITS_TTL_S or USAGE_TTL_S.
+    return {"at": None, "value": None, "error": None}
 
 
 _credits_cache: dict = _empty_cache()
+_usage_cache: dict = _empty_cache()
+
+
+async def _fetch_usage(client: httpx.AsyncClient | None, auth: tuple[str, str | None],
+                       now: float) -> tuple[float, dict]:
+    """``(fetch epoch, wham/usage body)``, fetched at most every USAGE_TTL_S
+    (a failure is held as long); raises :class:`_FetchError`."""
+    cache = _usage_cache
+    if cache["at"] is None or now - cache["at"] >= USAGE_TTL_S:
+        token, account_id = auth
+        own_client = client is None
+        client = client or httpx.AsyncClient(timeout=TIMEOUT)
+        try:
+            cache["value"], cache["error"] = await _get_json(client, USAGE_URL, _headers(token, account_id)), None
+        except _FetchError as e:
+            cache["value"], cache["error"] = None, str(e)
+        finally:
+            if own_client:
+                await client.aclose()
+        cache["at"] = now
+    if cache["value"] is None:
+        raise _FetchError(cache["error"] or "usage: unavailable")
+    return cache["at"], cache["value"]
+
+
+async def live_usage(client: httpx.AsyncClient | None, home: Path, now: float) -> tuple[float, dict] | None:
+    """``(fetch epoch, rate_limits)`` from ``wham/usage``, or None when
+    ``codex_credits = off``, without a ChatGPT sign-in, after a failure
+    (logged once) or when the body has no usable window."""
+    if not credits_enabled():
+        return None
+    auth = read_auth(home)
+    if auth is None:
+        return None
+    try:
+        fetched_at, body = await _fetch_usage(client, auth, now)
+    except _FetchError as e:
+        _warn_once(f"Codex: live usage unavailable ({e}); using local session logs")
+        return None
+    limits = live_rate_limits(body, fetched_at)
+    return (fetched_at, limits) if limits is not None else None
 
 
 async def reset_credits(client: httpx.AsyncClient | None, home: Path, now: float) -> ResetCredits | None:
@@ -302,9 +411,10 @@ async def reset_credits(client: httpx.AsyncClient | None, home: Path, now: float
         own_client = client is None
         client = client or httpx.AsyncClient(timeout=TIMEOUT)
         try:
-            value = await fetch_reset_credits(client, token, account_id, now)
+            _, usage = await _fetch_usage(client, auth, now)
+            value = await fetch_reset_credits(client, token, account_id, now, usage)
         except _FetchError as e:
-            _warn_once(f"Codex: reset credits unavailable ({e}); showing local usage only")
+            _warn_once(f"Codex: reset credits unavailable ({e}); showing usage without them")
             value = None
         finally:
             if own_client:
@@ -319,9 +429,13 @@ async def reset_credits(client: httpx.AsyncClient | None, home: Path, now: float
 async def poll(now: float | None = None, client: httpx.AsyncClient | None = None) -> ProviderResult:
     now = time.time() if now is None else now
     home = codex_home()
-    limits = latest_rate_limits(home / "sessions", now)
-    if limits is None:
+    local = latest_snapshot(home / "sessions", now)
+    live = await live_usage(client, home, now)
+    # The newer source wins; on a tie the live fetch does.
+    newest = max((s for s in (live, local) if s is not None), key=lambda s: s[0], default=None)
+    if newest is None:
         return ProviderResult(id="codex", bars=[], ok=False)
+    limits = newest[1]
     res = parse_rate_limits(limits, now)
     res.credits = await reset_credits(client, home, now)
     return res
