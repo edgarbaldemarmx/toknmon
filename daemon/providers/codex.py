@@ -30,6 +30,7 @@ in the config skips every network call: local logs only.
 """
 
 import json
+import math
 import os
 import time
 from collections.abc import Callable
@@ -190,7 +191,8 @@ def live_rate_limits(usage: dict, fetched_at: float) -> dict | None:
 
 
 def _is_number(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    # ``json.loads`` accepts NaN and Infinity; neither is a usable figure.
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def parse_rate_limits(limits: dict, now: float) -> ProviderResult:
@@ -280,6 +282,10 @@ async def _get_json(client: httpx.AsyncClient, url: str, headers: dict[str, str]
         resp = await client.get(url, headers=headers)
     except httpx.HTTPError as e:
         raise _FetchError(f"{name}: request failed: {type(e).__name__}") from None
+    except UnicodeError:
+        # A non-ASCII token (corrupted auth.json) cannot go into a header, and
+        # the encoding error's text carries the header: never let it escape.
+        raise _FetchError(f"{name}: request failed: the token is not ASCII") from None
     if resp.status_code >= 400:
         raise _FetchError(f"{name}: HTTP {resp.status_code}")
     try:

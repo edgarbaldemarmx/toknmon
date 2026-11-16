@@ -420,3 +420,34 @@ def test_api_key_login_stays_local_and_offline(tmp_path, monkeypatch):
     res = _run(codex.poll(now=NOW, client=_client(_handler(seen, usage=LIVE_USAGE))))
     assert seen == []
     assert json.dumps(to_payload(res), separators=(",", ":")).encode() == BASELINE
+
+
+def test_a_non_ascii_token_never_reaches_the_log(tmp_path, monkeypatch, logged):
+    """A corrupted ``auth.json`` whose token is not ASCII cannot go into an
+    HTTP header; the encoding error carries the header text, so it must turn
+    into a log-safe failure instead of escaping ``poll()``."""
+    secret = "eyJ-SECRET-toké"
+    _codex_home(tmp_path, monkeypatch, auth={"auth_mode": "chatgpt", "tokens": {"access_token": secret}})
+    res = _run(codex.poll(now=NOW))
+    assert json.dumps(to_payload(res), separators=(",", ":")).encode() == BASELINE
+    assert any("live usage unavailable" in l for l in logged)
+    assert "SECRET" not in "".join(logged)
+
+
+@pytest.mark.parametrize("field,value", [("limit_window_seconds", float("nan")),
+                                         ("limit_window_seconds", float("inf")),
+                                         ("used_percent", float("nan")),
+                                         ("reset_at", float("inf"))])
+def test_non_finite_numbers_drop_the_window(tmp_path, monkeypatch, field, value):
+    """``json.loads`` accepts NaN and Infinity; such a window is unusable and
+    must not break the poll (the local logs still show)."""
+    _codex_home(tmp_path, monkeypatch)
+    window = {"used_percent": 37, "limit_window_seconds": WEEKLY_S,
+              "reset_after_seconds": 3 * 86400, "reset_at": NOW + 3 * 86400}
+    window[field] = value
+    usage = json.dumps(_live(window)).encode()   # NaN / Infinity literals, as json.loads accepts them
+    res = _run(codex.poll(now=NOW, client=_client(_handler([], usage=usage))))
+    if field == "reset_at":
+        assert res.bars == [("Weekly", 37, 3 * 1440)]   # falls back to reset_after_seconds
+    else:
+        assert res.bars == [("5h", 12, 240), ("Weekly", 40, 6174)]

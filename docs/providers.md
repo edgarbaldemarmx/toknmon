@@ -251,17 +251,20 @@ nor credits):
   `rate_limit.primary_window` / `secondary_window` (`used_percent`,
   `limit_window_seconds`, `reset_at`, or `reset_after_seconds` when `reset_at`
   is missing) become the Codex bars with the same rules as the rollout entries
-  (a window up to 10 h is the 5h bar, a longer one the weekly bar), and its
-  `rate_limit_reset_credits.available_count` is `rc`. When a rollout entry is
-  newer than the last fetch, the rollout entry wins.
+  (a window up to 10 h is the 5h bar, a longer one the weekly bar). When a
+  rollout entry is newer than the last fetch, the rollout entry wins.
 - `…/wham/rate-limit-reset-credits` and `…/wham/rate-limit-reset-credits/history`,
-  once an hour per daemon process, for `ru` and `rm`.
+  once an hour per daemon process. Together with the
+  `rate_limit_reset_credits.available_count` of the `wham/usage` body at that
+  moment they give `rc`, `ru` and `rm`, which therefore refresh hourly.
 
-Any failure (sign-in missing, HTTP error such as an expired token, timeout,
-unexpected response) is logged once (`Codex: live usage unavailable (…)`,
-`Codex: reset credits unavailable (…)`): the bars fall back to the local
-rollout logs and the credit keys are omitted. Set `codex_credits = off` in the
-config to never make a call.
+Without a ChatGPT sign-in the daemon logs `Codex: reset credits unavailable
+(… has no ChatGPT sign-in)` once and uses the local rollout logs. Any other
+failure (HTTP error such as an expired token, timeout, unexpected response) is
+logged once as `Codex: live usage unavailable (…)` and/or `Codex: reset
+credits unavailable (…)`: the bars fall back to the local rollout logs, and a
+failed hourly credit refresh omits the credit keys until the next one. Set
+`codex_credits = off` in the config to never make a call.
 
 ## Adding a provider
 

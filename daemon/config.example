@@ -82,8 +82,8 @@
 # Codex rate limits every 5 minutes, so the meter stays current without recent
 # session logs, and once an hour for the reset credits ("banked resets": how
 # many the account holds, how many it spent in the last 30 days and when the
-# soonest one expires). Any failure falls back to the local session logs and
-# just hides the credits.
+# soonest one expires). A failed fetch falls back to the local session logs; a
+# failed hourly credit refresh hides the credits until the next one.
 #   on  = live usage and reset credits (default)
 #   off = never call the network; the Codex slot shows local session logs only
 # codex_credits = on
