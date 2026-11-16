@@ -159,6 +159,75 @@ def clock_value(label: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# daemon (launchd)
+# ---------------------------------------------------------------------------
+
+DAEMON_RESTARTING = "Daemon: restarting…"
+_REINSTALL = "Re-run ./install-mac.sh in your ToknMon checkout"
+
+
+def parse_launchctl_print(text: str) -> dict[str, str]:
+    """Top-level ``key = value`` fields of ``launchctl print gui/<uid>/<label>``
+    (one tab deep); nested blocks such as ``arguments`` or ``environment``
+    are skipped, so their keys never shadow the agent's own."""
+    info: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line.startswith("\t") or line.startswith("\t\t"):
+            continue
+        key, sep, value = line.strip().partition(" = ")
+        if sep and value != "{":
+            info.setdefault(key, value)
+    return info
+
+
+def daemon_running(info: dict | None) -> bool:
+    return bool(info) and info.get("state") == "running"
+
+
+def last_exit_code(info: dict | None) -> int | None:
+    """``78`` from ``last exit code = 78: EX_CONFIG``; None for
+    ``(never exited)`` or when launchd does not report one."""
+    head = (info or {}).get("last exit code", "").split(":", 1)[0].strip()
+    return int(head) if head.lstrip("-").isdigit() else None
+
+
+def daemon_line(info: dict | None, *, program_exists: bool = True) -> str:
+    """``"Daemon: running"``, ``"Daemon: stopped · Python missing"`` (the
+    venv's interpreter is gone, e.g. after a Homebrew Python upgrade),
+    ``"Daemon: stopped · exit 78"``, ``"Daemon: stopped"`` or, when launchd
+    does not know the agent (``info`` is None), ``"Daemon: not loaded"``."""
+    if info is None:
+        return "Daemon: not loaded"
+    if daemon_running(info):
+        return "Daemon: running"
+    if not program_exists:
+        return f"Daemon: stopped{SEP}Python missing"
+    code = last_exit_code(info)
+    return f"Daemon: stopped{SEP}exit {code}" if code is not None else "Daemon: stopped"
+
+
+def restart_problem(info: dict | None, *, installed: bool = True,
+                    program_exists: bool = True, load_error: str = "") -> str | None:
+    """Alert text for why ``Restart daemon`` did not leave the daemon running,
+    or None when it is running. ``info`` is the agent's state after the
+    reload (None when launchd does not know it)."""
+    if not installed:
+        return f"The daemon is not installed (no launch agent). {_REINSTALL}."
+    if daemon_running(info):
+        return None
+    if info is None:
+        detail = f": {load_error}" if load_error else ""
+        return f"launchd could not load the daemon{detail}. {_REINSTALL}."
+    if not program_exists:
+        return (f"The daemon's Python is missing ({info.get('program', 'unknown')}), "
+                "usually after a Homebrew Python upgrade. "
+                f"{_REINSTALL} to rebuild daemon/.venv.")
+    code = last_exit_code(info)
+    exited = f" (last exit code {code})" if code is not None else ""
+    return f"The daemon did not stay running{exited}. See Open logs."
+
+
+# ---------------------------------------------------------------------------
 # about
 # ---------------------------------------------------------------------------
 

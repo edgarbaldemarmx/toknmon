@@ -513,15 +513,36 @@ command -v curl >/dev/null || { echo "Error: curl is required"; exit 1; }
 # older system python3 (3.9), so prefer a newer interpreter — Homebrew's if
 # present — and fall back to anything on PATH that is >= 3.10.
 py_ge_310() { "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; }
-PYTHON3=""
-for cand in \
-    "$(command -v python3.13)" "$(command -v python3.12)" \
-    "$(command -v python3.11)" "$(command -v python3.10)" \
-    /opt/homebrew/bin/python3 /usr/local/bin/python3 \
-    "$(command -v python3)"; do
-    [ -n "$cand" ] && [ -x "$cand" ] || continue
-    if py_ge_310 "$cand"; then PYTHON3="$cand"; break; fi
-done
+# A virtualenv's python (PlatformIO's penv often sits ahead of Homebrew on
+# PATH) makes `-m venv` link daemon/.venv to the versioned Homebrew keg
+# (Cellar/python@3.x/<patch>), which `brew upgrade` deletes; launchd then
+# cannot start the daemon (exit 78). The base install links to Homebrew's
+# stable opt/ path instead, so venv interpreters are skipped.
+py_is_venv() {
+    "$1" -c 'import sys; sys.exit(0 if sys.prefix != sys.base_prefix else 1)' >/dev/null 2>&1
+}
+# Print the first Python >= 3.10 that is not a virtualenv, checking every
+# python3.13 … python3.10 on PATH (not only the first), then python3.
+pick_python() {
+    local cand
+    while IFS= read -r cand; do
+        [ -n "$cand" ] && [ -x "$cand" ] || continue
+        py_is_venv "$cand" && continue
+        if py_ge_310 "$cand"; then echo "$cand"; return 0; fi
+    done < <(
+        for name in python3.13 python3.12 python3.11 python3.10; do type -aP "$name"; done
+        echo /opt/homebrew/bin/python3
+        echo /usr/local/bin/python3
+        type -aP python3
+    )
+    return 1
+}
+# True when the venv was built from a versioned Homebrew keg: it works today
+# but breaks on the next `brew upgrade`, so the installer rebuilds it.
+venv_pinned_to_keg() {
+    grep -q '^home = .*/Cellar/python' "$1/pyvenv.cfg" 2>/dev/null
+}
+PYTHON3="$(pick_python || true)"
 if [ -z "$PYTHON3" ]; then
     echo "Error: need Python >= 3.10. Install with: brew install python"
     exit 1
@@ -550,10 +571,14 @@ echo "  OK"
 echo ""
 
 echo "[2/7] Creating Python virtualenv at daemon/.venv ..."
-# Recreate the venv if it's missing or was built with an interpreter older
-# than 3.10 (e.g. a previous run that picked the system python3).
+# Recreate the venv if its interpreter no longer runs or is older than 3.10
+# (e.g. a previous run that picked the system python3), or if it is tied to a
+# versioned Homebrew keg that the next `brew upgrade` deletes.
 if [ -d "$VENV_DIR" ] && ! py_ge_310 "$VENV_DIR/bin/python"; then
     echo "  Existing venv is too old; recreating with $PYTHON3"
+    rm -rf "$VENV_DIR"
+elif venv_pinned_to_keg "$VENV_DIR"; then
+    echo "  Existing venv is tied to a Homebrew Python version that 'brew upgrade' deletes; recreating with $PYTHON3"
     rm -rf "$VENV_DIR"
 fi
 if [ ! -d "$VENV_DIR" ]; then

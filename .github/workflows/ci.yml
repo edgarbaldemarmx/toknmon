@@ -87,6 +87,9 @@ jobs:
       - name: Shell installer --apps tests
         run: bash tools/test/shell/test_install_apps.sh
 
+      - name: Shell installer interpreter tests
+        run: bash tools/test/shell/test_install_python.sh
+
       - name: Focus timer state-machine tests (C++)
         run: bash tools/test/shell/test_focus_logic.sh
 

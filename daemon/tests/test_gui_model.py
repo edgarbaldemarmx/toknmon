@@ -202,3 +202,91 @@ def test_read_version(tmp_path):
 def test_about_text_mentions_version_and_upstream():
     text = model.about_text("1.2.3")
     assert "ToknMon 1.2.3" in text and "Clawdmeter" in text
+
+
+# ---------------------------------------------------------------------------
+# daemon (launchd)
+# ---------------------------------------------------------------------------
+
+# Trimmed from real `launchctl print gui/501/com.toknmon.daemon` output:
+# top-level fields sit one tab deep, nested blocks two.
+LAUNCHCTL_RUNNING = """gui/501/com.toknmon.daemon = {
+\tactive count = 1
+\tpath = /opt/toknmon-test/Library/LaunchAgents/com.toknmon.daemon.plist
+\ttype = LaunchAgent
+\tstate = running
+
+\tprogram = /opt/toknmon-test/toknmon/daemon/.venv/bin/python
+\targuments = {
+\t\t/opt/toknmon-test/toknmon/daemon/.venv/bin/python
+\t\t/opt/toknmon-test/toknmon/daemon/claude_usage_daemon.py
+\t}
+
+\tenvironment = {
+\t\tstate = not-a-top-level-field
+\t}
+
+\truns = 1
+\tpid = 23558
+\tlast exit code = (never exited)
+}
+"""
+LAUNCHCTL_EXIT_78 = (LAUNCHCTL_RUNNING
+                     .replace("state = running", "state = spawn scheduled")
+                     .replace("\tpid = 23558\n", "")
+                     .replace("(never exited)", "78: EX_CONFIG"))
+
+
+def test_parse_launchctl_print_reads_top_level_fields_only():
+    info = model.parse_launchctl_print(LAUNCHCTL_RUNNING)
+    assert info["state"] == "running"
+    assert info["pid"] == "23558"
+    assert info["program"] == "/opt/toknmon-test/toknmon/daemon/.venv/bin/python"
+    assert info["last exit code"] == "(never exited)"
+    assert "arguments" not in info and "environment" not in info
+
+
+def test_last_exit_code():
+    assert model.last_exit_code(model.parse_launchctl_print(LAUNCHCTL_EXIT_78)) == 78
+    assert model.last_exit_code(model.parse_launchctl_print(LAUNCHCTL_RUNNING)) is None
+    assert model.last_exit_code(None) is None
+
+
+@pytest.mark.parametrize("text, program_exists, expected", [
+    (LAUNCHCTL_RUNNING, True, "Daemon: running"),
+    (LAUNCHCTL_EXIT_78, False, "Daemon: stopped · Python missing"),
+    (LAUNCHCTL_EXIT_78, True, "Daemon: stopped · exit 78"),
+    (LAUNCHCTL_EXIT_78.replace("78: EX_CONFIG", "(never exited)"), True, "Daemon: stopped"),
+    (None, True, "Daemon: not loaded"),
+])
+def test_daemon_line(text, program_exists, expected):
+    info = model.parse_launchctl_print(text) if text is not None else None
+    assert model.daemon_line(info, program_exists=program_exists) == expected
+
+
+def test_restart_problem_is_none_when_running():
+    info = model.parse_launchctl_print(LAUNCHCTL_RUNNING)
+    assert model.restart_problem(info) is None
+
+
+def test_restart_problem_names_missing_python_and_the_installer():
+    info = model.parse_launchctl_print(LAUNCHCTL_EXIT_78)
+    text = model.restart_problem(info, program_exists=False)
+    assert "/opt/toknmon-test/toknmon/daemon/.venv/bin/python" in text
+    assert "./install-mac.sh" in text
+
+
+def test_restart_problem_reports_the_exit_code_and_logs():
+    info = model.parse_launchctl_print(LAUNCHCTL_EXIT_78)
+    text = model.restart_problem(info)
+    assert "78" in text and "Open logs" in text
+
+
+def test_restart_problem_when_launchd_refused_the_plist():
+    text = model.restart_problem(None, load_error="Bootstrap failed: 5: Input/output error")
+    assert "Bootstrap failed: 5" in text and "./install-mac.sh" in text
+
+
+def test_restart_problem_when_not_installed():
+    text = model.restart_problem(None, installed=False)
+    assert "not installed" in text and "./install-mac.sh" in text
